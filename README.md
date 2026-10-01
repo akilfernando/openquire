@@ -14,6 +14,8 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Split | By page ranges (`1-3, 4-6, 7-`) or every page, as a zip; each part keeps its structure |
 | Forms | Fill text fields, checkboxes, radio buttons and dropdowns directly on the page; flatten |
 | Sign | Draw, type or upload a signature, remembered on this device |
+| Digital signatures | Sign with a certificate (.p12/.pfx) or a self-signed ID created in the app; visible or invisible; multiple signatures; validity panel that detects tampering. Later edits are appended so signatures stay valid. |
+| OCR | Recognize text on scanned pages (English) and add an invisible, searchable, selectable text layer, entirely on-device |
 | Redact | Mark areas, text selections, search terms or patterns (emails, phone/card numbers, dates, URLs), then apply. Only the covered content is removed. |
 | Stamp | Headers, footers, page numbers, Bates numbering and watermarks, written into the page |
 | Protect | Open password-protected PDFs; add, change or remove AES-256 passwords and permissions |
@@ -47,23 +49,30 @@ Requires Node 20+ and a current Chrome, Edge, Firefox or Safari.
 - Every change is a MuPDF journal operation, which is what makes undo/redo work across all features.
 - The UI (`src/App.tsx`, `src/components/`) renders page bitmaps from the worker and draws
   interaction overlays (selection, handles, form inputs, editors) on top.
+- `src/engine/signing.ts` creates digital IDs and signs (CMS / `adbe.pkcs7.detached`, SHA-256) and
+  verifies PDFs with node-forge, writing each signature as an incremental update.
+- `src/ocr.ts` runs Tesseract (WebAssembly) on page renders; `npm run assets` copies its engine and
+  English data into `public/ocr` so nothing is fetched from a CDN.
 
 ## Known limitations
 
 - **Text editing** works one line at a time and uses the closest standard font (Helvetica, Times or
   Courier), with Western European characters only.
-- **Signatures** are images. Certificate-based digital signatures (PAdES) aren't supported yet.
-- **No OCR**: scanned pages have no selectable or searchable text.
+- **Digital signatures** check integrity and the signer's certificate, but not trust chains, revocation
+  or timestamps (no LTV). Signatures are `adbe.pkcs7.detached`, not PAdES baseline profiles. Signing a
+  password-protected document requires removing the password first.
+- **OCR** is English only, and its text uses the standard Latin font set.
 - **Office conversion** is basic: complex layouts, and some formatting such as bold headings, may not survive.
 - **No PDF to Word** export.
 - **No accessibility tagging** or PDF/A validation.
-- **Large downloads:** the WebAssembly engine is about 10 MB (4.8 MB gzipped) on first load.
+- **Large downloads:** the WebAssembly engine is about 10 MB (4.8 MB gzipped) on first load; OCR
+  fetches a further 15 MB the first time it's used.
 
 ## Roadmap
 
-OCR (tesseract.js), certificate-based digital signatures, paragraph-level text editing with embedded
-fonts, PDF to Word, document compare, accessibility tagging and PDF/A, a desktop build (Tauri), a
-command-line tool for batch processing, and an optional AI assistant.
+More OCR languages, trust-chain validation and RFC 3161 timestamps for signatures, paragraph-level
+text editing with embedded fonts, PDF to Word, document compare, accessibility tagging and PDF/A, a
+desktop build (Tauri), a command-line tool for batch processing, and an optional AI assistant.
 
 ## License
 

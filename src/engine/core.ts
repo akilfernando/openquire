@@ -1,5 +1,6 @@
 import * as mupdf from 'mupdf'
 import { zipSync } from 'fflate'
+import { createDigitalId, readDigitalId, signPdf, verifySignatures } from './signing'
 import {
   hexOf,
   type AnnotInfo,
@@ -10,6 +11,7 @@ import {
   type CompressLevel,
   type DocState,
   type Metadata,
+  type OcrWord,
   type PageInfo,
   type Permission,
   type Point,
@@ -18,6 +20,8 @@ import {
   type Rect,
   type SaveOptions,
   type SearchHit,
+  type SignRequest,
+  type SignatureInfo,
   type StampSpec,
   type TextLine,
   type WidgetInfo,
@@ -119,6 +123,10 @@ interface TextRun {
   opacity?: number
   /** Counter-clockwise degrees. */
   angle?: number
+  /** Searchable but not drawn (an OCR text layer). */
+  invisible?: boolean
+  /** Stretch or squeeze horizontally to this width. */
+  width?: number
 }
 
 // ---- the engine --------------------------------------------------------------
@@ -129,6 +137,7 @@ export class Engine {
   author = 'OpenQuire user'
   private password: string | undefined
   private encrypted = false
+  private signatures: SignatureInfo[] = []
   private tick = 0
   private revs = new Map<number, number>()
   private fonts = new Map<string, mupdf.Font>()
@@ -143,6 +152,7 @@ export class Engine {
     this.name = name.replace(/\.[^.]+$/, '')
     this.password = password
     this.encrypted = isPdfName(name) && !!password
+    this.signatures = isPdfName(name) ? verifySignatures(bytes, doc) : []
     this.revs.clear()
     this.stext.clear()
     doc.enableJournal()
@@ -157,6 +167,7 @@ export class Engine {
     this.name = 'untitled'
     this.password = undefined
     this.encrypted = false
+    this.signatures = []
     this.revs.clear()
     doc.enableJournal()
     return this.state()
@@ -380,6 +391,7 @@ export class Engine {
         name,
         size: doc.getEmbeddedFileContents(ref)?.getLength() ?? 0,
       })),
+      signatures: this.signatures,
     }
   }
 
@@ -845,6 +857,7 @@ export class Engine {
     }
 
     const names = new Map<string, string>()
+    const states = new Map<number, string>()
     let ops = ''
     const inv = mupdf.Matrix.invert(page.getTransform())
     ops += `${inv.map((v) => +v.toFixed(5)).join(' ')} cm\n`
@@ -855,12 +868,19 @@ export class Engine {
         fontDict.put(fname, doc.addSimpleFont(this.font(run.font), 'Latin'))
         names.set(run.font, fname)
       }
-      const gs = fresh(gsDict, 'OQG')
-      gsDict.put(gs, doc.addObject({ Type: 'ExtGState', ca: run.opacity ?? 1, CA: run.opacity ?? 1 }))
+      const alpha = run.opacity ?? 1
+      let gs = states.get(alpha)
+      if (!gs) {
+        gs = fresh(gsDict, 'OQG')
+        gsDict.put(gs, doc.addObject({ Type: 'ExtGState', ca: alpha, CA: alpha }))
+        states.set(alpha, gs)
+      }
       const t = ((run.angle ?? 0) * Math.PI) / 180
       const [c, s] = [Math.cos(t), Math.sin(t)]
       const lines = run.text.split('\n')
-      ops += `q /${gs} gs ${run.color.map((v) => v.toFixed(3)).join(' ')} rg BT /${fname} ${run.size.toFixed(2)} Tf\n`
+      const natural = run.width ? this.textWidth(lines[0], run.size, run.font) : 0
+      const tz = natural > 0 ? ` ${((100 * run.width!) / natural).toFixed(2)} Tz` : ''
+      ops += `q /${gs} gs ${run.color.map((v) => v.toFixed(3)).join(' ')} rg BT /${fname} ${run.size.toFixed(2)} Tf${tz}${run.invisible ? ' 3 Tr' : ''}\n`
       lines.forEach((line, i) => {
         const down = i * run.size * LINE_HEIGHT
         // Page space has y pointing down, so the text matrix flips y back up.
@@ -1060,7 +1080,59 @@ export class Engine {
 
   // ---- output ----
 
+  /** Pages that have no text at all, such as scans. */
+  pagesWithoutText() {
+    return this.pageIds().filter((id) => !this.pageText(id).trim())
+  }
+
+  /** Adds invisible, searchable text over recognized words (the output of OCR). */
+  addTextLayer(pageId: number, words: OcrWord[]) {
+    const runs: TextRun[] = words
+      .filter((w) => w.text.trim() && w.bbox[2] > w.bbox[0])
+      .map((w) => ({
+        text: w.text, x: w.bbox[0], y: w.baseline, size: Math.max(2, w.size), width: w.bbox[2] - w.bbox[0],
+        font: 'Helvetica' as BaseFont, color: [0, 0, 0] as RGB, invisible: true,
+      }))
+    if (runs.length) this.op('Recognize text', () => this.appendText(pageId, runs), [pageId])
+    return this.state()
+  }
+
+  // ---- digital signatures ----
+
+  createDigitalId(opts: Parameters<typeof createDigitalId>[0]) {
+    return createDigitalId(opts)
+  }
+
+  /** Signs the current document and reopens the signed result. */
+  sign(req: SignRequest) {
+    if (this.encrypted) throw new Error('Remove the password protection (Compression & security) and save before signing.')
+    const id = readDigitalId(req.p12, req.password)
+    const order = this.pageIds()
+    const base = this.save({ compress: this.signatures.length ? 'none' : 'standard', security: { mode: 'keep' } })
+    const bytes = signPdf(base, id, {
+      page: req.pageId === null ? undefined : order.indexOf(req.pageId),
+      rect: req.pageId === null ? undefined : req.rect,
+      reason: req.reason, location: req.location, image: req.image,
+    })
+    const state = this.open(`${this.name}.pdf`, bytes.slice())
+    return { bytes, state }
+  }
+
   save(opts: SaveOptions): Uint8Array {
+    if (this.signatures.length) {
+      // Rewriting a signed file would break its signatures; append the changes instead.
+      if (opts.security.mode !== 'keep') throw new Error("Password changes aren't possible on a signed document without invalidating its signatures.")
+      const out = this.d.saveToBuffer('incremental').asUint8Array().slice()
+      // MuPDF can't append a second update to the same in-memory document, so continue from
+      // what was just written. Object numbers, and therefore page ids, are unchanged.
+      const doc = openAsPdf(`${this.name}.pdf`, out.slice(), this.password)
+      this.doc!.destroy()
+      this.doc = doc
+      this.signatures = verifySignatures(out, doc)
+      this.touch('all')
+      doc.enableJournal()
+      return out
+    }
     const doc = this.reopen()
     if (opts.compress === 'medium' || opts.compress === 'strong') {
       downsampleImages(doc, opts.compress === 'medium' ? { maxDim: 2000, quality: 75 } : { maxDim: 1200, quality: 55 })

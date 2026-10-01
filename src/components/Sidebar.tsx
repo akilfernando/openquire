@@ -3,7 +3,7 @@ import { requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
 import { ANNOT_LABELS, kb } from '../util'
 
-export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments'
+export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures'
 
 export interface SideActions {
   goTo: (pageId: number) => void
@@ -226,7 +226,38 @@ function Attachments({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   )
 }
 
-export default function Sidebar(props: Props) {
+function Signatures({ doc, onSign }: { doc: DocState; onSign: () => void }) {
+  const when = (d: string | null) => (d ? new Date(d).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'unknown time')
+  return (
+    <div className="side-pane">
+      <button onClick={onSign}>Sign with a digital ID…</button>
+      {!doc.signatures.length && <p className="hint">This document has no digital signatures.</p>}
+      {doc.signatures.map((s) => (
+        <div key={s.field} className={`sig ${s.valid ? 'ok' : 'bad'}`}>
+          <b>{s.valid ? '✔ Valid signature' : '✖ Invalid signature'}</b>
+          <span>{s.signer}{s.email ? ` <${s.email}>` : ''}</span>
+          <span className="muted small">Signed {when(s.signedAt)}{s.reason ? ` · ${s.reason}` : ''}{s.location ? ` · ${s.location}` : ''}</span>
+          {s.problem && <span className="error small">{s.problem}</span>}
+          {s.valid && (
+            <span className="muted small">
+              {s.coversWholeFile ? 'The document has not changed since it was signed.' : 'Later revisions were added after this signature (e.g. comments or more signatures).'}
+            </span>
+          )}
+          <span className="muted small">
+            {s.selfSigned
+              ? "Self-signed ID: the signer's identity isn't confirmed by a certificate authority."
+              : `Issued by ${s.issuer}. OpenQuire doesn't yet check certificate trust chains or revocation.`}
+          </span>
+        </div>
+      ))}
+      {doc.signatures.length > 0 && (
+        <p className="hint">Changes you save are appended to the file, so existing signatures stay intact.</p>
+      )}
+    </div>
+  )
+}
+
+export default function Sidebar(props: Props & { onSign: () => void }) {
   const { doc, tab, onTab } = props
   const count = doc.pages.reduce((n, p) => n + p.annots.filter((a) => a.replyTo === null).length, 0)
   const tabs: [SideTab, string][] = [
@@ -234,6 +265,7 @@ export default function Sidebar(props: Props) {
     ['bookmarks', 'Bookmarks'],
     ['comments', `Comments${count ? ` (${count})` : ''}`],
     ['attachments', `Files${doc.attachments.length ? ` (${doc.attachments.length})` : ''}`],
+    ['signatures', `Signatures${doc.signatures.length ? ` (${doc.signatures.length})` : ''}`],
   ]
   return (
     <aside className="sidebar">
@@ -246,6 +278,7 @@ export default function Sidebar(props: Props) {
       {tab === 'bookmarks' && <Bookmarks {...props} />}
       {tab === 'comments' && <Comments {...props} />}
       {tab === 'attachments' && <Attachments {...props} />}
+      {tab === 'signatures' && <Signatures doc={doc} onSign={props.onSign} />}
     </aside>
   )
 }

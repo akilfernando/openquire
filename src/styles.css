@@ -88,6 +88,17 @@ input, textarea, .comment, .reply { user-select: text; }
 .comment textarea { resize: vertical; width: 100%; }
 .reply { font-size: 12px; padding-left: 8px; border-left: 2px solid var(--line); }
 .reply-input { width: 100%; font-size: 12px; }
+.sig { border: 1px solid var(--line); border-left: 4px solid; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 3px; }
+.sig.ok { border-left-color: #16a34a; }
+.sig.ok b { color: #4ade80; }
+.sig.bad { border-left-color: var(--danger); }
+.sig.bad b { color: #f87171; }
+.sign-dialog { width: min(560px, 92vw); }
+.sign-dialog .row > label { flex: 1; }
+.sign-dialog input:not([type='checkbox']), .sign-dialog select { width: 100%; }
+.dialog .grow { flex: 1; align-self: center; }
+.progress { display: flex; align-items: center; gap: 8px; }
+.progress progress { flex: 1; }
 
 main {
   flex: 1; overflow: auto; padding: 24px;

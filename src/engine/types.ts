@@ -69,6 +69,22 @@ export interface Attachment {
   size: number
 }
 
+export interface SignatureInfo {
+  field: string
+  signer: string
+  email: string
+  issuer: string
+  signedAt: string | null
+  reason: string
+  location: string
+  /** The signed bytes are intact and the signature matches the certificate. */
+  valid: boolean
+  /** False when later revisions were appended after this signature. */
+  coversWholeFile: boolean
+  selfSigned: boolean
+  problem: string | null
+}
+
 export interface DocState {
   name: string
   pages: PageInfo[]
@@ -78,6 +94,28 @@ export interface DocState {
   meta: Metadata
   encrypted: boolean
   attachments: Attachment[]
+  /** Signatures as they were when the file was opened. */
+  signatures: SignatureInfo[]
+}
+
+/** A recognized word, in page space. */
+export interface OcrWord {
+  text: string
+  bbox: Rect
+  /** Baseline y and font size estimated from the word's line. */
+  baseline: number
+  size: number
+}
+
+export interface SignRequest {
+  p12: Uint8Array
+  password: string
+  /** Page for a visible signature box; null for an invisible signature. */
+  pageId: number | null
+  rect?: Rect
+  reason?: string
+  location?: string
+  image?: Uint8Array
 }
 
 export type AnnotSpec =

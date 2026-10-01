@@ -17,6 +17,29 @@ export interface PanelActions {
   exportHtml: () => void
   setMeta: (m: Metadata) => void
   setAuthor: (name: string) => void
+  ocr: (scope: 'notext' | 'selected' | 'all') => void
+  pagesWithoutText: () => Promise<number>
+  digitalSign: () => void
+}
+
+function Ocr({ doc, selectedCount, actions }: Pick<Props, 'doc' | 'selectedCount' | 'actions'>) {
+  const [noText, setNoText] = useState<number | null>(null)
+  return (
+    <details onToggle={(e) => e.currentTarget.open && void actions.pagesWithoutText().then(setNoText)}>
+      <summary>Recognize text (OCR)</summary>
+      <p className="hint">
+        Makes scanned pages searchable and selectable by adding an invisible text layer. The page looks the same. English, processed on
+        this device; the first run downloads the 15 MB OCR engine.
+      </p>
+      <button disabled={!noText} onClick={() => { actions.ocr('notext'); setNoText(0) }}>
+        Pages without text{noText === null ? '' : ` (${noText})`}
+      </button>
+      <div className="row">
+        <button disabled={!selectedCount} onClick={() => actions.ocr('selected')}>Selected pages</button>
+        <button onClick={() => actions.ocr('all')}>All {doc.pages.length} pages</button>
+      </div>
+    </details>
+  )
 }
 
 interface Props {
@@ -133,6 +156,12 @@ function SaveSettings({ doc, saveOpts, onSaveOpts }: Pick<Props, 'doc' | 'saveOp
   return (
     <details>
       <summary>Compression &amp; security</summary>
+      {doc.signatures.length > 0 && (
+        <p className="hint">
+          This document is digitally signed. Changes are appended when you save so the signatures stay valid, which means compression and
+          password changes aren't applied.
+        </p>
+      )}
       <label><span>Compression when saving</span>
         <select value={saveOpts.compress} onChange={(e) => set({ compress: e.target.value as CompressLevel })}>
           <option value="none">None</option>
@@ -211,8 +240,18 @@ export default function ToolsPanel({ doc, selectedCount, author, saveOpts, onSav
         <p className="hint">Each part keeps its links, form fields and bookmarks. Downloads as a zip.</p>
       </details>
 
+      <Ocr doc={doc} selectedCount={selectedCount} actions={actions} />
       <Stamps actions={actions} scope={scope} />
       <Redaction doc={doc} actions={actions} />
+
+      <details>
+        <summary>Digital signature{doc.signatures.length ? ` (${doc.signatures.length})` : ''}</summary>
+        <p className="hint">
+          Sign with a certificate (.p12/.pfx), or create your own ID. Unlike a signature image, this proves who signed and reveals any later
+          tampering.
+        </p>
+        <button onClick={actions.digitalSign}>Sign with a digital ID…</button>
+      </details>
 
       <details>
         <summary>Forms &amp; flattening</summary>

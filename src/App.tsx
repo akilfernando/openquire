@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import DigitalSignDialog from './components/DigitalSignDialog'
 import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import Sidebar, { type SideActions, type SideTab } from './components/Sidebar'
@@ -85,6 +86,7 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const [signing, setSigning] = useState(false)
+  const [digitalSigning, setDigitalSigning] = useState(false)
   const [pwPrompt, setPwPrompt] = useState<{ file: string; retry: boolean; resolve: (p: string | null) => void } | null>(null)
   const [author, setAuthorState] = useState(() => store.get('openquire.author', ''))
   const [saveOpts, setSaveOpts] = useState<SaveOptions>({ compress: 'standard', security: { mode: 'keep' } })
@@ -158,6 +160,8 @@ export default function App() {
     run('Saving…', async () => {
       const bytes = await engine.save(saveOpts)
       download(bytes, `${docRef.current!.name}.pdf`)
+      // Signed documents are reloaded after an incremental save, so refresh their state.
+      if (docRef.current!.signatures.length) apply(await engine.state())
       setStatus(`Saved ${docRef.current!.name}.pdf (${kb(bytes.length)})`)
     })
 
@@ -379,6 +383,17 @@ export default function App() {
       setAuthorState(name)
       store.set('openquire.author', name)
     },
+    pagesWithoutText: async () => (await engine.pagesWithoutText()).length,
+    ocr: (scope) =>
+      void run('Starting OCR…', async () => {
+        const ids = scope === 'notext' ? await engine.pagesWithoutText() : scope === 'selected' ? [...selected] : doc!.pages.map((p) => p.id)
+        if (!ids.length) return setStatus('Every page already has text')
+        const { recognizePages } = await import('./ocr')
+        const state = await recognizePages(ids, (done, total) => setBusy(`Recognizing text: page ${Math.min(done + 1, total)} of ${total}…`))
+        if (state) apply(state)
+        setStatus(state ? `Recognized text on ${ids.length} page${ids.length === 1 ? '' : 's'}; it's now searchable` : 'No text was found')
+      }),
+    digitalSign: () => setDigitalSigning(true),
   }
 
   // ---- toolbar state -------------------------------------------------------------
@@ -481,7 +496,8 @@ export default function App() {
           </span>
         ))}
         <i />
-        <button disabled={!doc} onClick={() => setSigning(true)} title="Add your signature">✍ Sign</button>
+        <button disabled={!doc} onClick={() => setSigning(true)} title="Place a drawn, typed or uploaded signature">✍ Sign</button>
+        <button disabled={!doc} onClick={() => setDigitalSigning(true)} title="Sign with a certificate-based digital ID">🔏 Digital ID</button>
         <button disabled={!doc} onClick={() => imageRef.current!.click()} title="Place an image or stamp">🖼 Image</button>
         <i />
         <input type="color" value={shownColor} title={sel ? 'Colour of the selected annotation' : 'Colour for new markup'} onChange={(e) => setColor(e.target.value)} />
@@ -509,7 +525,7 @@ export default function App() {
         {doc && (
           <Sidebar
             doc={doc} tab={tab} onTab={setTab} selected={selected} selectedAnnot={selAnnot?.id ?? null}
-            commentFocus={commentFocus} actions={sideActions}
+            commentFocus={commentFocus} actions={sideActions} onSign={() => setDigitalSigning(true)}
           />
         )}
         <main ref={mainRef}>
@@ -552,14 +568,31 @@ export default function App() {
       <footer>
         <span>
           {doc
-            ? `${doc.name} · ${doc.pages.length} page${doc.pages.length > 1 ? 's' : ''}${selected.size ? ` · ${selected.size} selected` : ''}${doc.encrypted ? ' · 🔒 protected' : ''}`
+            ? `${doc.name} · ${doc.pages.length} page${doc.pages.length > 1 ? 's' : ''}${selected.size ? ` · ${selected.size} selected` : ''}${doc.encrypted ? ' · 🔒 protected' : ''}${
+                doc.signatures.length ? (doc.signatures.every((s) => s.valid) ? ' · ✔ signed' : ' · ✖ signature problem') : ''}`
             : 'No document'}
         </span>
         <span className={status.startsWith('Error') ? 'error' : ''}>{busy ?? status}</span>
       </footer>
 
       {signing && <SignatureDialog onClose={() => setSigning(false)} onPlace={(png, aspect) => { setSigning(false); placeImage(png, aspect) }} />}
-      {pwPrompt && <PasswordDialog file={pwPrompt.file} retry={pwPrompt.retry} onDone={pwPrompt.resolve} />}
+      {digitalSigning && doc && (() => {
+        const page = currentPage() ?? doc.pages[0]
+        return (
+          <DigitalSignDialog
+            page={page} signedBefore={doc.signatures.length > 0} onClose={() => setDigitalSigning(false)}
+            onSign={async (req) => {
+              const { bytes, state } = await engine.sign(req)
+              download(bytes, `${doc.name}-signed.pdf`)
+              apply(state)
+              setDigitalSigning(false)
+              setTab('signatures')
+              setStatus(`Signed and saved ${doc.name}-signed.pdf`)
+            }}
+          />
+        )
+      })()}
+      {pwPrompt &&<PasswordDialog file={pwPrompt.file} retry={pwPrompt.retry} onDone={pwPrompt.resolve} />}
       {busy && <div className="busy" />}
     </div>
   )

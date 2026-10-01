@@ -18,7 +18,7 @@ self.onmessage = async ({ data }: MessageEvent<Request>) => {
     }
     const fn = (engine as unknown as Record<string, (...a: unknown[]) => unknown>)[method]
     if (typeof fn !== 'function') throw new Error(`Unknown engine method ${method}`)
-    const result = fn.apply(engine, args)
+    const result = await fn.apply(engine, args)
 
     if (method === 'render') {
       const { width, height, pixels } = result as ReturnType<Engine['render']>
