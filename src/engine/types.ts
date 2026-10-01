@@ -83,6 +83,8 @@ export interface Attachment {
 
 export interface SignatureInfo {
   field: string
+  /** A signature, or a document timestamp (PAdES B-LTA). */
+  kind: 'signature' | 'timestamp'
   signer: string
   email: string
   issuer: string
@@ -97,6 +99,14 @@ export interface SignatureInfo {
   problem: string | null
   /** For certification signatures, the DocMDP level that limits later changes. */
   certification?: 1 | 2 | 3
+  /** A trusted timestamp from a timestamp authority, when the signature has one. */
+  timestamp?: { time: string; tsa: string; valid: boolean }
+  /** Whether the signer's certificate chain leads to a trusted authority. */
+  trust: { trusted: boolean; anchor: string | null; chain: string[]; problem: string | null }
+  /** Revocation status from data embedded in the file, or from an online check. */
+  revocation: 'good' | 'revoked' | 'unknown' | 'not checked'
+  /** Validation data for the whole chain is embedded, so the signature can be checked long-term. */
+  ltv: boolean
 }
 
 export interface DocState {
@@ -133,6 +143,8 @@ export interface SignRequest {
   /** Name of an empty signature field to sign into. */
   field?: string
   certify?: 1 | 2 | 3
+  /** Timestamp server for a trusted signing time (PAdES B-T). */
+  timestampUrl?: string
 }
 
 export type AnnotSpec =

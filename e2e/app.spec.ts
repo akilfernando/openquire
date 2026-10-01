@@ -108,11 +108,14 @@ test('signs with a new digital ID and verifies it', async ({ page }) => {
   const idDownload = page.waitForEvent('download')
   await dialog.getByRole('button', { name: 'Create & download ID' }).click()
   expect((await idDownload).suggestedFilename()).toBe('Ada-Lovelace.p12')
+  // Keep the test offline: no timestamp from a live server.
+  await dialog.getByLabel(/Add a trusted timestamp/).uncheck()
   const signedDownload = page.waitForEvent('download')
   await dialog.getByRole('button', { name: 'Sign & download' }).click()
   const signed = await bytesOf(await signedDownload)
-  await expect(page.locator('.sig.ok')).toContainText('Valid signature')
-  await expect(page.locator('.sig.ok')).toContainText('Ada Lovelace')
+  // A self-signed ID is valid, but its identity can't be verified.
+  await expect(page.locator('.sig.warn')).toContainText('Valid, identity not verified')
+  await expect(page.locator('.sig.warn')).toContainText('Ada Lovelace')
   expect(new TextDecoder('latin1').decode(signed)).toContain('/SubFilter/adbe.pkcs7.detached')
 })
 

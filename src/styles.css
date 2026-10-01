@@ -219,6 +219,13 @@ kbd {
 .sig-status { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .sig.ok .sig-status { color: var(--green); }
 .sig.bad .sig-status { color: var(--red); }
+.sig.warn .sig-status { color: hsl(40, 90%, 45%); }
+.file-button { cursor: pointer; }
+.button-like {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: var(--radius-s);
+  background: var(--interactive); color: var(--text-normal); box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+}
+.button-like:hover { background: var(--interactive-hover); }
 
 /* Right sidebar: collapsible sections in the style of Obsidian's settings and outline. */
 .section { border-bottom: 1px solid var(--border); }

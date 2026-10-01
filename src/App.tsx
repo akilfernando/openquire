@@ -46,7 +46,7 @@ const STAMP_PRESETS: [string, Omit<StampSpec, 'pageIds'>][] = [
 
 const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
-  const fallback: Settings = { theme: 'system', accentHue: 32, author: '' }
+  const fallback: Settings = { theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [] }
   try {
     const legacyAuthor = localStorage.getItem('openquire.author') ?? ''
     return { ...fallback, author: legacyAuthor, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') }
@@ -128,6 +128,10 @@ export default function App() {
   }, [])
   const dark = settings.theme === 'system' ? systemDark : settings.theme === 'dark'
   useEffect(() => void engine.setAuthor(settings.author), [settings.author])
+  useEffect(() => {
+    void engine.setTrustedCertificates(settings.trusted.map((c) => c.pem)).then((s) => s && docRef.current && apply(s))
+    // apply is stable; re-run only when the trusted list changes.
+  }, [settings.trusted])
 
   useEffect(() => {
     const on = () => {
@@ -473,6 +477,27 @@ export default function App() {
       }),
     removeAttachment: (name) => void run(m.busy.removing, async () => apply(await engine.removeAttachment(name))),
     digitalSign: () => setDigitalSigning(true),
+    checkRevocation: () =>
+      void run(m.busy.checkingRevocation, async () => {
+        const { state, problems } = await engine.checkRevocation()
+        apply(state)
+        setStatus(problems.length ? m.status.error(problems[0]) : m.status.revocationChecked)
+      }),
+    addValidationData: () =>
+      void run(m.busy.addingValidation, async () => {
+        const { bytes, state, added, incomplete } = await engine.addValidationData()
+        apply(state)
+        download(bytes, `${state.name}.pdf`)
+        setStatus(m.status.validationAdded(added.certs, added.ocsps + added.crls, incomplete))
+      }),
+    addDocumentTimestamp: () =>
+      void run(m.busy.timestamping, async () => {
+        if (!settings.tsa) return setSettingsOpen(true)
+        const { bytes, state } = await engine.addDocumentTimestamp(settings.tsa)
+        apply(state)
+        download(bytes, `${state.name}.pdf`)
+        setStatus(m.status.timestampAdded)
+      }),
   }
 
   // ---- tool panel actions -------------------------------------------------------------------
@@ -880,13 +905,14 @@ export default function App() {
       </div>
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
-      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} />}
       {signing && <SignatureDialog onClose={() => setSigning(false)} onPlace={(png, aspect) => { setSigning(false); placeImage(png, aspect) }} />}
       {digitalSigning && doc && (() => {
         const page = currentPage() ?? doc.pages[0]
         return (
           <DigitalSignDialog
             page={page} signedBefore={doc.signatures.length > 0} onClose={() => setDigitalSigning(false)}
+            tsa={settings.tsa}
             fields={doc.pages.flatMap((p) => p.widgets).filter((w) => w.kind === 'signature' && !doc.signatures.some((s) => s.field === w.name)).map((w) => w.name)}
             onSign={async (req) => {
               const { bytes, state } = await engine.sign(req)

@@ -80,7 +80,7 @@ describe('digital signatures', () => {
   it('signs, verifies, detects tampering, and supports a second signature', async () => {
     const e = new Engine()
     const s = e.open('contract.pdf', await textPdf())
-    const { bytes, state } = e.sign({
+    const { bytes, state } = await e.sign({
       p12, password: pw, pageId: s.pages[0].id, rect: [200, 220, 380, 280], reason: 'I approve this document', location: 'Colombo',
     })
     expect(state.signatures).toHaveLength(1)
@@ -110,7 +110,7 @@ describe('digital signatures', () => {
     expect(() => e.save({ compress: 'standard', security: { mode: 'none' } })).toThrow(/signed/)
 
     // A second, invisible signature.
-    const second = e.sign({ p12, password: pw, pageId: null, reason: 'Countersigned' })
+    const second = await e.sign({ p12, password: pw, pageId: null, reason: 'Countersigned' })
     expect(second.state.signatures.map((x) => [x.field, x.valid, x.coversWholeFile])).toEqual([
       ['Signature1', true, false],
       ['Signature2', true, true],
@@ -122,7 +122,7 @@ describe('digital signatures', () => {
     const p = doc.addPage([300, 300])
     doc.getForm().createTextField('name').addToPage(p, { x: 20, y: 200, width: 150, height: 20 })
     const id = readDigitalId(p12, pw)
-    const signed = signPdf(await doc.save(), id, {})
+    const signed = await signPdf(await doc.save(), id, {})
     const e = new Engine()
     const s = e.open('form.pdf', signed)
     expect(s.signatures[0].valid).toBe(true)

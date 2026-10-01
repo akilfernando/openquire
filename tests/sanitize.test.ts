@@ -36,7 +36,7 @@ it('removes hidden and sensitive information', async () => {
   const { state } = e.addField(id, 'text', [40, 300, 240, 322], { name: 'Notes' })
   e.setField(id, state.pages[0].widgets[0].id, 'confidential answer')
   const p12 = await createDigitalId({ name: 'Ada', password: 'pw' })
-  s = e.sign({ p12, password: 'pw', pageId: null }).state
+  s = (await e.sign({ p12, password: 'pw', pageId: null })).state
   expect(s.signatures).toHaveLength(1)
 
   const { report } = e.sanitize({

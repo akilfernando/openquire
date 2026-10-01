@@ -106,7 +106,7 @@ describe('form designer', () => {
     e.addField(id, 'text', [40, 40, 240, 62], { name: 'Name' })
     const { name } = e.addField(id, 'signature', [40, 300, 240, 350], { name: 'Approver' })
     const p12 = await createDigitalId({ name: 'Ada', password: 'pw' })
-    const { state } = e.sign({ p12, password: 'pw', pageId: null, field: name, reason: 'Approved' })
+    const { state } = await e.sign({ p12, password: 'pw', pageId: null, field: name, reason: 'Approved' })
     expect(state.signatures).toHaveLength(1)
     expect(state.signatures[0]).toMatchObject({ field: 'Approver', valid: true, coversWholeFile: true })
     expect(state.pages[0].widgets.map((w) => w.kind).sort()).toEqual(['signature', 'text'])

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  BadgeCheck, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, Trash2, X,
+  BadgeCheck, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
 } from 'lucide-react'
 import { requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
@@ -25,6 +25,9 @@ export interface SideActions {
   saveAttachment: (name: string) => void
   removeAttachment: (name: string) => void
   digitalSign: () => void
+  checkRevocation: () => void
+  addValidationData: () => void
+  addDocumentTimestamp: () => void
 }
 
 interface Props {
@@ -275,33 +278,45 @@ function Attachments({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
 }
 
 function Signatures({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
+  const any = doc.signatures.length > 0
   return (
     <div className="pane">
       <button onClick={actions.digitalSign}><BadgeCheck size={16} />{m.panel.signWithId}</button>
-      {!doc.signatures.length && <div className="empty-note">{m.sidebar.noSignatures}</div>}
-      {doc.signatures.map((s) => (
-        <div key={s.field} className={`sig ${s.valid ? 'ok' : 'bad'}`}>
-          <span className="sig-status">
-            {s.valid ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
-            {s.valid ? m.sidebar.validSignature : m.sidebar.invalidSignature}
-          </span>
-          <span>{s.signer}{s.email ? ` <${s.email}>` : ''}</span>
-          <span className="muted small">{m.sidebar.signedAt(s.signedAt ? when(s.signedAt) : null, s.reason, s.location)}</span>
-          {s.certification && <span className="small">{m.sidebar.certified(s.certification)}</span>}
-          {s.problem && <span className="error small">{s.problem}</span>}
-          {s.valid && (
-            <span className="faint small">
-              {s.coversWholeFile ? m.sidebar.unchanged : m.sidebar.laterRevisions}
+      {!any && <div className="empty-note">{m.sidebar.noSignatures}</div>}
+      {doc.signatures.map((s) => {
+        const trusted = s.trust.trusted && s.valid
+        return (
+          <div key={s.field} className={`sig ${!s.valid ? 'bad' : trusted ? 'ok' : 'warn'}`}>
+            <span className="sig-status">
+              {!s.valid ? <ShieldAlert size={16} /> : trusted ? <ShieldCheck size={16} /> : <ShieldQuestion size={16} />}
+              {s.kind === 'timestamp'
+                ? (s.valid ? m.sidebar.validTimestamp : m.sidebar.invalidTimestamp)
+                : !s.valid ? m.sidebar.invalidSignature : trusted ? m.sidebar.validSignature : m.sidebar.unverifiedSignature}
             </span>
-          )}
-          <span className="faint small">
-            {s.selfSigned
-              ? m.sidebar.selfSigned
-              : m.sidebar.issuedBy(s.issuer)}
-          </span>
+            <span>{s.signer}{s.email ? ` <${s.email}>` : ''}</span>
+            <span className="muted small">{m.sidebar.signedAt(s.signedAt ? when(s.signedAt) : null, s.reason, s.location)}</span>
+            {s.certification && <span className="small">{m.sidebar.certified(s.certification)}</span>}
+            {s.problem && <span className="error small">{s.problem}</span>}
+            {s.valid && s.kind === 'signature' && (
+              <span className="faint small">{s.coversWholeFile ? m.sidebar.unchanged : m.sidebar.laterRevisions}</span>
+            )}
+            {s.timestamp && <span className="small">{m.sidebar.timestamped(when(s.timestamp.time), s.timestamp.tsa, s.timestamp.valid)}</span>}
+            <span className="faint small">
+              {s.trust.trusted ? m.sidebar.trustedBy(s.trust.anchor ?? '') : s.selfSigned ? m.sidebar.selfSigned : m.sidebar.notTrusted(s.issuer)}
+            </span>
+            <span className={`small ${s.revocation === 'revoked' ? 'error' : 'faint'}`}>{m.sidebar.revocation[s.revocation]}</span>
+            {s.ltv && <span className="faint small">{m.sidebar.ltv}</span>}
+          </div>
+        )
+      })}
+      {any && (
+        <div className="row">
+          <button onClick={actions.checkRevocation}>{m.sidebar.checkRevocation}</button>
+          <button onClick={actions.addValidationData}>{m.sidebar.addValidation}</button>
+          <button onClick={actions.addDocumentTimestamp}>{m.sidebar.addTimestamp}</button>
         </div>
-      ))}
-      {doc.signatures.length > 0 && <p className="hint">{m.sidebar.appendNote}</p>}
+      )}
+      {any && <p className="hint">{m.sidebar.appendNote}</p>}
     </div>
   )
 }

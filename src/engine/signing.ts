@@ -1,17 +1,16 @@
 import * as mupdf from 'mupdf'
 import forge from 'node-forge'
+import {
+  OIDS, addUnsignedAttribute, aia, binary, buildChain, certFromDer, certToDer, checkSigner, crlUrls, evaluateTrust, fromBinary, nameOf,
+  ocspRequest, parseCrl, parseOcspResponse, parseSignedData, requestTimestamp, verifyTimestampToken,
+  type Crl, type Fetcher, type RevocationStatus,
+} from './pki'
 import type { Rect, SignatureInfo } from './types'
 
 const { asn1, pki, util } = forge
-const SIG_SPACE = 16384 // bytes reserved for the CMS signature
+const sha256 = (s: string) => forge.md.sha256.create().update(s).digest().getBytes()
 const BYTE_RANGE_PLACEHOLDER = [0, 1_000_000_000, 1_000_000_000, 1_000_000_000]
 
-const binary = (bytes: Uint8Array) => {
-  let s = ''
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-  return s
-}
-const fromBinary = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0))
 
 export interface DigitalId {
   key: forge.pki.rsa.PrivateKey
@@ -19,8 +18,6 @@ export interface DigitalId {
   name: string
 }
 
-const nameOf = (cert: forge.pki.Certificate) =>
-  String(cert.subject.getField('CN')?.value ?? cert.subject.getField('O')?.value ?? 'Unknown signer')
 
 /** Creates a self-signed digital ID and returns it as a password-protected PKCS#12 (.p12) file. */
 export async function createDigitalId(opts: { name: string; email?: string; organization?: string; password: string; years?: number }) {
@@ -87,6 +84,8 @@ export interface SignOptions {
   field?: string
   /** Certify the document: 1 allows no changes, 2 form filling and signing, 3 also comments. */
   certify?: 1 | 2 | 3
+  /** Add a trusted timestamp (PAdES B-T) from this timestamp server. */
+  timestamp?: { url: string; fetcher: Fetcher }
 }
 
 const pdfDate = (d: Date) => {
@@ -129,8 +128,11 @@ function appearance(doc: mupdf.PDFDocument, w: number, h: number, id: DigitalId,
   return doc.addStream(ops, { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, w, h], Resources: res })
 }
 
+/** Bytes reserved for a signature's CMS; timestamps and validation data need more room. */
+const spaceFor = (timestamped: boolean) => (timestamped ? 32768 : 16384)
+
 /** Signs a PDF with a digital ID, appending the signature as an incremental update. */
-export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}): Uint8Array {
+export async function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}): Promise<Uint8Array> {
   let doc = mupdf.Document.openDocument(input, 'application/pdf').asPDF() as mupdf.PDFDocument
   if (doc.needsPassword()) throw new Error('Remove the password before signing.')
   if (!doc.canBeSavedIncrementally()) {
@@ -144,6 +146,7 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
     if (signed) throw new Error('Only the first signature can certify a document, and this one is already signed.')
   }
 
+  const space = spaceFor(!!opts.timestamp)
   const when = new Date()
   const sig = doc.addObject({
     Type: 'Sig', Filter: 'Adobe.PPKLite', SubFilter: 'adbe.pkcs7.detached',
@@ -151,13 +154,14 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
       ? { Reference: [{ Type: 'SigRef', TransformMethod: 'DocMDP', TransformParams: { Type: 'TransformParams', P: opts.certify, V: '1.2' } }] }
       : {}),
     ByteRange: BYTE_RANGE_PLACEHOLDER,
-    Contents: doc.newByteString(new Uint8Array(SIG_SPACE)),
+    Contents: doc.newByteString(new Uint8Array(space)),
     M: doc.newString(pdfDate(when)),
     Name: doc.newString(id.name),
     ...(opts.reason ? { Reason: doc.newString(opts.reason) } : {}),
     ...(opts.location ? { Location: doc.newString(opts.location) } : {}),
     ...(opts.contact ? { ContactInfo: doc.newString(opts.contact) } : {}),
   })
+  const contents = (signed: string) => cmsSignature(signed, id, when, opts.timestamp)
 
   const root = doc.getTrailer().get('Root')
   // A certification signature is referenced from the catalog's permissions.
@@ -166,12 +170,9 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
   // Signing into an existing, empty signature field: use its box and leave the form as it is.
   if (opts.field) {
     let target: mupdf.PDFObject | null = null
-    const fields = root.get('AcroForm', 'Fields')
-    if (fields.isArray())
-      fields.forEach((f) => {
-        const d = f.resolve()
-        if (!target && d.get('FT').toString() === '/Sig' && d.get('T').isString() && d.get('T').asString() === opts.field) target = f
-      })
+    walkFields(doc, (f, name) => {
+      if (!target && f.get('FT').toString() === '/Sig' && name === opts.field) target = f
+    })
     const field = target as mupdf.PDFObject | null
     if (!field) throw new Error(`There is no signature field named ${opts.field}.`)
     if (!field.get('V').isNull()) throw new Error(`${opts.field} is already signed.`)
@@ -181,12 +182,10 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
     field.put('F', 132)
     if (x1 - x0 > 1 && y1 - y0 > 1) field.put('AP', doc.addObject({ N: appearance(doc, x1 - x0, y1 - y0, id, when, opts) }))
     root.get('AcroForm').put('SigFlags', 3)
-    return finishSignature(doc, id, when)
+    return finishSignature(doc, contents, space)
   }
 
-  const pageIndex = opts.page ?? 0
-  const page = doc.loadPage(pageIndex)
-  const pageObj = page.getObject()
+  const page = doc.loadPage(opts.page ?? 0)
   let rect: Rect = [0, 0, 0, 0]
   let ap: mupdf.PDFObject
   if (opts.rect) {
@@ -195,7 +194,27 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
   } else {
     ap = doc.addStream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 0, 0] })
   }
+  addSignatureField(doc, page.getObject(), 'Signature', { V: sig, Rect: rect, AP: { N: ap } })
+  return finishSignature(doc, contents, space)
+}
 
+/** Adds a document timestamp (PAdES B-LTA): a signature by a timestamp authority over the whole file. */
+export async function timestampPdf(input: Uint8Array, ts: { url: string; fetcher: Fetcher }): Promise<Uint8Array> {
+  const doc = mupdf.Document.openDocument(input, 'application/pdf').asPDF() as mupdf.PDFDocument
+  if (doc.needsPassword()) throw new Error('Remove the password before adding a timestamp.')
+  const space = spaceFor(true)
+  const sig = doc.addObject({
+    Type: 'DocTimeStamp', Filter: 'Adobe.PPKLite', SubFilter: 'ETSI.RFC3161',
+    ByteRange: BYTE_RANGE_PLACEHOLDER, Contents: doc.newByteString(new Uint8Array(space)),
+  })
+  addSignatureField(doc, doc.findPage(0), 'Timestamp', {
+    V: sig, Rect: [0, 0, 0, 0], AP: { N: doc.addStream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 0, 0] }) },
+  })
+  return finishSignature(doc, async (signed) => (await requestTimestamp(ts.url, sha256(signed), ts.fetcher)).token, space)
+}
+
+function addSignatureField(doc: mupdf.PDFDocument, pageObj: mupdf.PDFObject, base: string, entries: Record<string, unknown>) {
+  const root = doc.getTrailer().get('Root')
   let form = root.get('AcroForm')
   if (form.isNull()) {
     form = doc.addObject(doc.newDictionary())
@@ -207,14 +226,10 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
     form.put('Fields', fields)
   }
   const names = new Set<string>()
-  fields.forEach((f) => names.add(f.get('T').isString() ? f.get('T').asString() : ''))
+  walkFields(doc, (_, name) => names.add(name))
   let n = 1
-  while (names.has(`Signature${n}`)) n++
-
-  const field = doc.addObject({
-    Type: 'Annot', Subtype: 'Widget', FT: 'Sig', T: doc.newString(`Signature${n}`),
-    F: 132, Rect: rect, P: pageObj, V: sig, AP: { N: ap },
-  })
+  while (names.has(`${base}${n}`)) n++
+  const field = doc.addObject({ Type: 'Annot', Subtype: 'Widget', FT: 'Sig', T: doc.newString(`${base}${n}`), F: 132, P: pageObj, ...entries })
   fields.push(field)
   form.put('SigFlags', 3)
   let annots = pageObj.get('Annots')
@@ -223,17 +238,42 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
     pageObj.put('Annots', annots)
   }
   annots.push(field)
-  return finishSignature(doc, id, when)
 }
 
-/** Saves the update with its placeholder, then fills in the byte range and the CMS signature. */
-function finishSignature(doc: mupdf.PDFDocument, id: DigitalId, when: Date): Uint8Array {
+/** The CMS signature over the signed bytes, with a signature timestamp when a server is given. */
+async function cmsSignature(signed: string, id: DigitalId, when: Date, ts?: { url: string; fetcher: Fetcher }) {
+  const p7 = forge.pkcs7.createSignedData()
+  p7.content = util.createBuffer(signed)
+  for (const c of id.chain) p7.addCertificate(c)
+  p7.addSigner({
+    key: id.key,
+    certificate: id.chain[0],
+    digestAlgorithm: pki.oids.sha256,
+    authenticatedAttributes: [
+      { type: pki.oids.contentType, value: pki.oids.data },
+      { type: pki.oids.messageDigest },
+      { type: pki.oids.signingTime, value: when as unknown as string },
+    ],
+  })
+  p7.sign({ detached: true })
+  let cms = asn1.toDer(p7.toAsn1()).getBytes()
+  if (ts) {
+    // PAdES B-T: a timestamp over the signature value proves when the signature existed.
+    const { signatureValue } = checkSigner(parseSignedData(cms), signed)
+    const stamp = await requestTimestamp(ts.url, sha256(signatureValue), ts.fetcher)
+    cms = addUnsignedAttribute(cms, OIDS.signatureTimeStampToken, asn1.fromDer(stamp.token))
+  }
+  return cms
+}
+
+/** Saves the update with its placeholder, then fills in the byte range and the signature contents. */
+async function finishSignature(doc: mupdf.PDFDocument, makeContents: (signed: string) => Promise<string>, space: number): Promise<Uint8Array> {
   const out = doc.saveToBuffer('incremental').asUint8Array().slice()
   doc.destroy()
 
   // Locate the placeholder in the newly written signature object.
   const text = new TextDecoder('latin1').decode(out)
-  const placeholder = '<' + '0'.repeat(SIG_SPACE * 2) + '>'
+  const placeholder = '<' + '0'.repeat(space * 2) + '>'
   const start = text.lastIndexOf(placeholder)
   if (start < 0) throw new Error('Signature placeholder not found')
   const end = start + placeholder.length
@@ -250,108 +290,294 @@ function finishSignature(doc: mupdf.PDFDocument, id: DigitalId, when: Date): Uin
   const signed = new Uint8Array(range[1] + range[3])
   signed.set(out.subarray(0, range[1]), 0)
   signed.set(out.subarray(range[2]), range[1])
+  const contents = await makeContents(binary(signed))
+  if (contents.length > space) throw new Error('The signature is too large for the reserved space.')
+  out.set(new TextEncoder().encode(util.bytesToHex(contents)), start + 1)
+  return out
+}
 
-  const p7 = forge.pkcs7.createSignedData()
-  p7.content = util.createBuffer(binary(signed))
-  for (const c of id.chain) p7.addCertificate(c)
-  p7.addSigner({
-    key: id.key,
-    certificate: id.chain[0],
-    digestAlgorithm: pki.oids.sha256,
-    authenticatedAttributes: [
-      { type: pki.oids.contentType, value: pki.oids.data },
-      { type: pki.oids.messageDigest },
-      { type: pki.oids.signingTime, value: when as unknown as string },
-    ],
+// ---- long-term validation ---------------------------------------------------------------
+
+/** Validation data stored in the document security store (/DSS). */
+interface Dss {
+  certs: forge.pki.Certificate[]
+  ocsps: string[]
+  crls: Crl[]
+}
+
+function readDss(doc: mupdf.PDFDocument): Dss {
+  const dss = doc.getTrailer().get('Root', 'DSS')
+  const streams = (key: string) => {
+    const out: string[] = []
+    const arr = dss.isDictionary() ? dss.get(key) : null
+    if (arr?.isArray()) arr.forEach((s) => s.isStream() && out.push(binary(s.readStream().asUint8Array())))
+    return out
+  }
+  const certs = streams('Certs').flatMap((d) => {
+    try {
+      return [certFromDer(d)]
+    } catch {
+      return []
+    }
   })
-  p7.sign({ detached: true })
-  const der = asn1.toDer(p7.toAsn1()).getBytes()
-  if (der.length > SIG_SPACE) throw new Error('The signature is too large for the reserved space.')
-  out.set(new TextEncoder().encode(util.bytesToHex(der)), start + 1)
+  const crls = streams('CRLs').flatMap((d) => {
+    try {
+      return [parseCrl(d)]
+    } catch {
+      return []
+    }
+  })
+  return { certs, ocsps: streams('OCSPs'), crls }
+}
+
+interface SignatureMaterial {
+  field: string
+  /** The signer (or timestamp authority) certificate and any certificates carried with it. */
+  signer: forge.pki.Certificate | null
+  certificates: forge.pki.Certificate[]
+}
+
+/** Signer certificates for every signature and timestamp in a document. */
+function signatureMaterial(doc: mupdf.PDFDocument): SignatureMaterial[] {
+  const out: SignatureMaterial[] = []
+  walkFields(doc, (f, name) => {
+    const v = f.get('V')
+    if (f.getInheritable('FT').toString() !== '/Sig' || !v.isDictionary()) return
+    try {
+      const parts = parseSignedData(binary(v.get('Contents').asByteString()))
+      const sid = parts.signerInfo.value as forge.asn1.Asn1[]
+      const serial = util.bytesToHex((sid[1].value as forge.asn1.Asn1[])[1].value as string).replace(/^0+/, '')
+      const signer = parts.certificates.find((c) => c.serialNumber.replace(/^0+/, '') === serial) ?? parts.certificates[0] ?? null
+      out.push({ field: name, signer, certificates: parts.certificates })
+      // A signature timestamp has its own signer chain to validate.
+      const tsAttr = sid.find((n) => n.tagClass === asn1.Class.CONTEXT_SPECIFIC && n.type === 1)
+      for (const a of (tsAttr?.value as forge.asn1.Asn1[] | undefined) ?? []) {
+        const [type, set] = a.value as forge.asn1.Asn1[]
+        if (asn1.derToOid(type.value as string) !== OIDS.signatureTimeStampToken) continue
+        const token = parseSignedData(asn1.toDer((set.value as forge.asn1.Asn1[])[0]).getBytes())
+        out.push({ field: `${name} (timestamp)`, signer: token.certificates[0] ?? null, certificates: token.certificates })
+      }
+    } catch {
+      // unreadable signatures are reported by verification
+    }
+  })
+  return out
+}
+
+/** Revocation status of each certificate in a chain from embedded data only. */
+function chainRevocationOffline(chain: forge.pki.Certificate[], dss: Dss): RevocationStatus | 'not checked' {
+  let status: RevocationStatus | 'not checked' = 'good'
+  for (let i = 0; i + 1 < chain.length; i++) {
+    const r = embeddedStatus(chain[i], chain[i + 1], dss)
+    if (r === 'revoked') return 'revoked'
+    if (!r) status = 'not checked'
+    else if (r === 'unknown' && status === 'good') status = 'unknown'
+  }
+  return status
+}
+
+function embeddedStatus(cert: forge.pki.Certificate, issuer: forge.pki.Certificate, dss: Dss): RevocationStatus | null {
+  for (const der of dss.ocsps) {
+    try {
+      return parseOcspResponse(der, cert, issuer).status
+    } catch {
+      // a response for another certificate
+    }
+  }
+  const crl = dss.crls.find((c) => c.signedBy(issuer))
+  return crl ? (crl.revoked.has(cert.serialNumber.replace(/^0+/, '')) ? 'revoked' : 'good') : null
+}
+
+/** Revocation status of each certificate in a chain, from embedded data or by asking online. */
+async function chainRevocation(
+  chain: forge.pki.Certificate[],
+  dss: Dss,
+  fetcher: Fetcher | null,
+): Promise<{ status: RevocationStatus | 'not checked'; ocsps: string[]; crls: string[]; problems: string[] }> {
+  const ocsps: string[] = []
+  const crls: string[] = []
+  const problems: string[] = []
+  let status: RevocationStatus | 'not checked' = 'good'
+  for (let i = 0; i + 1 < chain.length; i++) {
+    const [cert, issuer] = [chain[i], chain[i + 1]]
+    if (cert.getExtension({ id: OIDS.ocspNoCheck } as unknown as string)) continue
+    let result = embeddedStatus(cert, issuer, dss)
+    const serial = cert.serialNumber.replace(/^0+/, '')
+    if (!result && fetcher) {
+      for (const url of aia(cert).ocsp) {
+        try {
+          const der = binary(await fetcher(url, ocspRequest(cert, issuer), 'application/ocsp-request'))
+          result = parseOcspResponse(der, cert, issuer).status
+          ocsps.push(der)
+          break
+        } catch (e) {
+          problems.push(`OCSP ${url}: ${(e as Error).message}`)
+        }
+      }
+      for (const url of result ? [] : crlUrls(cert)) {
+        try {
+          const crl = parseCrl(binary(await fetcher(url)))
+          if (!crl.signedBy(issuer)) throw new Error('not signed by the issuer')
+          result = crl.revoked.has(serial) ? 'revoked' : 'good'
+          crls.push(crl.der)
+          break
+        } catch (e) {
+          problems.push(`CRL ${url}: ${(e as Error).message}`)
+        }
+      }
+    }
+    if (result === 'revoked') return { status: 'revoked', ocsps, crls, problems }
+    if (!result) status = fetcher ? 'unknown' : 'not checked'
+    else if (result === 'unknown' && status === 'good') status = 'unknown'
+  }
+  return { status, ocsps, crls, problems }
+}
+
+/**
+ * Fetches revocation data for every certificate chain behind the document's signatures and
+ * timestamps, and stores it with the chains in the document security store (PAdES B-LT).
+ */
+export async function addValidationData(input: Uint8Array, anchors: forge.pki.Certificate[], fetcher: Fetcher) {
+  const doc = mupdf.Document.openDocument(input, 'application/pdf').asPDF() as mupdf.PDFDocument
+  const dss = readDss(doc)
+  const certs: forge.pki.Certificate[] = []
+  const ocsps: string[] = []
+  const crls: string[] = []
+  const problems: string[] = []
+  let incomplete = 0
+  for (const m of signatureMaterial(doc)) {
+    if (!m.signer) continue
+    const chain = buildChain(m.signer, [...m.certificates, ...dss.certs, ...anchors])
+    certs.push(...chain)
+    const r = await chainRevocation(chain, dss, fetcher)
+    ocsps.push(...r.ocsps)
+    crls.push(...r.crls)
+    problems.push(...r.problems)
+    if (r.status !== 'good') incomplete++
+  }
+
+  const root = doc.getTrailer().get('Root')
+  let store = root.get('DSS')
+  if (store.isNull()) {
+    store = doc.addObject(doc.newDictionary())
+    root.put('DSS', store)
+  }
+  const seen = new Set<string>()
+  const add = (key: string, items: string[]) => {
+    let arr = store.get(key)
+    if (arr.isNull()) {
+      arr = doc.newArray()
+      store.put(key, arr)
+    }
+    arr.forEach((s) => s.isStream() && seen.add(sha256(binary(s.readStream().asUint8Array()))))
+    let n = 0
+    for (const item of items) {
+      const h = sha256(item)
+      if (seen.has(h)) continue
+      seen.add(h)
+      arr.push(doc.addStream(fromBinary(item), {}))
+      n++
+    }
+    return n
+  }
+  const added = { certs: add('Certs', certs.map(certToDer)), ocsps: add('OCSPs', ocsps), crls: add('CRLs', crls) }
+  const bytes = doc.saveToBuffer('incremental').asUint8Array().slice()
+  doc.destroy()
+  return { bytes, added, incomplete, problems }
+}
+
+/** Checks revocation online for every signature, without changing the document. */
+export async function checkRevocationOnline(bytes: Uint8Array, doc: mupdf.PDFDocument, anchors: forge.pki.Certificate[], fetcher: Fetcher) {
+  const dss = readDss(doc)
+  const out = new Map<string, { status: RevocationStatus | 'not checked'; problems: string[] }>()
+  for (const m of signatureMaterial(doc)) {
+    if (!m.signer || m.field.endsWith('(timestamp)')) continue
+    const chain = buildChain(m.signer, [...m.certificates, ...dss.certs, ...anchors])
+    const r = await chainRevocation(chain, { ...dss, ocsps: [], crls: [] }, fetcher)
+    out.set(m.field, { status: r.status, problems: r.problems })
+  }
+  void bytes
   return out
 }
 
 // ---- verification -----------------------------------------------------------
 
-const DIGESTS: Record<string, () => forge.md.MessageDigest> = {
-  [pki.oids.sha1]: () => forge.md.sha1.create(),
-  [pki.oids.sha256]: () => forge.md.sha256.create(),
-  [pki.oids.sha384]: () => forge.md.sha384.create(),
-  [pki.oids.sha512]: () => forge.md.sha512.create(),
-}
-
-/** Checks every signature in a PDF: integrity of the signed bytes and of the signature itself. */
-export function verifySignatures(bytes: Uint8Array, doc: mupdf.PDFDocument): SignatureInfo[] {
+/**
+ * Checks every signature and timestamp in a PDF: integrity, signer, signature timestamps, trust
+ * in the certificate chain, revocation data embedded in the file, and certification limits.
+ */
+export function verifySignatures(bytes: Uint8Array, doc: mupdf.PDFDocument, anchors: forge.pki.Certificate[] = []): SignatureInfo[] {
+  const dss = readDss(doc)
   const out: SignatureInfo[] = []
-  const walk = (field: mupdf.PDFObject) => {
-    const kids = field.get('Kids')
-    if (kids.isArray()) kids.forEach(walk)
-    const ft = field.getInheritable('FT')
-    const v = field.get('V')
-    if (ft.isName() && ft.asName() === 'Sig' && v.isDictionary()) out.push(check(field, v))
-  }
-  const check = (field: mupdf.PDFObject, v: mupdf.PDFObject): SignatureInfo => {
+  const fields: [mupdf.PDFObject, string][] = []
+  walkFields(doc, (f, name) => {
+    if (f.getInheritable('FT').toString() === '/Sig' && f.get('V').isDictionary()) fields.push([f, name])
+  })
+  for (const [field, name] of fields) out.push(check(field.get('V'), name))
+  return out
+
+  function check(v: mupdf.PDFObject, field: string): SignatureInfo {
     const str = (k: string) => (v.get(k).isString() ? v.get(k).asString() : '')
+    const isTimestamp = v.get('SubFilter').toString() === '/ETSI.RFC3161'
     const info: SignatureInfo = {
-      field: field.get('T').isString() ? field.get('T').asString() : '',
+      field, kind: isTimestamp ? 'timestamp' : 'signature',
       signer: str('Name'), issuer: '', email: '', signedAt: null, reason: str('Reason'), location: str('Location'),
       valid: false, coversWholeFile: false, selfSigned: false, problem: null,
+      trust: { trusted: false, anchor: null, chain: [], problem: null },
+      revocation: 'not checked', ltv: false,
     }
     try {
       const br: number[] = []
       v.get('ByteRange').forEach((n) => br.push(n.asNumber()))
       if (br.length !== 4) throw new Error('Missing byte range')
       info.coversWholeFile = br[2] + br[3] === bytes.length
-      const signed = new Uint8Array(br[1] + br[3])
-      signed.set(bytes.subarray(br[0], br[0] + br[1]), 0)
-      signed.set(bytes.subarray(br[2], br[2] + br[3]), br[1])
+      const signed = binary(bytes.subarray(br[0], br[0] + br[1])) + binary(bytes.subarray(br[2], br[2] + br[3]))
+      const contents = binary(v.get('Contents').asByteString())
 
-      // The reserved space is zero-padded after the DER signature.
-      const cms = asn1.fromDer(binary(v.get('Contents').asByteString()), { parseAllBytes: false } as unknown as boolean)
-      const msg = forge.pkcs7.messageFromAsn1(cms) as forge.pkcs7.PkcsSignedData & { rawCapture: { signerInfos: forge.asn1.Asn1[] } }
-      const si = msg.rawCapture.signerInfos[0].value as forge.asn1.Asn1[]
-      let i = 1
-      const sid = si[i++].value as forge.asn1.Asn1[]
-      const serial = util.bytesToHex(sid[1].value as string)
-      const digestOid = asn1.derToOid((si[i++].value as forge.asn1.Asn1[])[0].value as string)
-      let attrs: forge.asn1.Asn1 | null = null
-      if (si[i].tagClass === asn1.Class.CONTEXT_SPECIFIC && si[i].type === 0) attrs = si[i++]
-      i++ // signature algorithm
-      const signature = si[i].value as string
-
-      const cert = msg.certificates.find((c) => c.serialNumber.replace(/^0+/, '') === serial.replace(/^0+/, '')) ?? msg.certificates[0]
-      info.signer = nameOf(cert)
-      info.email = String(cert.subject.getField('E')?.value ?? '')
-      info.issuer = String(cert.issuer.getField('CN')?.value ?? cert.issuer.getField('O')?.value ?? '')
-      info.selfSigned = cert.isIssuer(cert)
-
-      const md = DIGESTS[digestOid]
-      if (!md) throw new Error('Unsupported digest algorithm')
-      const contentDigest = md().update(binary(signed)).digest().getBytes()
-      const key = cert.publicKey as forge.pki.rsa.PublicKey
-      if (attrs) {
-        let messageDigest = ''
-        for (const a of attrs.value as forge.asn1.Asn1[]) {
-          const [oid, set] = a.value as forge.asn1.Asn1[]
-          const type = asn1.derToOid(oid.value as string)
-          const val = (set.value as forge.asn1.Asn1[])[0]
-          if (type === pki.oids.messageDigest) messageDigest = val.value as string
-          if (type === pki.oids.signingTime) info.signedAt = asn1.utcTimeToDate(val.value as string).toISOString()
-        }
-        if (messageDigest !== contentDigest) {
-          info.problem = 'The document has been altered since it was signed.'
-          return info
-        }
-        const signedAttrs = asn1.toDer(asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SET, true, attrs.value as forge.asn1.Asn1[])).getBytes()
-        info.valid = key.verify(md().update(signedAttrs).digest().getBytes(), signature)
+      let signer: forge.pki.Certificate | null = null
+      let pool: forge.pki.Certificate[] = []
+      if (isTimestamp) {
+        const ts = verifyTimestampToken(contents, sha256(signed))
+        info.valid = ts.valid
+        info.signer = ts.tsa
+        info.signedAt = ts.time?.toISOString() ?? null
+        info.timestamp = ts.time ? { time: ts.time.toISOString(), tsa: ts.tsa, valid: ts.valid } : undefined
+        if (!ts.valid) info.problem = `The timestamp is not valid (${ts.problem}).`
+        signer = ts.cert ?? null
+        pool = ts.certificates ?? []
       } else {
-        info.valid = key.verify(contentDigest, signature)
+        const parts = parseSignedData(contents)
+        const c = checkSigner(parts, signed)
+        info.valid = c.valid
+        info.problem = c.problem
+        signer = c.cert
+        pool = parts.certificates
+        info.signedAt = c.signingTime?.toISOString() ?? (str('M') ? parsePdfDate(str('M')) : null)
+        const token = c.unsigned.get(OIDS.signatureTimeStampToken)
+        if (token) {
+          const ts = verifyTimestampToken(asn1.toDer(token).getBytes(), sha256(c.signatureValue))
+          if (ts.time) info.timestamp = { time: ts.time.toISOString(), tsa: ts.tsa, valid: ts.valid }
+        }
       }
-      if (!info.valid) info.problem = 'The signature does not match the signer’s certificate.'
-      if (!info.signedAt && str('M')) info.signedAt = parsePdfDate(str('M'))
+      if (signer) {
+        info.signer = nameOf(signer)
+        info.email = String(signer.subject.getField('E')?.value ?? '')
+        info.issuer = String(signer.issuer.getField('CN')?.value ?? signer.issuer.getField('O')?.value ?? '')
+        info.selfSigned = signer.isIssuer(signer)
+        // Trust is judged at the trusted signing time when there is one.
+        const at = info.timestamp?.valid ? new Date(info.timestamp.time) : info.signedAt ? new Date(info.signedAt) : new Date()
+        const chain = buildChain(signer, [...pool, ...dss.certs, ...anchors])
+        info.trust = evaluateTrust(chain, anchors, at)
+        info.revocation = chainRevocationOffline(chain, dss)
+        info.ltv = info.revocation === 'good' && chain.length > 1
+        if (info.revocation === 'revoked') {
+          info.valid = false
+          info.problem = 'The signer’s certificate has been revoked.'
+        }
+      }
 
       // A certification signature limits what later revisions may change.
-      const level = certificationLevel(v)
+      const level = isTimestamp ? 0 : certificationLevel(v)
       if (level) {
         info.certification = level
         if (info.valid && !info.coversWholeFile) {
@@ -371,9 +597,6 @@ export function verifySignatures(bytes: Uint8Array, doc: mupdf.PDFDocument): Sig
     }
     return info
   }
-  const fields = doc.getTrailer().get('Root', 'AcroForm', 'Fields')
-  if (fields.isArray()) fields.forEach(walk)
-  return out
 }
 
 function walkFields(doc: mupdf.PDFDocument, fn: (f: mupdf.PDFObject, name: string) => void) {

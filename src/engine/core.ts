@@ -1,7 +1,10 @@
 import * as mupdf from 'mupdf'
 import { zipSync } from 'fflate'
 import { findImageDraws, fmt, imageWarp, invert, multiply, patch, stripHidden, type Matrix as CMatrix } from './content'
-import { createDigitalId, readDigitalId, signPdf, verifySignatures } from './signing'
+import { certFromDer, certsFromPem, nameOf, binary, type Fetcher } from './pki'
+import roots from './roots.json'
+import forge from 'node-forge'
+import { addValidationData, checkRevocationOnline, createDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
 import {
   hexOf,
   type AnnotInfo,
@@ -216,6 +219,8 @@ export class Engine {
   private encrypted = false
   private signatures: SignatureInfo[] = []
   private lastSave: { position: number; bytes: Uint8Array } | null = null
+  /** The bytes the open document was loaded from (or last saved to, for signed documents). */
+  private bytes = new Uint8Array()
   private tick = 0
   private revs = new Map<number, number>()
   private fonts = new Map<string, mupdf.Font>()
@@ -229,7 +234,8 @@ export class Engine {
     this.replaceDoc(doc, name.replace(/\.[^.]+$/, ''))
     this.password = password
     this.encrypted = isPdfName(name) && !!password
-    this.signatures = isPdfName(name) ? verifySignatures(bytes, doc) : []
+    this.bytes = bytes
+    this.signatures = isPdfName(name) ? verifySignatures(bytes, doc, this.anchors()) : []
     return this.state()
   }
 
@@ -2062,19 +2068,83 @@ export class Engine {
     return createDigitalId(opts)
   }
 
+  /** Makes network requests for timestamps and revocation data. Replaced in tests and on desktop. */
+  fetcher: Fetcher = async (url, body, contentType) => {
+    let res: Response
+    try {
+      res = await fetch(url, body ? { method: 'POST', body: body as BodyInit, headers: { 'Content-Type': contentType ?? 'application/octet-stream' } } : undefined)
+    } catch {
+      throw new Error(`Couldn't reach ${new URL(url).host}. The server may not allow requests from a web page.`)
+    }
+    if (!res.ok) throw new Error(`${new URL(url).host} answered ${res.status}`)
+    return new Uint8Array(await res.arrayBuffer())
+  }
+
+  private trusted: string[] = []
+  private anchorCache: ReturnType<typeof certsFromPem> | null = null
+
+  /** Trust anchors: the bundled Mozilla roots plus certificates the user chose to trust. */
+  private anchors() {
+    this.anchorCache ??= [...certsFromPem((roots as string[]).join('\n')), ...certsFromPem(this.trusted.join('\n'))]
+    return this.anchorCache
+  }
+
+  /** Sets the user's own trusted certificates (PEM) and rechecks the open document's signatures. */
+  setTrustedCertificates(pems: string[]) {
+    this.trusted = pems
+    this.anchorCache = null
+    if (this.doc && this.signatures.length) this.signatures = verifySignatures(this.bytes, this.d, this.anchors())
+    return this.doc ? this.state() : null
+  }
+
+  /** Describes certificate files (PEM or DER) so the user can confirm what they are trusting. */
+  describeCertificates(data: Uint8Array) {
+    const text = new TextDecoder('latin1').decode(data)
+    const certs = text.includes('-----BEGIN CERTIFICATE-----') ? certsFromPem(text) : [certFromDer(binary(data))]
+    return certs.map((c) => ({ pem: forge.pki.certificateToPem(c), name: nameOf(c), issuer: String(c.issuer.getField('CN')?.value ?? ''), expires: c.validity.notAfter.toISOString() }))
+  }
+
   /** Signs the current document and reopens the signed result. */
-  sign(req: SignRequest) {
+  async sign(req: SignRequest) {
     if (this.encrypted) throw new Error('Remove the password protection (Compression & security) and save before signing.')
     const id = readDigitalId(req.p12, req.password)
     const order = this.pageIds()
     const base = this.save({ compress: this.signatures.length ? 'none' : 'standard', security: { mode: 'keep' } })
-    const bytes = signPdf(base, id, {
+    const bytes = await signPdf(base, id, {
       page: req.pageId === null ? undefined : order.indexOf(req.pageId),
       rect: req.pageId === null ? undefined : req.rect,
       reason: req.reason, location: req.location, image: req.image, field: req.field, certify: req.certify,
+      timestamp: req.timestampUrl ? { url: req.timestampUrl, fetcher: this.fetcher } : undefined,
     })
     const state = this.open(`${this.name}.pdf`, bytes.slice())
     return { bytes, state }
+  }
+
+  /** Adds a document timestamp over everything so far (PAdES B-LTA). */
+  async addDocumentTimestamp(url: string) {
+    const bytes = await timestampPdf(this.save({ compress: 'none', security: { mode: 'keep' } }), { url, fetcher: this.fetcher })
+    const state = this.open(`${this.name}.pdf`, bytes.slice())
+    return { bytes, state }
+  }
+
+  /** Fetches and embeds revocation data for all signatures, so they can be checked long-term. */
+  async addValidationData() {
+    const base = this.save({ compress: 'none', security: { mode: 'keep' } })
+    const { bytes, added, incomplete, problems } = await addValidationData(base, this.anchors(), this.fetcher)
+    const state = this.open(`${this.name}.pdf`, bytes.slice())
+    return { bytes, state, added, incomplete, problems }
+  }
+
+  /** Checks revocation online without changing the document; results are shown until reopened. */
+  async checkRevocation() {
+    const results = await checkRevocationOnline(this.bytes, this.d, this.anchors(), this.fetcher)
+    this.signatures = this.signatures.map((s) => {
+      const r = results.get(s.field)
+      if (!r) return s
+      const revoked = r.status === 'revoked'
+      return { ...s, revocation: r.status, valid: s.valid && !revoked, problem: revoked ? 'The signer’s certificate has been revoked.' : s.problem }
+    })
+    return { state: this.state(), problems: [...results.values()].flatMap((r) => r.problems) }
   }
 
   save(opts: SaveOptions): Uint8Array {
@@ -2087,7 +2157,8 @@ export class Engine {
       if (this.lastSave?.position === position) return this.lastSave.bytes.slice()
       const out = this.d.saveToBuffer('incremental').asUint8Array().slice()
       this.lastSave = { position, bytes: out }
-      this.signatures = verifySignatures(out, this.d)
+      this.bytes = out
+      this.signatures = verifySignatures(out, this.d, this.anchors())
       return out.slice()
     }
     const doc = this.reopen()

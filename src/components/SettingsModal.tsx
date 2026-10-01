@@ -9,6 +9,10 @@ export interface Settings {
   theme: ThemeSetting
   accentHue: number
   author: string
+  /** Timestamp server URL; empty turns timestamps off. */
+  tsa: string
+  /** Certificates the user trusts, as PEM with a display name. */
+  trusted: { pem: string; name: string; issuer: string; expires: string }[]
 }
 
 export const ACCENTS: { key: string; hue: number }[] = [
@@ -20,12 +24,14 @@ export const ACCENTS: { key: string; hue: number }[] = [
   { key: 'rose', hue: 340 },
 ]
 
-type Tab = 'appearance' | 'comments' | 'about'
+type Tab = 'appearance' | 'comments' | 'signatures' | 'about'
 
 interface Props {
   settings: Settings
   onChange: (s: Settings) => void
   onClose: () => void
+  /** Reads certificate files into displayable entries. */
+  readCertificates: (data: Uint8Array) => Promise<Settings['trusted']>
 }
 
 function Item({ name, desc, children }: { name: string; desc?: string; children: React.ReactNode }) {
@@ -40,7 +46,8 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, onChange, onClose }: Props) {
+export default function SettingsModal({ settings, onChange, onClose, readCertificates }: Props) {
+  const [certError, setCertError] = useState('')
   const [tab, setTab] = useState<Tab>('appearance')
   const ref = useRef<HTMLDivElement>(null)
   useFocusTrap(ref)
@@ -92,6 +99,45 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
                   onBlur={(e) => e.target.value.trim() !== settings.author && set({ author: e.target.value.trim() })}
                 />
               </Item>
+            </>
+          )}
+          {tab === 'signatures' && (
+            <>
+              <h2>{m.settings.tabs.signatures}</h2>
+              <Item name={m.settings.tsa} desc={m.settings.tsaDesc}>
+                <input defaultValue={settings.tsa} placeholder="https://rfc3161.ai.moda" aria-label={m.settings.tsa} style={{ width: 240 }}
+                  onBlur={(e) => e.target.value.trim() !== settings.tsa && set({ tsa: e.target.value.trim() })} />
+              </Item>
+              <Item name={m.settings.trusted} desc={m.settings.trustedDesc}>
+                <label className="file-button">
+                  <input type="file" hidden accept=".cer,.crt,.pem,.der,application/x-x509-ca-cert,application/pkix-cert"
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0]
+                      e.target.value = ''
+                      if (!f) return
+                      try {
+                        setCertError('')
+                        const certs = await readCertificates(new Uint8Array(await f.arrayBuffer()))
+                        const known = new Set(settings.trusted.map((c) => c.pem))
+                        set({ trusted: [...settings.trusted, ...certs.filter((c) => !known.has(c.pem))] })
+                      } catch (err) {
+                        setCertError((err as Error).message)
+                      }
+                    }} />
+                  <span className="button-like">{m.settings.importCert}</span>
+                </label>
+              </Item>
+              {certError && <p className="error small">{certError}</p>}
+              {!settings.trusted.length && <p className="hint">{m.settings.noTrusted}</p>}
+              {settings.trusted.map((c) => (
+                <div key={c.pem} className="setting-item">
+                  <div className="setting-info">
+                    <div className="setting-name">{c.name}</div>
+                    <div className="setting-desc">{c.issuer} · {m.settings.expires(new Date(c.expires).toLocaleDateString())}</div>
+                  </div>
+                  <button onClick={() => set({ trusted: settings.trusted.filter((x) => x.pem !== c.pem) })}>{m.settings.removeCert}</button>
+                </div>
+              ))}
             </>
           )}
           {tab === 'about' && (

@@ -13,6 +13,8 @@ interface Props {
   signedBefore: boolean
   /** Names of empty signature fields the document asks to be signed. */
   fields: string[]
+  /** Timestamp server from Settings, or empty for none. */
+  tsa: string
   onSign: (req: SignRequest) => Promise<void>
   onClose: () => void
 }
@@ -29,7 +31,8 @@ function boxFor(corner: Corner, w: number, h: number): Rect | undefined {
   return [x, y, x + bw, y + bh]
 }
 
-export default function DigitalSignDialog({ page, signedBefore, fields, onSign, onClose }: Props) {
+export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onSign, onClose }: Props) {
+  const [stamp, setStamp] = useState(!!tsa)
   const [source, setSource] = useState<'file' | 'new'>('file')
   const [p12, setP12] = useState<{ name: string; bytes: Uint8Array } | null>(null)
   const [password, setPassword] = useState('')
@@ -78,7 +81,7 @@ export default function DigitalSignDialog({ page, signedBefore, fields, onSign, 
       if (useImage && savedImage) image = new Uint8Array(await (await fetch(savedImage)).arrayBuffer())
       const rect = field ? undefined : boxFor(corner, page.width, page.height)
       await onSign({
-        p12: p12.bytes.slice(), password, pageId: rect ? page.id : null, rect, field: field || undefined, certify: certify || undefined,
+        p12: p12.bytes.slice(), password, pageId: rect ? page.id : null, rect, field: field || undefined, certify: certify || undefined, timestampUrl: stamp && tsa ? tsa : undefined,
         reason: reason.trim() || undefined, location: location.trim() || undefined, image,
       })
     } catch (e) {
@@ -158,6 +161,12 @@ export default function DigitalSignDialog({ page, signedBefore, fields, onSign, 
           )}
         </div>
 
+        {tsa && (
+          <label className="check" title={m.digitalId.timestampHint}>
+            <input type="checkbox" checked={stamp} onChange={(e) => setStamp(e.target.checked)} />
+            <span>{m.digitalId.timestamp((() => { try { return new URL(tsa).host } catch { return tsa } })())}</span>
+          </label>
+        )}
         {error && <p className="error">{error}</p>}
         <div className="row end">
           <span className="muted grow">{busy}</span>

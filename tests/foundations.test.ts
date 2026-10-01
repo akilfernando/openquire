@@ -40,7 +40,7 @@ describe('signed documents', () => {
     const p12 = await createDigitalId({ name: 'Ada', password: 'pw' })
     const e = new Engine()
     const s = e.open('doc.pdf', bigPdf(2))
-    const { state } = e.sign({ p12, password: 'pw', pageId: null })
+    const { state } = await e.sign({ p12, password: 'pw', pageId: null })
     const page = state.pages[0].id
 
     e.addAnnot(page, { type: 'Text', at: [10, 10], text: 'one', color: [1, 1, 0] })
