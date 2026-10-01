@@ -13,6 +13,7 @@ import {
   type Metadata,
   type OcrWord,
   type PageInfo,
+  type PageLabelStyle,
   type Permission,
   type Point,
   type Quad,
@@ -414,6 +415,7 @@ export class Engine {
         .map((a, i) => (a.getType() === 'Popup' || a.getType() === 'Link' ? null : this.annotInfo(a, i)))
         .filter((a): a is AnnotInfo => !!a),
       widgets: page.getWidgets().map((w, i) => this.widgetInfo(w, i)),
+      links: page.getLinks().map((l, i) => ({ index: i, rect: l.getBounds() as Rect, uri: l.getURI(), page: l.isExternal() ? -1 : doc.resolveLink(l) })),
     }
     page.destroy()
     return info
@@ -1275,6 +1277,71 @@ export class Engine {
 
   deleteBookmark(path: number[]) {
     this.op('Delete bookmark', () => this.outlineAt(path).delete(), [])
+    return this.state()
+  }
+
+  // ---- links ----
+
+  /** A link URI for a web address or a page index. Bare domains get https://. */
+  private linkUri(target: string | number) {
+    if (typeof target === 'number') return this.linkTo(target)
+    const t = target.trim()
+    if (/^(https?|mailto|tel):/i.test(t)) return t
+    if (/^[\w.+-]+@[\w-]+\.[\w.]+$/.test(t)) return `mailto:${t}`
+    return `https://${t}`
+  }
+
+  addLink(pageId: number, rect: Rect, target: string | number) {
+    this.op('Add link', () => {
+      const page = this.page(pageId)
+      page.createLink(rect, this.linkUri(target))
+      page.destroy()
+    }, [pageId])
+    return this.state()
+  }
+
+  updateLink(pageId: number, index: number, change: { rect?: Rect; target?: string | number }) {
+    this.op('Edit link', () => {
+      const page = this.page(pageId)
+      const link = page.getLinks()[index]
+      if (!link) throw new Error('Link not found')
+      const uri = change.target !== undefined ? this.linkUri(change.target) : link.getURI()
+      if (change.rect) {
+        // Link.setBounds ignores page rotation, so recreate the link at its new place instead.
+        page.deleteLink(link)
+        page.createLink(change.rect, uri)
+      } else {
+        link.setURI(uri)
+      }
+      page.destroy()
+    }, [pageId])
+    return this.state()
+  }
+
+  deleteLink(pageId: number, index: number) {
+    this.op('Delete link', () => {
+      const page = this.page(pageId)
+      const link = page.getLinks()[index]
+      if (link) page.deleteLink(link)
+      page.destroy()
+    }, [pageId])
+    return this.state()
+  }
+
+  // ---- page labels ----
+
+  /** Starts a page numbering range at a page: style D (1, 2), r (i, ii), R (I, II), a, A, or none. */
+  setPageLabels(pageId: number, style: PageLabelStyle, prefix = '', start = 1) {
+    const index = this.indexOf(pageId)
+    const code = style === 'none' ? mupdf.PDFDocument.PAGE_LABEL_NONE : style
+    this.op('Set page labels', () => this.d.setPageLabels(index, code, prefix, Math.max(1, Math.round(start))))
+    return this.state()
+  }
+
+  /** Removes the numbering range that starts at a page, so it continues the previous range. */
+  removePageLabels(pageId: number) {
+    const index = this.indexOf(pageId)
+    this.op('Remove page labels', () => this.d.deletePageLabels(index))
     return this.state()
   }
 

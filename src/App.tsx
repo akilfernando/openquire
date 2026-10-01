@@ -3,10 +3,11 @@ import {
   BadgeCheck, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
   ImagePlus, Loader2, Lock, MousePointer2, MoveUpRight, PanelLeft, PanelRight, Pencil, Redo2, ScanText, Search, Settings as SettingsIcon,
   ShieldAlert, ShieldCheck, Signature, Square, SquareTerminal, StickyNote, Strikethrough, TextCursorInput, Trash2, Type, Underline, Undo2,
-  X, ZoomIn, ZoomOut, type LucideProps,
+  X, ZoomIn, ZoomOut, Link2, type LucideProps,
 } from 'lucide-react'
 import CommandPalette, { type Command } from './components/CommandPalette'
 import DigitalSignDialog from './components/DigitalSignDialog'
+import LinkDialog from './components/LinkDialog'
 import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsModal, { type Settings } from './components/SettingsModal'
@@ -15,7 +16,7 @@ import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
 import { EngineError, engine } from './engine/client'
 import { parseRanges } from './engine/ranges'
-import { rgbOf, type DocState, type Quad, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
+import { rgbOf, type DocState, type LinkInfo, type Quad, type Rect, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
 import { arrowNavigate } from './focus'
 import { m } from './i18n'
 import { download, imageToPng, kb } from './util'
@@ -23,7 +24,7 @@ import { download, imageToPng, kb } from './util'
 type Icon = ComponentType<LucideProps>
 
 const TOOL_ICONS: [Tool, Icon][][] = [
-  [['select', MousePointer2], ['edittext', TextCursorInput]],
+  [['select', MousePointer2], ['edittext', TextCursorInput], ['link', Link2]],
   [['highlight', Highlighter], ['underline', Underline], ['strike', Strikethrough], ['note', StickyNote], ['text', Type]],
   [['ink', Pencil], ['rect', Square], ['ellipse', Circle], ['arrow', MoveUpRight]],
   [['whiteout', Eraser], ['redact', EyeOff], ['crop', Crop]],
@@ -83,6 +84,7 @@ export default function App() {
   const [signing, setSigning] = useState(false)
   const [digitalSigning, setDigitalSigning] = useState(false)
   const [palette, setPalette] = useState(false)
+  const [linkEdit, setLinkEdit] = useState<{ pageId: number; rect: Rect | null; index: number | null } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settings, setSettingsState] = useState(loadSettings)
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
@@ -285,6 +287,8 @@ export default function App() {
   }
 
   const targets = () => (selected.size ? [...selected] : doc!.pages.map((p) => p.id))
+  /** The page a numbering range starts at: the first selected page, or the one in view. */
+  const labelPageId = () => doc!.pages.find((p) => selected.has(p.id))?.id ?? doc!.pages[Math.min(pageIndex, doc!.pages.length - 1)].id
 
   // ---- search ------------------------------------------------------------------------------
 
@@ -381,6 +385,15 @@ export default function App() {
         }),
       setSelection: setTextSel,
       toolDone: () => setTool('select'),
+      editLink: (pageId, rect, index) => setLinkEdit({ pageId, rect, index }),
+      followLink: (link: LinkInfo) => {
+        if (link.page >= 0) {
+          const target = docRef.current?.pages[link.page]
+          if (target) goTo(target.id)
+        } else if (/^(https?|mailto):/i.test(link.uri)) {
+          window.open(link.uri, '_blank', 'noopener,noreferrer')
+        }
+      },
     }),
     [apply, run, selected],
   )
@@ -504,6 +517,8 @@ export default function App() {
         setStatus(state ? m.status.recognized(ids.length) : m.status.noTextFound)
       }),
     digitalSign: () => setDigitalSigning(true),
+    setLabels: (style, prefix, start) => void run(m.busy.numbering, async () => apply(await engine.setPageLabels(labelPageId(), style, prefix, start))),
+    removeLabels: () => void run(m.busy.numbering, async () => apply(await engine.removePageLabels(labelPageId()))),
   }
 
   // ---- selection-dependent toolbar state --------------------------------------------------
@@ -699,7 +714,7 @@ export default function App() {
             <IconButton Icon={Redo2} label={m.actions.redo} hotkey={mod('Y')} disabled={!doc.canRedo} onClick={redo} />
             <div className="view-title">
               <b>{doc.name}</b>
-              <span className="faint tnum">{'  '}{m.workspace.pageOf(Math.min(pageIndex + 1, doc.pages.length), doc.pages.length)}</span>
+              <span className="faint tnum">{'  '}{m.workspace.pageOf(doc.pages[Math.min(pageIndex, doc.pages.length - 1)].label, Math.min(pageIndex + 1, doc.pages.length), doc.pages.length)}</span>
             </div>
             <div className="view-actions">
               {findOpen ? (
@@ -802,7 +817,7 @@ export default function App() {
         </div>
       </div>
 
-      {doc && rightOpen && <ToolsPanel doc={doc} selectedCount={selected.size} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} />}
+      {doc && rightOpen && <ToolsPanel doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} />}
       {doc && narrow && (leftOpen || rightOpen) && <div className="drawer-scrim" onClick={() => { setLeftOpen(false); setRightOpen(false) }} />}
 
       <div className="status-bar">
@@ -841,6 +856,24 @@ export default function App() {
           />
         )
       })()}
+      {linkEdit && doc && (
+        <LinkDialog
+          link={linkEdit.index === null ? null : doc.pages.find((p) => p.id === linkEdit.pageId)?.links[linkEdit.index] ?? null}
+          pageCount={doc.pages.length}
+          onClose={() => setLinkEdit(null)}
+          onSave={(target) => {
+            const { pageId, rect, index } = linkEdit
+            setLinkEdit(null)
+            void run(m.busy.linking, async () =>
+              apply(index === null ? await engine.addLink(pageId, rect!, target) : await engine.updateLink(pageId, index, { target })))
+          }}
+          onRemove={() => {
+            const { pageId, index } = linkEdit
+            setLinkEdit(null)
+            if (index !== null) void run(m.busy.linking, async () => apply(await engine.deleteLink(pageId, index)))
+          }}
+        />
+      )}
       {pwPrompt && <PasswordDialog file={pwPrompt.file} retry={pwPrompt.retry} onDone={pwPrompt.resolve} />}
       {busy && <div className="busy" />}
     </div>

@@ -13,7 +13,8 @@ export const en = {
 
   tools: {
     select: { name: 'Select', hint: 'Select text, annotations and form fields' },
-    edittext: { name: 'Edit text', hint: 'Click a line of text to change it' },
+    edittext: { name: 'Edit text', hint: 'Click a paragraph to change it' },
+    link: { name: 'Link', hint: 'Drag to add a link, or click a link to edit it' },
     highlight: { name: 'Highlight', hint: 'Drag across text to highlight it' },
     underline: { name: 'Underline', hint: 'Drag across text to underline it' },
     strike: { name: 'Strikethrough', hint: 'Drag across text to strike it through' },
@@ -93,6 +94,7 @@ export const en = {
     splitting: 'Splitting', stamping: 'Stamping', redacting: 'Redacting', flattening: 'Flattening', renderingImages: 'Rendering images',
     extractingText: 'Extracting text', converting: 'Converting', savingProperties: 'Saving properties', startingOcr: 'Starting OCR',
     recoloring: 'Recoloring', undoing: 'Undoing', redoing: 'Redoing', creating: 'Creating', attaching: 'Attaching', resizingText: 'Resizing text',
+    numbering: 'Numbering pages', linking: 'Updating links',
     recognizing: (page: number, total: number) => `Recognizing text, page ${page} of ${total}`,
   },
 
@@ -117,7 +119,8 @@ export const en = {
 
   workspace: {
     ribbon: 'Ribbon',
-    pageOf: (page: number, total: number) => `Page ${page} of ${total}`,
+    pageOf: (label: string, page: number, total: number) =>
+      label === String(page) ? `Page ${page} of ${total}` : `Page ${label} (${page} of ${total})`,
     findPlaceholder: 'Find...',
     noMatches: 'None',
     tools: 'Tools',
@@ -181,6 +184,14 @@ export const en = {
     delete: 'Delete',
     extract: 'Extract',
     insertBlank: 'Insert blank page',
+    labels: 'Page labels',
+    labelsHint: (from: string) => `Numbering starts at page ${from} and continues until the next range.`,
+    labelStyle: 'Style',
+    labelStyles: { D: '1, 2, 3', r: 'i, ii, iii', R: 'I, II, III', a: 'a, b, c', A: 'A, B, C', none: 'Prefix only' },
+    labelPrefix: 'Prefix',
+    labelStart: 'Start at',
+    applyLabels: 'Apply',
+    removeLabels: 'Remove range',
     split: 'Split',
     splitPlaceholder: 'For example 1-3, 4-6, 7-',
     byRanges: 'By ranges',
@@ -242,6 +253,20 @@ export const en = {
     exportHtml: 'HTML',
     properties: 'Properties',
     meta: { title: 'Title', author: 'Author', subject: 'Subject', keywords: 'Keywords' },
+  },
+
+  links: {
+    newTitle: 'Add link',
+    editTitle: 'Edit link',
+    web: 'Web address or email',
+    page: 'Page in this document',
+    address: 'Address',
+    pageNumber: (n: number) => `Page number (1 to ${n})`,
+    remove: 'Remove link',
+    cancel: 'Cancel',
+    save: 'Save',
+    follow: (target: string) => `Go to ${target}`,
+    toPage: (n: number) => `page ${n}`,
   },
 
   palette: {

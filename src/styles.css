@@ -315,6 +315,10 @@ main.desk {
 .draft-whiteout { fill: #fff; stroke: #94a3b8; }
 .draft-crop { fill: none; stroke: #08b94e; stroke-width: 1.5; }
 .draft-ink { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.link-area { fill: transparent; cursor: pointer; }
+.link-area:hover { fill: hsla(212, 90%, 55%, 0.1); stroke: hsla(212, 90%, 50%, 0.6); stroke-width: 0.75; }
+.link-area.editing { fill: hsla(212, 90%, 55%, 0.08); stroke: hsl(212, 90%, 50%); stroke-width: 0.75; stroke-dasharray: 3 2; }
+.overlay:not(.tool-select) .link-area.editing { pointer-events: all; }
 .ghost { fill: hsla(var(--accent-h), 90%, 55%, 0.08); stroke: hsl(var(--accent-h), 90%, 48%); stroke-dasharray: 4 3; }
 
 .page-html { position: absolute; inset: 0; pointer-events: none; }

@@ -1,11 +1,11 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { engine, requestRender } from '../engine/client'
-import { rgbOf, type AnnotInfo, type AnnotSpec, type PageInfo, type Point, type Quad, type Rect, type TextBlock, type WidgetInfo, hexOf } from '../engine/types'
+import { rgbOf, type AnnotInfo, type AnnotSpec, type PageInfo, type Point, type Quad, type Rect, type TextBlock, type WidgetInfo, type LinkInfo, hexOf } from '../engine/types'
 import { isResizable, normRect, quadPoints } from '../util'
 import { m } from '../i18n'
 
 export type Tool =
-  | 'select' | 'edittext' | 'highlight' | 'underline' | 'strike' | 'note' | 'text'
+  | 'select' | 'edittext' | 'link' | 'highlight' | 'underline' | 'strike' | 'note' | 'text'
   | 'ink' | 'rect' | 'ellipse' | 'arrow' | 'whiteout' | 'redact' | 'crop'
 
 const MARKUP: Partial<Record<Tool, 'Highlight' | 'Underline' | 'StrikeOut'>> = { highlight: 'Highlight', underline: 'Underline', strike: 'StrikeOut' }
@@ -20,6 +20,9 @@ export interface PageActions {
   setField: (pageId: number, w: WidgetInfo, value: string | boolean) => void
   replaceBlock: (pageId: number, block: TextBlock, text: string) => void
   crop: (pageId: number, r: Rect) => void
+  /** Opens the link editor for a new link area, or an existing link by index. */
+  editLink: (pageId: number, rect: Rect | null, index: number | null) => void
+  followLink: (link: LinkInfo) => void
   setSelection: (sel: { pageId: number; quads: Quad[]; text: string } | null) => void
   toolDone: () => void
 }
@@ -118,6 +121,13 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
     ;(document.activeElement as HTMLElement | null)?.blur()
     const p = pt(e)
     const target = e.target as Element
+    const linkIndex = target.closest('[data-link]')?.getAttribute('data-link')
+    if (linkIndex !== null && linkIndex !== undefined && (tool === 'select' || tool === 'link')) {
+      const link = page.links[Number(linkIndex)]
+      if (tool === 'select') actions.followLink(link)
+      else actions.editLink(page.id, null, link.index)
+      return
+    }
     if (tool === 'select') {
       const id = target.closest('[data-annot]')?.getAttribute('data-annot')
       const annot = page.annots.find((a) => String(a.id) === id)
@@ -214,6 +224,7 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
       await actions.addAnnot(page.id, { type: tool === 'rect' ? 'Square' : 'Circle', rect: r, color: c, fill: null, width: strokeWidth })
     else if (tool === 'whiteout') await actions.addAnnot(page.id, { type: 'Square', rect: r, color: null, fill: [1, 1, 1], width: 0 })
     else if (tool === 'redact') await actions.addAnnot(page.id, { type: 'Redact', rect: r })
+    else if (tool === 'link') actions.editLink(page.id, r, null)
     else if (tool === 'crop') {
       actions.crop(page.id, r)
       actions.toolDone()
@@ -249,6 +260,14 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
         {selection?.map((q, i) => <polygon key={i} className="text-sel" points={quadPoints(q)} />)}
         {blocks?.map((l, i) => (
           <rect key={i} className="text-line" x={l.bbox[0]} y={l.bbox[1]} width={l.bbox[2] - l.bbox[0]} height={l.bbox[3] - l.bbox[1]} />
+        ))}
+        {(tool === 'select' || tool === 'link') && page.links.map((l) => (
+          <rect
+            key={`link-${l.index}`} data-link={l.index} className={`link-area${tool === 'link' ? ' editing' : ''}`}
+            x={l.rect[0]} y={l.rect[1]} width={l.rect[2] - l.rect[0]} height={l.rect[3] - l.rect[1]}
+          >
+            <title>{m.links.follow(l.page >= 0 ? m.links.toPage(l.page + 1) : l.uri)}</title>
+          </rect>
         ))}
         {shown.map((a) => {
           const [x0, y0, x1, y1] = a.rect

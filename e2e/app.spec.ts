@@ -202,3 +202,27 @@ test('edits a whole paragraph that reflows', async ({ page }) => {
   expect(saved.replace(/\s+/g, ' ')).toContain('A rewritten paragraph that is long enough to wrap')
   expect(saved).not.toContain('exercises the paragraph editor')
 })
+
+test('adds an internal link and follows it', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('button', { name: 'Link', exact: true }).click()
+  const a = await pagePoint(page, 0, 60, 60)
+  const b = await pagePoint(page, 0, 300, 90)
+  await page.mouse.move(a.x, a.y)
+  await page.mouse.down()
+  await page.mouse.move(b.x, b.y, { steps: 5 })
+  await page.mouse.up()
+  const dialog = page.getByRole('dialog', { name: 'Add link' })
+  await dialog.getByRole('button', { name: 'Page in this document' }).click()
+  await dialog.getByLabel(/Page number/).fill('2')
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(page.locator('.link-area')).toHaveCount(1)
+
+  await page.getByRole('button', { name: 'Select', exact: true }).click()
+  await page.mouse.click((a.x + b.x) / 2, (a.y + b.y) / 2)
+  await expect(page.locator('.view-title')).toContainText('Page 2 of 2')
+
+  const doc = mupdf.Document.openDocument(await save(page), 'application/pdf')
+  const [link] = doc.loadPage(0).getLinks()
+  expect(doc.resolveLink(link)).toBe(1)
+})

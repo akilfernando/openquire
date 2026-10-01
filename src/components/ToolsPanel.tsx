@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { ChevronRight, RotateCcw, RotateCw, Wrench } from 'lucide-react'
-import { rgbOf, type CompressLevel, type DocState, type Metadata, type Permission, type SaveOptions, type StampPosition, type StampSpec } from '../engine/types'
+import { rgbOf, type CompressLevel, type DocState, type Metadata, type PageLabelStyle, type Permission, type SaveOptions, type StampPosition, type StampSpec } from '../engine/types'
 import { m } from '../i18n'
 
 export interface PanelActions {
@@ -21,11 +21,15 @@ export interface PanelActions {
   ocr: (scope: 'notext' | 'selected' | 'all') => void
   pagesWithoutText: () => Promise<number>
   digitalSign: () => void
+  setLabels: (style: PageLabelStyle, prefix: string, start: number) => void
+  removeLabels: () => void
 }
 
 interface Props {
   doc: DocState
   selectedCount: number
+  /** Label of the page that page-level actions start from (the first selected, or current, page). */
+  labelPage: string
   saveOpts: SaveOptions
   onSaveOpts: (o: SaveOptions) => void
   actions: PanelActions
@@ -201,7 +205,32 @@ function SaveSettings({ doc, saveOpts, onSaveOpts }: Pick<Props, 'doc' | 'saveOp
   )
 }
 
-export default function ToolsPanel({ doc, selectedCount, saveOpts, onSaveOpts, actions }: Props) {
+function Labels({ labelPage, actions }: Pick<Props, 'labelPage' | 'actions'>) {
+  const [style, setStyle] = useState<PageLabelStyle>('r')
+  const [prefix, setPrefix] = useState('')
+  const [start, setStart] = useState(1)
+  const styles = Object.entries(m.panel.labelStyles) as [PageLabelStyle, string][]
+  return (
+    <Section title={m.panel.labels}>
+      <p className="hint">{m.panel.labelsHint(labelPage)}</p>
+      <div className="row">
+        <Field label={m.panel.labelStyle}>
+          <select value={style} onChange={(e) => setStyle(e.target.value as PageLabelStyle)}>
+            {styles.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+        </Field>
+        <Field label={m.panel.labelPrefix}><input value={prefix} onChange={(e) => setPrefix(e.target.value)} /></Field>
+        <Field label={m.panel.labelStart}><input type="number" min={1} value={start} onChange={(e) => setStart(Number(e.target.value) || 1)} /></Field>
+      </div>
+      <div className="row">
+        <button onClick={() => actions.setLabels(style, prefix, start)}>{m.panel.applyLabels}</button>
+        <button onClick={actions.removeLabels}>{m.panel.removeLabels}</button>
+      </div>
+    </Section>
+  )
+}
+
+export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions }: Props) {
   const [ranges, setRanges] = useState('')
   const scope = selectedCount ? m.panel.scopeSelected(selectedCount) : m.panel.scopeAll
   const widgets = doc.pages.reduce((n, p) => n + p.widgets.length, 0)
@@ -227,6 +256,8 @@ export default function ToolsPanel({ doc, selectedCount, saveOpts, onSaveOpts, a
           </div>
           <button onClick={actions.insertBlank}>{m.panel.insertBlank}</button>
         </Section>
+
+        <Labels labelPage={labelPage} actions={actions} />
 
         <Section title={m.panel.split}>
           <input placeholder={m.panel.splitPlaceholder} aria-label={m.panel.split} value={ranges} onChange={(e) => setRanges(e.target.value)} />

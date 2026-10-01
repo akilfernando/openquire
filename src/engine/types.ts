@@ -49,6 +49,16 @@ export interface PageInfo {
   label: string
   annots: AnnotInfo[]
   widgets: WidgetInfo[]
+  links: LinkInfo[]
+}
+
+export interface LinkInfo {
+  /** Position in the page's link list. */
+  index: number
+  rect: Rect
+  uri: string
+  /** Target page index for internal links, -1 for web links. */
+  page: number
 }
 
 export interface Bookmark {
@@ -204,3 +214,6 @@ export const rgbOf = (hex: string): RGB => {
   const n = parseInt(hex.slice(1), 16)
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
 }
+
+/** Page numbering styles: decimal, lower/upper Roman, lower/upper letters, or prefix only. */
+export type PageLabelStyle = 'D' | 'r' | 'R' | 'a' | 'A' | 'none'
