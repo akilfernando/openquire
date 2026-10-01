@@ -23,6 +23,7 @@ import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
 import WorkflowsDialog from './components/WorkflowsDialog'
 import { OUTPUT_ACTIONS, newWorkflow, pageSetOf, type Workflow, type WorkflowStep } from './engine/workflow'
+import { addRecent, fileName, isDesktop, pickFiles, readPath, recentFiles, removeRecent, saveAs, watchOpenedFiles, writePath } from './native'
 import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
 import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
@@ -126,6 +127,9 @@ export default function App() {
   const [workflowsOpen, setWorkflowsOpen] = useState<{ index: number } | null>(null)
   // Steps recorded so far while recording a workflow.
   const [recording, setRecording] = useState<WorkflowStep[] | null>(null)
+  // Desktop app: where each tab's document lives on disk, and recently opened files.
+  const paths = useRef(new Map<number, string>())
+  const [recent, setRecent] = useState(() => (isDesktop ? recentFiles() : []))
   const [aiLog, setAiLog] = useState<AiEntry[]>([])
   const [aiBusy, setAiBusy] = useState(false)
   const [consent, setConsent] = useState<{ host: string; items: string[]; answer: (send: boolean, remember: boolean) => void } | null>(null)
@@ -639,9 +643,9 @@ export default function App() {
     return { main, other }
   }, [comparison])
 
-  const openFiles = (files: File[], append: boolean) =>
+  const openFiles = (files: File[], append: boolean, filePaths?: string[]) =>
     run(m.busy.opening, async () => {
-      for (const f of files) {
+      for (const [i, f] of files.entries()) {
         const bytes = new Uint8Array(await f.arrayBuffer())
         const load = async (open: (password?: string) => Promise<DocState>) => {
           let password: string | undefined
@@ -660,16 +664,58 @@ export default function App() {
         if (append) {
           const s = await load((pw) => engine.append(f.name, bytes.slice(), pw))
           if (s) apply(s)
-        } else await inNewTab(() => load((pw) => engine.open(f.name, bytes.slice(), pw)))
+        } else {
+          const before = activeDocument()
+          await inNewTab(() => load((pw) => engine.open(f.name, bytes.slice(), pw)))
+          const path = filePaths?.[i]
+          if (path && activeDocument() !== before) {
+            paths.current.set(activeDocument(), path)
+            setRecent(addRecent(path))
+          }
+        }
       }
     })
+
+  /** Opens files: the native dialog in the desktop app, the file picker in the browser. */
+  const openDialog = () => {
+    if (!isDesktop) return openRef.current!.click()
+    void pickFiles().then((picked) => {
+      if (picked.length) void openFiles(picked.map((p) => p.file), false, picked.map((p) => p.path))
+    })
+  }
+
+  const openPaths = (list: string[]) =>
+    void Promise.all(list.map((p) => readPath(p).catch(() => null))).then((files) => {
+      const ok = list.filter((_, i) => files[i])
+      list.filter((_, i) => !files[i]).forEach((p) => setRecent(removeRecent(p)))
+      if (ok.length) void openFiles(files.filter((f): f is File => !!f), false, ok)
+    })
+
+  useEffect(() => {
+    if (!isDesktop) return
+    let stop: (() => void) | undefined
+    void watchOpenedFiles(openPaths).then((u) => (stop = u))
+    return () => stop?.()
+    // Registered once at startup.
+  }, [])
 
   const newBlank = () => run(m.busy.creating, () => inNewTab(() => engine.newBlank()))
 
   const save = () =>
     run(m.busy.saving, async () => {
       const bytes = await engine.save(saveOpts)
-      download(bytes, `${docRef.current!.name}.pdf`)
+      if (isDesktop) {
+        // Save in place when the document came from a PDF on disk; otherwise ask where.
+        const id = activeDocument()
+        let path = paths.current.get(id)
+        if (path && /\.pdf$/i.test(path)) await writePath(path, bytes)
+        else {
+          path = (await saveAs(`${docRef.current!.name}.pdf`, bytes)) ?? undefined
+          if (!path) return
+          paths.current.set(id, path)
+          setRecent(addRecent(path))
+        }
+      } else download(bytes, `${docRef.current!.name}.pdf`)
       // Passwords aren't recorded: a shared workflow file would reveal them.
       if (saveOpts.security.mode !== 'set') record({ action: 'save', options: saveOpts })
       // Signed documents are reloaded after an incremental save, so refresh their state.
@@ -1108,7 +1154,7 @@ export default function App() {
 
   const has = !!doc
   const commands: Command[] = [
-    { id: 'open', name: m.actions.openFile, icon: FolderOpen, hotkey: mod('O'), run: () => openRef.current!.click() },
+    { id: 'open', name: m.actions.openFile, icon: FolderOpen, hotkey: mod('O'), run: () => openDialog() },
     { id: 'new', name: m.actions.newBlank, icon: FilePlus2, run: () => void newBlank() },
     { id: 'merge', name: m.actions.merge, icon: Combine, enabled: has, run: () => addRef.current!.click() },
     { id: 'save', name: m.actions.saveCopy, icon: Download, hotkey: mod('S'), enabled: has, run: () => void save() },
@@ -1175,7 +1221,7 @@ export default function App() {
       if (doc) void save()
     } else if (modKey && k === 'o') {
       e.preventDefault()
-      openRef.current!.click()
+      openDialog()
     } else if (modKey && k === 'f') {
       e.preventDefault()
       if (doc) openFind()
@@ -1255,7 +1301,7 @@ export default function App() {
 
       <nav className="ribbon" aria-label={m.workspace.ribbon}>
         <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} onClick={() => setLeftOpen((o) => !o)} />
-        <IconButton Icon={FolderOpen} label={m.actions.openFile} hotkey={mod('O')} onClick={() => openRef.current!.click()} />
+        <IconButton Icon={FolderOpen} label={m.actions.openFile} hotkey={mod('O')} onClick={() => openDialog()} />
         <IconButton Icon={FilePlus2} label={m.actions.newBlank} onClick={() => newBlank()} />
         <IconButton Icon={Combine} label={m.actions.merge} disabled={!doc} onClick={() => addRef.current!.click()} />
         <IconButton Icon={ScanText} label={m.actions.ocr} disabled={!doc} onClick={() => panelActions.ocr('notext')} />
@@ -1420,9 +1466,19 @@ export default function App() {
             <div className="empty-state">
               <div className="empty-state-inner">
                 <div className="empty-state-title">{m.workspace.emptyTitle}</div>
-                <button className="empty-state-action" onClick={() => openRef.current!.click()}>{m.workspace.emptyOpen}<kbd>{mod('O')}</kbd></button>
+                <button className="empty-state-action" onClick={() => openDialog()}>{m.workspace.emptyOpen}<kbd>{mod('O')}</kbd></button>
                 <button className="empty-state-action" onClick={() => newBlank()}>{m.workspace.emptyBlank}</button>
                 <button className="empty-state-action" onClick={() => setPalette(true)}>{m.actions.commandPalette}<kbd>{mod('P')}</kbd></button>
+                {recent.length > 0 && (
+                  <div className="recent">
+                    <div className="pane-heading">{m.workspace.recent}</div>
+                    {recent.map((p) => (
+                      <button key={p} className="empty-state-action recent-file" title={p} onClick={() => openPaths([p])}>
+                        <FileText size={15} />{fileName(p)}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <p className="empty-state-note">{m.workspace.emptyNote}</p>
               </div>
             </div>

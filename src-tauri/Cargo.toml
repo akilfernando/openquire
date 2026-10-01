@@ -1,0 +1,27 @@
+[package]
+name = "openquire"
+version = "0.6.0"
+description = "OpenQuire, an open source PDF suite"
+license = "AGPL-3.0-or-later"
+edition = "2021"
+
+[lib]
+name = "openquire_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+percent-encoding = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -1,6 +1,9 @@
+import { isDesktop, saveAs } from './native'
 import type { DocState, PageInfo, Point, Quad, Rect } from './engine/types'
 
 export function download(bytes: Uint8Array | string, name: string, type = 'application/pdf') {
+  // The desktop app saves with a native dialog instead of downloading.
+  if (isDesktop) return void saveAs(name, bytes)
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }))
   const a = document.createElement('a')
   a.href = url

@@ -30,6 +30,7 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Convert | Open Word, Excel, PowerPoint, EPUB, HTML, text and images as PDF; export Word (paragraphs, headings, images and tables), Excel (detected tables, numbers as numbers), PNG, text or HTML |
 | Properties | Title, author, subject and keywords |
 | Undo | Unlimited undo and redo for every change |
+| Desktop app | Windows, macOS and Linux installers: open PDFs from the file manager, save in place, recent files |
 
 Changes are saved into the existing file, so links, bookmarks, form fields, tags and comments are
 preserved when you reorganize pages. Annotations are standard PDF annotations that Acrobat and other

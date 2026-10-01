@@ -8,6 +8,8 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered in main.tsx, and only in the browser: the desktop app ships its files.
+      injectRegister: null,
       manifest: {
         name: 'OpenQuire',
         short_name: 'OpenQuire',

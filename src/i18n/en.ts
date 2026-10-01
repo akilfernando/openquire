@@ -175,6 +175,7 @@ export const en = {
     emptyTitle: 'No file is open',
     emptyOpen: 'Open a file',
     emptyBlank: 'Create a blank PDF',
+    recent: 'Recent files',
     emptyNote: 'Opens PDFs, images, Word, Excel, PowerPoint, EPUB, HTML and text. Drop several files to combine them. Everything stays on this device.',
   },
 

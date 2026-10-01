@@ -7,3 +7,5 @@ playwright-report
 cli/dist
 cli/LICENSE
 cli/*.tgz
+src-tauri/target
+src-tauri/gen

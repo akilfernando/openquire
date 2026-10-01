@@ -214,6 +214,10 @@ kbd {
 .tree-item.problem > svg { flex: none; margin-top: 2px; }
 .tree-item .label.wrap { white-space: normal; }
 
+/* Recent files (desktop) */
+.recent { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+.recent-file { display: flex; align-items: center; gap: 8px; }
+
 /* AI assistant */
 .assistant .row.wrap { flex-wrap: wrap; }
 .ai-log { display: flex; flex-direction: column; gap: 10px; }
