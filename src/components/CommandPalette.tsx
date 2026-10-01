@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { useFocusTrap } from '../focus'
 import { ArrowDown, ArrowUp, CornerDownLeft, type LucideProps } from 'lucide-react'
+import { m } from '../i18n'
 
 export interface Command {
   id: string
@@ -66,9 +67,9 @@ export default function CommandPalette({ commands, onClose }: { commands: Comman
   return (
     <div className="modal-container prompt-container">
       <div className="modal-bg" onPointerDown={onClose} />
-      <div ref={box} className="prompt" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div ref={box} className="prompt" role="dialog" aria-modal="true" aria-label={m.palette.label}>
         <input
-          className="prompt-input" autoFocus placeholder="Type a command..." value={query}
+          className="prompt-input" autoFocus placeholder={m.palette.placeholder} aria-label={m.palette.placeholder} value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') { e.preventDefault(); setIndex((i) => Math.min(results.length - 1, i + 1)) }
@@ -78,7 +79,7 @@ export default function CommandPalette({ commands, onClose }: { commands: Comman
           }}
         />
         <div ref={list} className="prompt-results">
-          {!results.length && <div className="empty-note" style={{ padding: '10px 12px' }}>No commands found.</div>}
+          {!results.length && <div className="empty-note" style={{ padding: '10px 12px' }}>{m.palette.none}</div>}
           {results.map(({ c, m }, i) => {
             const Icon = c.icon
             return (
@@ -96,9 +97,9 @@ export default function CommandPalette({ commands, onClose }: { commands: Comman
           })}
         </div>
         <div className="prompt-instructions">
-          <span className="instruction"><ArrowUp size={12} /><ArrowDown size={12} />to navigate</span>
-          <span className="instruction"><CornerDownLeft size={12} />to use</span>
-          <span className="instruction"><b>esc</b>to dismiss</span>
+          <span className="instruction"><ArrowUp size={12} /><ArrowDown size={12} />{m.palette.navigate}</span>
+          <span className="instruction"><CornerDownLeft size={12} />{m.palette.use}</span>
+          <span className="instruction"><b>{m.palette.esc}</b>{m.palette.dismiss}</span>
         </div>
       </div>
     </div>

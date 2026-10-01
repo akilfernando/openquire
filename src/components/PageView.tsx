@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { engine, requestRender } from '../engine/client'
 import { rgbOf, type AnnotInfo, type AnnotSpec, type PageInfo, type Point, type Quad, type Rect, type TextLine, type WidgetInfo } from '../engine/types'
-import { ANNOT_LABELS, isResizable, normRect, quadPoints } from '../util'
+import { isResizable, normRect, quadPoints } from '../util'
+import { m } from '../i18n'
 
 export type Tool =
   | 'select' | 'edittext' | 'highlight' | 'underline' | 'strike' | 'note' | 'text'
@@ -254,7 +255,7 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
           const sel = a.id === selectedAnnot
           return (
             <g key={a.id} data-annot={a.id} className={sel ? 'annot sel' : 'annot'}>
-              <title>{[ANNOT_LABELS[a.type] ?? a.type, a.author, a.contents].filter(Boolean).join(' · ')}</title>
+              <title>{[m.annotations[a.type] ?? a.type, a.author, a.contents].filter(Boolean).join(' · ')}</title>
               <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} className="annot-hit" />
               {sel && isResizable(a.type) && <rect data-handle x={x1 - 4} y={y1 - 4} width={8} height={8} className="handle" />}
             </g>

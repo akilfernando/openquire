@@ -33,12 +33,6 @@ export const canvasPng = (canvas: HTMLCanvasElement) =>
 
 export const pageIndex = (doc: DocState, id: number) => doc.pages.findIndex((p) => p.id === id)
 
-export const ANNOT_LABELS: Record<string, string> = {
-  Highlight: 'Highlight', Underline: 'Underline', StrikeOut: 'Strikethrough', Squiggly: 'Squiggly', Ink: 'Drawing',
-  FreeText: 'Text box', Square: 'Rectangle', Circle: 'Ellipse', Line: 'Line', Text: 'Note', Stamp: 'Stamp',
-  Redact: 'Redaction mark', Polygon: 'Polygon', PolyLine: 'Polyline', FileAttachment: 'Attachment', Caret: 'Insert',
-}
-
 export const isResizable = (type: string) => ['Square', 'Circle', 'Stamp', 'Redact'].includes(type)
 
 export type { PageInfo }

@@ -17,45 +17,29 @@ import { EngineError, engine } from './engine/client'
 import { parseRanges } from './engine/ranges'
 import { rgbOf, type DocState, type Quad, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
 import { arrowNavigate } from './focus'
+import { m } from './i18n'
 import { download, imageToPng, kb } from './util'
 
 type Icon = ComponentType<LucideProps>
 
-const TOOLS: { id: Tool; name: string; Icon: Icon; hint: string }[][] = [
-  [
-    { id: 'select', name: 'Select', Icon: MousePointer2, hint: 'Select text, annotations and form fields' },
-    { id: 'edittext', name: 'Edit text', Icon: TextCursorInput, hint: 'Click a line of text to change it' },
-  ],
-  [
-    { id: 'highlight', name: 'Highlight', Icon: Highlighter, hint: 'Drag across text to highlight it' },
-    { id: 'underline', name: 'Underline', Icon: Underline, hint: 'Drag across text to underline it' },
-    { id: 'strike', name: 'Strikethrough', Icon: Strikethrough, hint: 'Drag across text to strike it through' },
-    { id: 'note', name: 'Sticky note', Icon: StickyNote, hint: 'Click to add a note' },
-    { id: 'text', name: 'Text box', Icon: Type, hint: 'Click to add a text box' },
-  ],
-  [
-    { id: 'ink', name: 'Pen', Icon: Pencil, hint: 'Draw freehand' },
-    { id: 'rect', name: 'Rectangle', Icon: Square, hint: 'Drag to draw a rectangle' },
-    { id: 'ellipse', name: 'Ellipse', Icon: Circle, hint: 'Drag to draw an ellipse' },
-    { id: 'arrow', name: 'Arrow', Icon: MoveUpRight, hint: 'Drag to draw an arrow' },
-  ],
-  [
-    { id: 'whiteout', name: 'Whiteout', Icon: Eraser, hint: 'Cover an area with white. Not secure: use Redact for sensitive content' },
-    { id: 'redact', name: 'Redact', Icon: EyeOff, hint: 'Mark an area for redaction, then apply it from the Redact section' },
-    { id: 'crop', name: 'Crop', Icon: Crop, hint: 'Drag the area to keep, on this page or the selected pages' },
-  ],
+const TOOL_ICONS: [Tool, Icon][][] = [
+  [['select', MousePointer2], ['edittext', TextCursorInput]],
+  [['highlight', Highlighter], ['underline', Underline], ['strike', Strikethrough], ['note', StickyNote], ['text', Type]],
+  [['ink', Pencil], ['rect', Square], ['ellipse', Circle], ['arrow', MoveUpRight]],
+  [['whiteout', Eraser], ['redact', EyeOff], ['crop', Crop]],
 ]
+const TOOLS = TOOL_ICONS.map((g) => g.map(([id, Icon]) => ({ id, Icon, ...m.tools[id] })))
 const ALL_TOOLS = TOOLS.flat()
 
 const COLOR_GROUP: Partial<Record<Tool, 'markup' | 'draw' | 'text'>> = {
   highlight: 'markup', underline: 'draw', strike: 'draw', note: 'markup', text: 'text', ink: 'draw', rect: 'draw', ellipse: 'draw', arrow: 'draw',
 }
 
-const STAMP_PRESETS: Record<string, Omit<StampSpec, 'pageIds'>> = {
-  'page numbers': { template: 'Page {page} of {pages}', position: 'bc', size: 10, color: [0.2, 0.2, 0.2], opacity: 1, angle: 0 },
-  'a confidential watermark': { template: 'CONFIDENTIAL', position: 'center', size: 'fit', color: [0.85, 0.1, 0.1], opacity: 0.2, angle: 45 },
-  'Bates numbers': { template: '{name}-{bates}', position: 'br', size: 9, color: [0, 0, 0], opacity: 1, angle: 0, batesStart: 1, batesDigits: 6 },
-}
+const STAMP_PRESETS: [string, Omit<StampSpec, 'pageIds'>][] = [
+  [m.actions.addPageNumbers, { template: 'Page {page} of {pages}', position: 'bc', size: 10, color: [0.2, 0.2, 0.2], opacity: 1, angle: 0 }],
+  [m.actions.addWatermark, { template: 'CONFIDENTIAL', position: 'center', size: 'fit', color: [0.85, 0.1, 0.1], opacity: 0.2, angle: 45 }],
+  [m.actions.addBates, { template: '{name}-{bates}', position: 'br', size: 9, color: [0, 0, 0], opacity: 1, angle: 0, batesStart: 1, batesDigits: 6 }],
+]
 
 const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
@@ -95,6 +79,7 @@ export default function App() {
   const [commentFocus, setCommentFocus] = useState<number | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [status, setStatus] = useState('')
+  const [statusError, setStatusError] = useState('')
   const [signing, setSigning] = useState(false)
   const [digitalSigning, setDigitalSigning] = useState(false)
   const [palette, setPalette] = useState(false)
@@ -203,7 +188,9 @@ export default function App() {
       await fn()
     } catch (e) {
       console.error(e)
-      setStatus(`Error: ${(e as Error).message}`)
+      const text = m.status.error((e as Error).message)
+      setStatus(text)
+      setStatusError(text)
     } finally {
       setBusy(null)
     }
@@ -223,7 +210,7 @@ export default function App() {
   const askPassword = (file: string, retry: boolean) => new Promise<string | null>((resolve) => setPwPrompt({ file, retry, resolve }))
 
   const openFiles = (files: File[], append: boolean) =>
-    run('Opening', async () => {
+    run(m.busy.opening, async () => {
       for (const [i, f] of files.entries()) {
         const bytes = new Uint8Array(await f.arrayBuffer())
         const replace = !append && i === 0
@@ -252,12 +239,12 @@ export default function App() {
     })
 
   const save = () =>
-    run('Saving', async () => {
+    run(m.busy.saving, async () => {
       const bytes = await engine.save(saveOpts)
       download(bytes, `${docRef.current!.name}.pdf`)
       // Signed documents are reloaded after an incremental save, so refresh their state.
       if (docRef.current!.signatures.length) apply(await engine.state())
-      setStatus(`Saved ${docRef.current!.name}.pdf, ${kb(bytes.length)}`)
+      setStatus(m.status.saved(`${docRef.current!.name}.pdf`, kb(bytes.length)))
     })
 
   const closeDoc = () => {
@@ -303,7 +290,7 @@ export default function App() {
 
   const [searched, setSearched] = useState('')
   const find = (q: string) =>
-    run('Searching', async () => {
+    run(m.busy.searching, async () => {
       setSearched(q.trim())
       if (!q.trim()) return setHits(null)
       const found = await engine.search(q.trim())
@@ -342,7 +329,7 @@ export default function App() {
     const h = w / aspect
     const x = (page.width - w) / 2
     const y = (page.height - h) / 2
-    void run('Placing image', async () => {
+    void run(m.busy.placingImage, async () => {
       const { id, state } = await engine.addAnnot(page.id, { type: 'Stamp', rect: [x, y, x + w, y + h], png })
       apply(state)
       setSelAnnot({ pageId: page.id, id })
@@ -355,7 +342,7 @@ export default function App() {
   const pageActions: PageActions = useMemo(
     () => ({
       addAnnot: (pageId, spec, select) =>
-        run('Adding', async () => {
+        run(m.busy.adding, async () => {
           const { id, state } = await engine.addAnnot(pageId, spec)
           apply(state)
           if (select) {
@@ -368,11 +355,11 @@ export default function App() {
             }
           }
         }),
-      moveAnnot: (pageId, id, move) => void run('Moving', async () => apply(await engine.updateAnnot(pageId, id, { move }))),
-      resizeAnnot: (pageId, id, rect) => void run('Resizing', async () => apply(await engine.updateAnnot(pageId, id, { rect }))),
+      moveAnnot: (pageId, id, move) => void run(m.busy.moving, async () => apply(await engine.updateAnnot(pageId, id, { move }))),
+      resizeAnnot: (pageId, id, rect) => void run(m.busy.resizing, async () => apply(await engine.updateAnnot(pageId, id, { rect }))),
       editAnnotText: (pageId, id, contents) => {
         setEditingAnnot(null)
-        void run('Saving text', async () => apply(await engine.updateAnnot(pageId, id, { contents })))
+        void run(m.busy.savingText, async () => apply(await engine.updateAnnot(pageId, id, { contents })))
       },
       selectAnnot: (pageId, id) => {
         setSelAnnot(id === null ? null : { pageId, id })
@@ -385,10 +372,10 @@ export default function App() {
         setTab('comments')
         setCommentFocus(id)
       },
-      setField: (pageId, w, value) => void run('Filling form', async () => apply(await engine.setField(pageId, w.id, value))),
-      replaceText: (pageId, line, text) => void run('Editing text', async () => apply(await engine.replaceText(pageId, line, text))),
+      setField: (pageId, w, value) => void run(m.busy.fillingForm, async () => apply(await engine.setField(pageId, w.id, value))),
+      replaceText: (pageId, line, text) => void run(m.busy.editingText, async () => apply(await engine.replaceText(pageId, line, text))),
       crop: (pageId, rect) =>
-        void run('Cropping', async () => {
+        void run(m.busy.cropping, async () => {
           const ids = selected.has(pageId) ? [...selected] : [pageId]
           apply(await engine.cropPages(ids, rect))
         }),
@@ -403,7 +390,7 @@ export default function App() {
     const sel = textSel
     setTextSel(null)
     const color = rgbOf(type === 'Highlight' ? colors.markup : colors.draw)
-    void run('Adding', async () => {
+    void run(m.busy.adding, async () => {
       const spec = type === 'Redact' ? { type, quads: sel.quads } : { type, quads: sel.quads, color }
       apply((await engine.addAnnot(sel.pageId, spec)).state)
     })
@@ -431,90 +418,90 @@ export default function App() {
         goTo(id)
       }
     },
-    movePages: (ids, before) => void run('Moving pages', async () => apply(await engine.movePages(ids, before))),
+    movePages: (ids, before) => void run(m.busy.movingPages, async () => apply(await engine.movePages(ids, before))),
     addBookmark: (title) =>
-      void run('Adding bookmark', async () => {
+      void run(m.busy.addingBookmark, async () => {
         const page = currentPage()
         apply(await engine.addBookmark(title, page ? doc!.pages.indexOf(page) : 0))
       }),
-    renameBookmark: (path, title) => void run('Renaming', async () => apply(await engine.renameBookmark(path, title))),
-    deleteBookmark: (path) => void run('Deleting', async () => apply(await engine.deleteBookmark(path))),
+    renameBookmark: (path, title) => void run(m.busy.renaming, async () => apply(await engine.renameBookmark(path, title))),
+    deleteBookmark: (path) => void run(m.busy.deleting, async () => apply(await engine.deleteBookmark(path))),
     focusAnnot: (pageId, id) => {
       setSelAnnot({ pageId, id })
       const a = doc!.pages.find((p) => p.id === pageId)?.annots.find((x) => x.id === id)
       goTo(pageId, a ? [a.rect[0], a.rect[1], 0, 0, 0, 0, 0, 0] : undefined)
     },
-    editComment: (pageId, id, contents) => void run('Saving', async () => apply(await engine.updateAnnot(pageId, id, { contents }))),
-    reply: (pageId, id, text) => void run('Replying', async () => apply(await engine.reply(pageId, id, text))),
-    deleteAnnot: (pageId, id) => void run('Deleting', async () => apply(await engine.deleteAnnot(pageId, id))),
+    editComment: (pageId, id, contents) => void run(m.busy.saving, async () => apply(await engine.updateAnnot(pageId, id, { contents }))),
+    reply: (pageId, id, text) => void run(m.busy.replying, async () => apply(await engine.reply(pageId, id, text))),
+    deleteAnnot: (pageId, id) => void run(m.busy.deleting, async () => apply(await engine.deleteAnnot(pageId, id))),
     attach: () => attachRef.current!.click(),
     saveAttachment: (name) =>
-      void run('Extracting', async () => {
+      void run(m.busy.extracting, async () => {
         const bytes = await engine.attachment(name)
         if (bytes) download(bytes, name, 'application/octet-stream')
       }),
-    removeAttachment: (name) => void run('Removing', async () => apply(await engine.removeAttachment(name))),
+    removeAttachment: (name) => void run(m.busy.removing, async () => apply(await engine.removeAttachment(name))),
     digitalSign: () => setDigitalSigning(true),
   }
 
   // ---- tool panel actions -------------------------------------------------------------------
 
   const panelActions: PanelActions = {
-    rotate: (delta) => void run('Rotating', async () => apply(await engine.rotatePages(targets(), delta))),
+    rotate: (delta) => void run(m.busy.rotating, async () => apply(await engine.rotatePages(targets(), delta))),
     remove: () =>
-      void run('Deleting pages', async () => {
+      void run(m.busy.deletingPages, async () => {
         apply(await engine.deletePages([...selected]))
         setSelected(new Set())
       }),
     extract: () =>
-      void run('Extracting', async () => {
+      void run(m.busy.extracting, async () => {
         const ids = doc!.pages.filter((p) => selected.has(p.id)).map((p) => p.id)
         download(await engine.extract(ids), `${doc!.name}-extract.pdf`)
       }),
-    insertBlank: () => void run('Adding page', async () => apply(await engine.insertBlank(currentPage()?.id ?? null))),
+    insertBlank: () => void run(m.busy.addingPage, async () => apply(await engine.insertBlank(currentPage()?.id ?? null))),
     split: (spec) =>
-      void run('Splitting', async () => {
+      void run(m.busy.splitting, async () => {
         const groups = spec === null ? doc!.pages.map((_, i) => [i]) : parseRanges(spec, doc!.pages.length)
         download(await engine.split(groups), `${doc!.name}-split.zip`, 'application/zip')
-        setStatus(`Split into ${groups.length} files`)
+        setStatus(m.status.split(groups.length))
       }),
-    stamp: (spec) => void run('Stamping', async () => apply(await engine.stamp({ ...spec, pageIds: targets() }))),
+    stamp: (spec) => void run(m.busy.stamping, async () => apply(await engine.stamp({ ...spec, pageIds: targets() }))),
     markTerms: (terms) =>
-      void run('Searching', async () => {
+      void run(m.busy.searching, async () => {
         const { count, state } = await engine.markForRedaction(terms)
         apply(state)
-        setStatus(`Marked ${count} match${count === 1 ? '' : 'es'} for redaction`)
+        setStatus(m.status.marked(count))
       }),
     markPatterns: (patterns) =>
-      void run('Searching', async () => {
+      void run(m.busy.searching, async () => {
         let total = 0
         for (const p of patterns) {
           const { count, state } = await engine.markPattern(p)
           total += count
           apply(state)
         }
-        setStatus(`Marked ${total} match${total === 1 ? '' : 'es'} for redaction`)
+        setStatus(m.status.marked(total))
       }),
     applyRedactions: () =>
-      void run('Redacting', async () => {
+      void run(m.busy.redacting, async () => {
         const { count, state } = await engine.applyRedactions()
         apply(state)
-        setStatus(`Redacted content on ${count} page${count === 1 ? '' : 's'}`)
+        setStatus(m.status.redacted(count))
       }),
-    flatten: (annots, widgets) => void run('Flattening', async () => apply(await engine.flatten(annots, widgets))),
-    exportImages: () => void run('Rendering images', async () => download(await engine.exportImages(2), `${doc!.name}-images.zip`, 'application/zip')),
-    exportText: () => void run('Extracting text', async () => download(await engine.exportText(), `${doc!.name}.txt`, 'text/plain')),
-    exportHtml: () => void run('Converting', async () => download(await engine.exportHtml(), `${doc!.name}.html`, 'text/html')),
-    setMeta: (m) => void run('Saving properties', async () => apply(await engine.setMeta(m))),
+    flatten: (annots, widgets) => void run(m.busy.flattening, async () => apply(await engine.flatten(annots, widgets))),
+    exportImages: () => void run(m.busy.renderingImages, async () => download(await engine.exportImages(2), `${doc!.name}-images.zip`, 'application/zip')),
+    exportText: () => void run(m.busy.extractingText, async () => download(await engine.exportText(), `${doc!.name}.txt`, 'text/plain')),
+    exportHtml: () => void run(m.busy.converting, async () => download(await engine.exportHtml(), `${doc!.name}.html`, 'text/html')),
+    setMeta: (meta) => void run(m.busy.savingProperties, async () => apply(await engine.setMeta(meta))),
     pagesWithoutText: async () => (await engine.pagesWithoutText()).length,
     ocr: (scope) =>
-      void run('Starting OCR', async () => {
+      void run(m.busy.startingOcr, async () => {
         const ids = scope === 'notext' ? await engine.pagesWithoutText() : scope === 'selected' ? [...selected] : doc!.pages.map((p) => p.id)
-        if (!ids.length) return setStatus('Every page already has text')
+        if (!ids.length) return setStatus(m.status.allHaveText)
         const { recognizePages } = await import('./ocr')
-        const state = await recognizePages(ids, (done, total) => setBusy(`Recognizing text, page ${Math.min(done + 1, total)} of ${total}`))
+        const state = await recognizePages(ids, (done, total) => setBusy(m.busy.recognizing(Math.min(done + 1, total), total)))
         if (state) apply(state)
-        setStatus(state ? `Recognized text on ${ids.length} page${ids.length === 1 ? '' : 's'}` : 'No text was found')
+        setStatus(state ? m.status.recognized(ids.length) : m.status.noTextFound)
       }),
     digitalSign: () => setDigitalSigning(true),
   }
@@ -526,14 +513,14 @@ export default function App() {
   const shownColor = sel?.color ?? (group ? colors[group] : colors.draw)
   const setColor = (hex: string) => {
     if (sel && sel.type !== 'Stamp' && sel.type !== 'Redact') {
-      void run('Recoloring', async () => apply(await engine.updateAnnot(selAnnot!.pageId, sel.id, { color: rgbOf(hex) })))
+      void run(m.busy.recoloring, async () => apply(await engine.updateAnnot(selAnnot!.pageId, sel.id, { color: rgbOf(hex) })))
     } else {
       setColors({ ...colors, [group ?? 'draw']: hex })
     }
   }
 
-  const undo = () => doc?.canUndo && void run('Undoing', async () => apply(await engine.undo()))
-  const redo = () => doc?.canRedo && void run('Redoing', async () => apply(await engine.redo()))
+  const undo = () => doc?.canUndo && void run(m.busy.undoing, async () => apply(await engine.undo()))
+  const redo = () => doc?.canRedo && void run(m.busy.redoing, async () => apply(await engine.redo()))
   const zoomBy = (d: number) => setZoom((z) => Math.min(5, Math.max(0.25, +(z + d).toFixed(2))))
   /** Zoom so the widest page fills the view, capped so small pages don't balloon. */
   const fitWidth = (d = docRef.current) => {
@@ -547,43 +534,43 @@ export default function App() {
 
   const has = !!doc
   const commands: Command[] = [
-    { id: 'open', name: 'Open file', icon: FolderOpen, hotkey: mod('O'), run: () => openRef.current!.click() },
-    { id: 'new', name: 'Create new blank PDF', icon: FilePlus2, run: () => void run('Creating', async () => apply(await engine.newBlank())) },
-    { id: 'merge', name: 'Merge files into this document', icon: Combine, enabled: has, run: () => addRef.current!.click() },
-    { id: 'save', name: 'Save a copy', icon: Download, hotkey: mod('S'), enabled: has, run: () => void save() },
-    { id: 'close', name: 'Close document', icon: X, enabled: has, run: closeDoc },
-    { id: 'undo', name: 'Undo', icon: Undo2, hotkey: mod('Z'), enabled: !!doc?.canUndo, run: undo },
-    { id: 'redo', name: 'Redo', icon: Redo2, hotkey: mod('Y'), enabled: !!doc?.canRedo, run: redo },
-    { id: 'find', name: 'Find in document', icon: Search, hotkey: mod('F'), enabled: has, run: openFind },
-    { id: 'zoom-in', name: 'Zoom in', icon: ZoomIn, hotkey: mod('='), enabled: has, run: () => zoomBy(0.25) },
-    { id: 'zoom-out', name: 'Zoom out', icon: ZoomOut, hotkey: mod('-'), enabled: has, run: () => zoomBy(-0.25) },
-    { id: 'zoom-fit', name: 'Fit page width', enabled: has, run: () => fitWidth() },
-    { id: 'zoom-actual', name: 'Actual size', enabled: has, run: () => setZoom(1) },
-    { id: 'left', name: 'Toggle left sidebar', icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
-    { id: 'right', name: 'Toggle right sidebar', icon: PanelRight, enabled: has, run: () => setRightOpen((o) => !o) },
+    { id: 'open', name: m.actions.openFile, icon: FolderOpen, hotkey: mod('O'), run: () => openRef.current!.click() },
+    { id: 'new', name: m.actions.newBlank, icon: FilePlus2, run: () => void run(m.busy.creating, async () => apply(await engine.newBlank())) },
+    { id: 'merge', name: m.actions.merge, icon: Combine, enabled: has, run: () => addRef.current!.click() },
+    { id: 'save', name: m.actions.saveCopy, icon: Download, hotkey: mod('S'), enabled: has, run: () => void save() },
+    { id: 'close', name: m.actions.closeDocument, icon: X, enabled: has, run: closeDoc },
+    { id: 'undo', name: m.actions.undo, icon: Undo2, hotkey: mod('Z'), enabled: !!doc?.canUndo, run: undo },
+    { id: 'redo', name: m.actions.redo, icon: Redo2, hotkey: mod('Y'), enabled: !!doc?.canRedo, run: redo },
+    { id: 'find', name: m.actions.findInDocument, icon: Search, hotkey: mod('F'), enabled: has, run: openFind },
+    { id: 'zoom-in', name: m.actions.zoomIn, icon: ZoomIn, hotkey: mod('='), enabled: has, run: () => zoomBy(0.25) },
+    { id: 'zoom-out', name: m.actions.zoomOut, icon: ZoomOut, hotkey: mod('-'), enabled: has, run: () => zoomBy(-0.25) },
+    { id: 'zoom-fit', name: m.actions.fitWidth, enabled: has, run: () => fitWidth() },
+    { id: 'zoom-actual', name: m.actions.actualSize, enabled: has, run: () => setZoom(1) },
+    { id: 'left', name: m.actions.toggleLeft, icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
+    { id: 'right', name: m.actions.toggleRight, icon: PanelRight, enabled: has, run: () => setRightOpen((o) => !o) },
     ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures'] as SideTab[]).map((t) => ({
-      id: `show-${t}`, name: `Show ${t}`, enabled: has, run: () => { setLeftOpen(true); setTab(t) },
+      id: `show-${t}`, name: m.actions.showPanel[t], enabled: has, run: () => { setLeftOpen(true); setTab(t) },
     })),
-    ...ALL_TOOLS.map((t) => ({ id: `tool-${t.id}`, name: `Tool: ${t.name}`, icon: t.Icon, enabled: has, run: () => setTool(t.id) })),
-    { id: 'sign', name: 'Add signature image', icon: Signature, enabled: has, run: () => setSigning(true) },
-    { id: 'digital-sign', name: 'Sign with a digital ID', icon: BadgeCheck, enabled: has, run: () => setDigitalSigning(true) },
-    { id: 'image', name: 'Place image', icon: ImagePlus, enabled: has, run: () => imageRef.current!.click() },
-    { id: 'ocr', name: 'Recognize text on pages without text', icon: ScanText, enabled: has, run: () => panelActions.ocr('notext') },
-    { id: 'rotate-r', name: 'Rotate pages clockwise', enabled: has, run: () => panelActions.rotate(90) },
-    { id: 'rotate-l', name: 'Rotate pages counterclockwise', enabled: has, run: () => panelActions.rotate(270) },
-    { id: 'blank', name: 'Insert blank page', enabled: has, run: panelActions.insertBlank },
-    { id: 'delete-pages', name: 'Delete selected pages', icon: Trash2, enabled: has && selected.size > 0, run: panelActions.remove },
-    { id: 'extract', name: 'Extract selected pages', enabled: has && selected.size > 0, run: panelActions.extract },
-    { id: 'split', name: 'Split into single pages', enabled: has, run: () => panelActions.split(null) },
-    ...Object.entries(STAMP_PRESETS).map(([k, spec]) => ({ id: `stamp-${k}`, name: `Add ${k}`, enabled: has, run: () => panelActions.stamp(spec) })),
-    { id: 'apply-redactions', name: 'Apply redactions', icon: EyeOff, enabled: has, run: panelActions.applyRedactions },
-    { id: 'flatten-form', name: 'Flatten form fields', enabled: has, run: () => panelActions.flatten(false, true) },
-    { id: 'flatten-comments', name: 'Flatten comments and markup', enabled: has, run: () => panelActions.flatten(true, false) },
-    { id: 'export-png', name: 'Export pages as PNG images', enabled: has, run: panelActions.exportImages },
-    { id: 'export-text', name: 'Export text', enabled: has, run: panelActions.exportText },
-    { id: 'export-html', name: 'Export HTML', enabled: has, run: panelActions.exportHtml },
-    { id: 'settings', name: 'Open settings', icon: SettingsIcon, hotkey: mod(','), run: () => setSettingsOpen(true) },
-    { id: 'theme', name: 'Toggle light and dark mode', run: () => setSettings({ ...settings, theme: dark ? 'light' : 'dark' }) },
+    ...ALL_TOOLS.map((t) => ({ id: `tool-${t.id}`, name: m.actions.tool(t.name), icon: t.Icon, enabled: has, run: () => setTool(t.id) })),
+    { id: 'sign', name: m.actions.signImage, icon: Signature, enabled: has, run: () => setSigning(true) },
+    { id: 'digital-sign', name: m.actions.digitalSign, icon: BadgeCheck, enabled: has, run: () => setDigitalSigning(true) },
+    { id: 'image', name: m.actions.placeImage, icon: ImagePlus, enabled: has, run: () => imageRef.current!.click() },
+    { id: 'ocr', name: m.actions.ocrNoText, icon: ScanText, enabled: has, run: () => panelActions.ocr('notext') },
+    { id: 'rotate-r', name: m.actions.rotateCw, enabled: has, run: () => panelActions.rotate(90) },
+    { id: 'rotate-l', name: m.actions.rotateCcw, enabled: has, run: () => panelActions.rotate(270) },
+    { id: 'blank', name: m.actions.insertBlank, enabled: has, run: panelActions.insertBlank },
+    { id: 'delete-pages', name: m.actions.deletePages, icon: Trash2, enabled: has && selected.size > 0, run: panelActions.remove },
+    { id: 'extract', name: m.actions.extractPages, enabled: has && selected.size > 0, run: panelActions.extract },
+    { id: 'split', name: m.actions.splitPages, enabled: has, run: () => panelActions.split(null) },
+    ...STAMP_PRESETS.map(([name, spec], i) => ({ id: `stamp-${i}`, name, enabled: has, run: () => panelActions.stamp(spec) })),
+    { id: 'apply-redactions', name: m.actions.applyRedactions, icon: EyeOff, enabled: has, run: panelActions.applyRedactions },
+    { id: 'flatten-form', name: m.actions.flattenForm, enabled: has, run: () => panelActions.flatten(false, true) },
+    { id: 'flatten-comments', name: m.actions.flattenComments, enabled: has, run: () => panelActions.flatten(true, false) },
+    { id: 'export-png', name: m.actions.exportPng, enabled: has, run: panelActions.exportImages },
+    { id: 'export-text', name: m.actions.exportText, enabled: has, run: panelActions.exportText },
+    { id: 'export-html', name: m.actions.exportHtml, enabled: has, run: panelActions.exportHtml },
+    { id: 'settings', name: m.actions.openSettings, icon: SettingsIcon, hotkey: mod(','), run: () => setSettingsOpen(true) },
+    { id: 'theme', name: m.actions.toggleTheme, run: () => setSettings({ ...settings, theme: dark ? 'light' : 'dark' }) },
   ]
 
   // ---- keyboard ------------------------------------------------------------------------------
@@ -618,7 +605,7 @@ export default function App() {
       return
     } else if (modKey && k === 'c' && textSel) {
       void navigator.clipboard.writeText(textSel.text)
-      setStatus('Copied')
+      setStatus(m.status.copied)
     } else if (modKey && k === 'z') {
       e.preventDefault()
       e.shiftKey ? redo() : undo()
@@ -648,7 +635,7 @@ export default function App() {
   }
   const accept = 'application/pdf,image/*,.docx,.xlsx,.pptx,.epub,.html,.htm,.txt,.cbz,.fb2,.mobi'
   const IconButton = ({ Icon, label, hotkey, onClick, disabled, active }: { Icon: Icon; label: string; hotkey?: string; onClick: () => void; disabled?: boolean; active?: boolean }) => (
-    <button type="button" className={`clickable-icon${active ? ' is-active' : ''}`} aria-label={label} title={hotkey ? `${label} (${hotkey})` : label} disabled={disabled} onClick={onClick}>
+    <button type="button" className={`clickable-icon${active ? ' is-active' : ''}`} aria-label={label} title={hotkey ? m.actions.withHotkey(label, hotkey) : label} disabled={disabled} onClick={onClick}>
       <Icon size={18} />
     </button>
   )
@@ -670,20 +657,20 @@ export default function App() {
       <input ref={imageRef} type="file" hidden accept="image/*"
         onChange={picked(async ([f]) => { if (f) { const { png, aspect } = await imageToPng(f); placeImage(png, aspect) } })} />
       <input ref={attachRef} type="file" hidden
-        onChange={picked(([f]) => f && void run('Attaching', async () => apply(await engine.attach(f.name, new Uint8Array(await f.arrayBuffer()), f.type || 'application/octet-stream'))))} />
+        onChange={picked(([f]) => f && void run(m.busy.attaching, async () => apply(await engine.attach(f.name, new Uint8Array(await f.arrayBuffer()), f.type || 'application/octet-stream'))))} />
 
-      <nav className="ribbon" aria-label="Ribbon">
-        <IconButton Icon={PanelLeft} label="Toggle left sidebar" disabled={!doc} onClick={() => setLeftOpen((o) => !o)} />
-        <IconButton Icon={FolderOpen} label="Open file" hotkey={mod('O')} onClick={() => openRef.current!.click()} />
-        <IconButton Icon={FilePlus2} label="Create new blank PDF" onClick={() => run('Creating', async () => apply(await engine.newBlank()))} />
-        <IconButton Icon={Combine} label="Merge files into this document" disabled={!doc} onClick={() => addRef.current!.click()} />
-        <IconButton Icon={ScanText} label="Recognize text (OCR)" disabled={!doc} onClick={() => panelActions.ocr('notext')} />
-        <IconButton Icon={Signature} label="Add signature image" disabled={!doc} onClick={() => setSigning(true)} />
-        <IconButton Icon={BadgeCheck} label="Sign with a digital ID" disabled={!doc} onClick={() => setDigitalSigning(true)} />
-        <IconButton Icon={ImagePlus} label="Place image" disabled={!doc} onClick={() => imageRef.current!.click()} />
-        <IconButton Icon={SquareTerminal} label="Open command palette" hotkey={mod('P')} onClick={() => setPalette(true)} />
+      <nav className="ribbon" aria-label={m.workspace.ribbon}>
+        <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} onClick={() => setLeftOpen((o) => !o)} />
+        <IconButton Icon={FolderOpen} label={m.actions.openFile} hotkey={mod('O')} onClick={() => openRef.current!.click()} />
+        <IconButton Icon={FilePlus2} label={m.actions.newBlank} onClick={() => run(m.busy.creating, async () => apply(await engine.newBlank()))} />
+        <IconButton Icon={Combine} label={m.actions.merge} disabled={!doc} onClick={() => addRef.current!.click()} />
+        <IconButton Icon={ScanText} label={m.actions.ocr} disabled={!doc} onClick={() => panelActions.ocr('notext')} />
+        <IconButton Icon={Signature} label={m.actions.signImage} disabled={!doc} onClick={() => setSigning(true)} />
+        <IconButton Icon={BadgeCheck} label={m.actions.digitalSign} disabled={!doc} onClick={() => setDigitalSigning(true)} />
+        <IconButton Icon={ImagePlus} label={m.actions.placeImage} disabled={!doc} onClick={() => imageRef.current!.click()} />
+        <IconButton Icon={SquareTerminal} label={m.actions.commandPalette} hotkey={mod('P')} onClick={() => setPalette(true)} />
         <span className="spacer" />
-        <IconButton Icon={SettingsIcon} label="Settings" hotkey={mod(',')} onClick={() => setSettingsOpen(true)} />
+        <IconButton Icon={SettingsIcon} label={m.actions.settings} hotkey={mod(',')} onClick={() => setSettingsOpen(true)} />
       </nav>
 
       {doc && leftOpen && (
@@ -699,26 +686,26 @@ export default function App() {
             <div className="tab" title={doc.name}>
               <FileText size={15} className="faint" />
               <span className="label">{doc.name}</span>
-              <button className="clickable-icon" aria-label="Close document" title="Close" onClick={closeDoc}><X size={14} /></button>
+              <button className="clickable-icon" aria-label={m.actions.closeDocument} title={m.actions.close} onClick={closeDoc}><X size={14} /></button>
             </div>
           )}
           <span className="spacer" />
-          {doc && <IconButton Icon={PanelRight} label="Toggle right sidebar" onClick={() => setRightOpen((o) => !o)} />}
+          {doc && <IconButton Icon={PanelRight} label={m.actions.toggleRight} onClick={() => setRightOpen((o) => !o)} />}
         </div>
 
         {doc && (
           <div className="view-header">
-            <IconButton Icon={Undo2} label="Undo" hotkey={mod('Z')} disabled={!doc.canUndo} onClick={undo} />
-            <IconButton Icon={Redo2} label="Redo" hotkey={mod('Y')} disabled={!doc.canRedo} onClick={redo} />
+            <IconButton Icon={Undo2} label={m.actions.undo} hotkey={mod('Z')} disabled={!doc.canUndo} onClick={undo} />
+            <IconButton Icon={Redo2} label={m.actions.redo} hotkey={mod('Y')} disabled={!doc.canRedo} onClick={redo} />
             <div className="view-title">
               <b>{doc.name}</b>
-              <span className="faint tnum">{'  '}Page {Math.min(pageIndex + 1, doc.pages.length)} of {doc.pages.length}</span>
+              <span className="faint tnum">{'  '}{m.workspace.pageOf(Math.min(pageIndex + 1, doc.pages.length), doc.pages.length)}</span>
             </div>
             <div className="view-actions">
               {findOpen ? (
                 <div className="find-bar" role="search">
                   <input
-                    ref={findRef} placeholder="Find..." aria-label="Find in document" value={query} onChange={(e) => setQuery(e.target.value)}
+                    ref={findRef} placeholder={m.workspace.findPlaceholder} aria-label={m.actions.findInDocument} value={query} onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') { setFindOpen(false); setHits(null) }
                       if (e.key !== 'Enter') return
@@ -728,19 +715,19 @@ export default function App() {
                       else void find(query)
                     }}
                   />
-                  <span className="find-count tnum">{hits ? (hits.length ? `${hitIndex + 1}/${hits.length}` : 'None') : ''}</span>
-                  <IconButton Icon={ChevronUp} label="Previous match" disabled={!hits?.length} onClick={() => stepHit(-1)} />
-                  <IconButton Icon={ChevronDown} label="Next match" disabled={!hits?.length} onClick={() => stepHit(1)} />
-                  <IconButton Icon={X} label="Close find" onClick={() => { setFindOpen(false); setHits(null) }} />
+                  <span className="find-count tnum">{hits ? (hits.length ? `${hitIndex + 1}/${hits.length}` : m.workspace.noMatches) : ''}</span>
+                  <IconButton Icon={ChevronUp} label={m.actions.previousMatch} disabled={!hits?.length} onClick={() => stepHit(-1)} />
+                  <IconButton Icon={ChevronDown} label={m.actions.nextMatch} disabled={!hits?.length} onClick={() => stepHit(1)} />
+                  <IconButton Icon={X} label={m.actions.closeFind} onClick={() => { setFindOpen(false); setHits(null) }} />
                 </div>
               ) : (
-                <IconButton Icon={Search} label="Find" hotkey={mod('F')} onClick={openFind} />
+                <IconButton Icon={Search} label={m.actions.find} hotkey={mod('F')} onClick={openFind} />
               )}
-              <IconButton Icon={ZoomOut} label="Zoom out" hotkey={mod('-')} onClick={() => zoomBy(-0.25)} />
-              <button className="clickable-icon zoom-label tnum" title="Fit page width" onClick={() => fitWidth()}>{Math.round(zoom * 100)}%</button>
-              <IconButton Icon={ZoomIn} label="Zoom in" hotkey={mod('=')} onClick={() => zoomBy(0.25)} />
-              <button className="cta" style={{ marginLeft: 6, height: 28 }} title={`Save a copy (${mod('S')})`} onClick={save}>
-                <Download size={15} />Save
+              <IconButton Icon={ZoomOut} label={m.actions.zoomOut} hotkey={mod('-')} onClick={() => zoomBy(-0.25)} />
+              <button className="clickable-icon zoom-label tnum" title={m.actions.fitWidth} onClick={() => fitWidth()}>{Math.round(zoom * 100)}%</button>
+              <IconButton Icon={ZoomIn} label={m.actions.zoomIn} hotkey={mod('=')} onClick={() => zoomBy(0.25)} />
+              <button className="cta" style={{ marginLeft: 6, height: 28 }} title={m.actions.withHotkey(m.actions.saveCopy, mod('S'))} onClick={save}>
+                <Download size={15} />{m.actions.save}
               </button>
             </div>
           </div>
@@ -762,15 +749,15 @@ export default function App() {
 
               {textSel && (
                 <div className="selbar">
-                  <button onClick={() => { void navigator.clipboard.writeText(textSel.text); setStatus('Copied'); setTextSel(null) }}>Copy</button>
-                  <button onClick={() => markup('Highlight')}>Highlight</button>
-                  <button onClick={() => markup('Underline')}>Underline</button>
-                  <button onClick={() => markup('StrikeOut')}>Strikethrough</button>
-                  <button onClick={() => markup('Redact')}>Mark for redaction</button>
+                  <button onClick={() => { void navigator.clipboard.writeText(textSel.text); setStatus(m.status.copied); setTextSel(null) }}>{m.workspace.copy}</button>
+                  <button onClick={() => markup('Highlight')}>{m.tools.highlight.name}</button>
+                  <button onClick={() => markup('Underline')}>{m.tools.underline.name}</button>
+                  <button onClick={() => markup('StrikeOut')}>{m.tools.strike.name}</button>
+                  <button onClick={() => markup('Redact')}>{m.workspace.markForRedaction}</button>
                 </div>
               )}
 
-              <div className="dock" role="toolbar" aria-label="Tools" onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
+              <div className="dock" role="toolbar" aria-label={m.workspace.tools} onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
                 {TOOLS.map((g, gi) => (
                   <span key={gi} style={{ display: 'contents' }}>
                     {gi > 0 && <span className="divider" />}
@@ -785,18 +772,18 @@ export default function App() {
                   </span>
                 ))}
                 <span className="divider" />
-                <input className="color-input" type="color" value={shownColor} title={sel ? 'Color of the selected annotation' : 'Color for new markup'} onChange={(e) => setColor(e.target.value)} />
-                <select value={strokeWidth} title="Line width" onChange={(e) => setStrokeWidth(Number(e.target.value))}>
-                  {[1, 2, 3, 5, 8].map((w) => <option key={w} value={w}>{w} pt</option>)}
+                <input className="color-input" type="color" value={shownColor} title={sel ? m.workspace.selectedColor : m.workspace.newColor} aria-label={sel ? m.workspace.selectedColor : m.workspace.newColor} onChange={(e) => setColor(e.target.value)} />
+                <select value={strokeWidth} title={m.workspace.lineWidth} aria-label={m.workspace.lineWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))}>
+                  {[1, 2, 3, 5, 8].map((w) => <option key={w} value={w}>{m.workspace.points(w)}</option>)}
                 </select>
                 {sel?.type === 'FreeText' && (
-                  <input type="number" min={4} max={200} title="Font size" value={sel.fontSize ?? 12}
-                    onChange={(e) => { const fontSize = Number(e.target.value); if (fontSize >= 4) void run('Resizing text', async () => apply(await engine.updateAnnot(selAnnot!.pageId, sel.id, { fontSize }))) }} />
+                  <input type="number" min={4} max={200} title={m.workspace.fontSize} aria-label={m.workspace.fontSize} value={sel.fontSize ?? 12}
+                    onChange={(e) => { const fontSize = Number(e.target.value); if (fontSize >= 4) void run(m.busy.resizingText, async () => apply(await engine.updateAnnot(selAnnot!.pageId, sel.id, { fontSize }))) }} />
                 )}
                 {sel && (
                   <>
                     <span className="divider" />
-                    <IconButton Icon={Trash2} label="Delete annotation" hotkey="Del" onClick={() => sideActions.deleteAnnot(selAnnot!.pageId, sel.id)} />
+                    <IconButton Icon={Trash2} label={m.actions.deleteAnnotation} hotkey="Del" onClick={() => sideActions.deleteAnnot(selAnnot!.pageId, sel.id)} />
                   </>
                 )}
               </div>
@@ -804,14 +791,11 @@ export default function App() {
           ) : (
             <div className="empty-state">
               <div className="empty-state-inner">
-                <div className="empty-state-title">No file is open</div>
-                <button className="empty-state-action" onClick={() => openRef.current!.click()}>Open a file<kbd>{mod('O')}</kbd></button>
-                <button className="empty-state-action" onClick={() => run('Creating', async () => apply(await engine.newBlank()))}>Create a blank PDF</button>
-                <button className="empty-state-action" onClick={() => setPalette(true)}>Open command palette<kbd>{mod('P')}</kbd></button>
-                <p className="empty-state-note">
-                  Opens PDFs, images, Word, Excel, PowerPoint, EPUB, HTML and text. Drop several files to combine them. Everything stays on
-                  this device.
-                </p>
+                <div className="empty-state-title">{m.workspace.emptyTitle}</div>
+                <button className="empty-state-action" onClick={() => openRef.current!.click()}>{m.workspace.emptyOpen}<kbd>{mod('O')}</kbd></button>
+                <button className="empty-state-action" onClick={() => run(m.busy.creating, async () => apply(await engine.newBlank()))}>{m.workspace.emptyBlank}</button>
+                <button className="empty-state-action" onClick={() => setPalette(true)}>{m.actions.commandPalette}<kbd>{mod('P')}</kbd></button>
+                <p className="empty-state-note">{m.workspace.emptyNote}</p>
               </div>
             </div>
           )}
@@ -823,16 +807,16 @@ export default function App() {
 
       <div className="status-bar">
         {busy && <span className="status-item"><Loader2 size={13} className="spin" />{busy}</span>}
-        {!busy && status && <span className={`status-item${status.startsWith('Error') ? ' error' : ''}`}>{status}</span>}
-        {doc?.encrypted && <span className="status-item" title="Password protected"><Lock size={13} />Protected</span>}
+        {!busy && status && <span className={`status-item${status === statusError ? ' error' : ''}`}>{status}</span>}
+        {doc?.encrypted && <span className="status-item" title={m.status.passwordProtected}><Lock size={13} />{m.status.protected}</span>}
         {doc && doc.signatures.length > 0 && (
-          <span className={`status-item ${signedOk ? 'ok' : 'error'}`} title="Digital signatures">
-            {signedOk ? <ShieldCheck size={13} /> : <ShieldAlert size={13} />}{signedOk ? 'Signed' : 'Signature problem'}
+          <span className={`status-item ${signedOk ? 'ok' : 'error'}`} title={m.status.signatures}>
+            {signedOk ? <ShieldCheck size={13} /> : <ShieldAlert size={13} />}{signedOk ? m.status.signedOk : m.status.signatureProblem}
           </span>
         )}
         {doc && (
           <span className="status-item tnum">
-            {doc.pages.length} page{doc.pages.length === 1 ? '' : 's'}{selected.size ? `, ${selected.size} selected` : ''}
+            {m.status.pages(doc.pages.length, selected.size)}
           </span>
         )}
       </div>
@@ -852,7 +836,7 @@ export default function App() {
               setDigitalSigning(false)
               setLeftOpen(true)
               setTab('signatures')
-              setStatus(`Signed and saved ${doc.name}-signed.pdf`)
+              setStatus(m.status.signed(`${doc.name}-signed.pdf`))
             }}
           />
         )

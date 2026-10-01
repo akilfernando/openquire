@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
+import { m } from '../i18n'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -10,13 +11,13 @@ export interface Settings {
   author: string
 }
 
-export const ACCENTS: { name: string; hue: number }[] = [
-  { name: 'Amber', hue: 32 },
-  { name: 'Violet', hue: 258 },
-  { name: 'Blue', hue: 212 },
-  { name: 'Teal', hue: 172 },
-  { name: 'Green', hue: 140 },
-  { name: 'Rose', hue: 340 },
+export const ACCENTS: { key: string; hue: number }[] = [
+  { key: 'amber', hue: 32 },
+  { key: 'violet', hue: 258 },
+  { key: 'blue', hue: 212 },
+  { key: 'teal', hue: 172 },
+  { key: 'green', hue: 140 },
+  { key: 'rose', hue: 340 },
 ]
 
 type Tab = 'appearance' | 'comments' | 'about'
@@ -44,15 +45,15 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   useFocusTrap(ref)
   const set = (p: Partial<Settings>) => onChange({ ...settings, ...p })
-  const tabs: [Tab, string][] = [['appearance', 'Appearance'], ['comments', 'Comments'], ['about', 'About']]
+  const tabs = Object.entries(m.settings.tabs) as [Tab, string][]
 
   return (
     <div className="modal-container" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <div className="modal-bg" onPointerDown={onClose} />
-      <div ref={ref} className="modal settings" role="dialog" aria-modal="true" aria-label="Settings">
-        <button className="clickable-icon modal-close" aria-label="Close" onClick={onClose}><X size={18} /></button>
+      <div ref={ref} className="modal settings" role="dialog" aria-modal="true" aria-label={m.settings.label}>
+        <button className="clickable-icon modal-close" aria-label={m.actions.close} onClick={onClose}><X size={18} /></button>
         <nav className="settings-nav">
-          <div className="pane-heading">Options</div>
+          <div className="pane-heading">{m.settings.options}</div>
           {tabs.map(([k, label]) => (
             <button key={k} className={tab === k ? 'is-active' : ''} onClick={() => setTab(k)}>{label}</button>
           ))}
@@ -60,19 +61,19 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
         <div className="settings-content">
           {tab === 'appearance' && (
             <>
-              <h2>Appearance</h2>
-              <Item name="Base color scheme" desc="Choose a light or dark theme, or follow your system.">
-                <select value={settings.theme} onChange={(e) => set({ theme: e.target.value as ThemeSetting })}>
-                  <option value="system">Adapt to system</option>
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
+              <h2>{m.settings.tabs.appearance}</h2>
+              <Item name={m.settings.scheme} desc={m.settings.schemeDesc}>
+                <select aria-label={m.settings.scheme} value={settings.theme} onChange={(e) => set({ theme: e.target.value as ThemeSetting })}>
+                  <option value="system">{m.settings.schemes.system}</option>
+                  <option value="dark">{m.settings.schemes.dark}</option>
+                  <option value="light">{m.settings.schemes.light}</option>
                 </select>
               </Item>
-              <Item name="Accent color" desc="Used for the active tool, selections, links and primary buttons.">
+              <Item name={m.settings.accent} desc={m.settings.accentDesc}>
                 <div className="accent-swatches">
                   {ACCENTS.map((a) => (
                     <button
-                      key={a.hue} title={a.name} aria-label={a.name}
+                      key={a.hue} title={m.settings.accents[a.key]} aria-label={m.settings.accents[a.key]} aria-pressed={settings.accentHue === a.hue}
                       className={settings.accentHue === a.hue ? 'is-active' : ''}
                       style={{ background: `hsl(${a.hue}, 88%, 60%)` }}
                       onClick={() => set({ accentHue: a.hue })}
@@ -84,10 +85,10 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
           )}
           {tab === 'comments' && (
             <>
-              <h2>Comments</h2>
-              <Item name="Author name" desc="Shown on the comments, markup and replies you add.">
+              <h2>{m.settings.tabs.comments}</h2>
+              <Item name={m.settings.author} desc={m.settings.authorDesc}>
                 <input
-                  defaultValue={settings.author} placeholder="OpenQuire user"
+                  defaultValue={settings.author} placeholder={m.settings.authorPlaceholder} aria-label={m.settings.author}
                   onBlur={(e) => e.target.value.trim() !== settings.author && set({ author: e.target.value.trim() })}
                 />
               </Item>
@@ -95,14 +96,14 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
           )}
           {tab === 'about' && (
             <>
-              <h2>About OpenQuire</h2>
-              <Item name="Version" desc="A free, open source PDF suite. Files are processed on this device and never uploaded.">
+              <h2>{m.settings.about}</h2>
+              <Item name={m.settings.version} desc={m.app.tagline}>
                 <span className="muted tnum">0.1.0</span>
               </Item>
-              <Item name="License" desc="GNU Affero General Public License v3.0 or later. Built on MuPDF, Tesseract and node-forge.">
+              <Item name={m.settings.license} desc={m.settings.licenseDesc}>
                 <span className="muted">AGPL-3.0</span>
               </Item>
-              <Item name="Source code" desc="Report issues and contribute on GitHub.">
+              <Item name={m.settings.source} desc={m.settings.sourceDesc}>
                 <a href="https://github.com/akilfernando/openquire" target="_blank" rel="noreferrer" className="row" style={{ alignItems: 'center', gap: 4 }}>
                   akilfernando/openquire <ExternalLink size={14} />
                 </a>

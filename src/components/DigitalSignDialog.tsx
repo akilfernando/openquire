@@ -3,6 +3,7 @@ import { engine } from '../engine/client'
 import type { Rect, SignRequest } from '../engine/types'
 import { download } from '../util'
 import Modal from './Modal'
+import { m } from '../i18n'
 
 type Corner = 'br' | 'bl' | 'tr' | 'tl' | 'invisible'
 
@@ -31,7 +32,7 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
   const [p12, setP12] = useState<{ name: string; bytes: Uint8Array } | null>(null)
   const [password, setPassword] = useState('')
   const [newId, setNewId] = useState({ name: '', email: '', organization: '', password: '', confirm: '' })
-  const [reason, setReason] = useState('I approve this document')
+  const [reason, setReason] = useState(m.digitalId.defaultReason)
   const [location, setLocation] = useState('')
   const [corner, setCorner] = useState<Corner>('br')
   const savedImage = (() => {
@@ -47,9 +48,9 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
 
   const createId = async () => {
     setError('')
-    if (newId.password.length < 6) return setError('Use a password of at least 6 characters.')
-    if (newId.password !== newId.confirm) return setError("The passwords don't match.")
-    setBusy('Creating your digital ID…')
+    if (newId.password.length < 6) return setError(m.digitalId.passwordTooShort)
+    if (newId.password !== newId.confirm) return setError(m.digitalId.passwordMismatch)
+    setBusy(m.digitalId.creating)
     try {
       const bytes = await engine.createDigitalId({ name: newId.name.trim(), email: newId.email.trim() || undefined, organization: newId.organization.trim() || undefined, password: newId.password })
       const fileName = `${newId.name.trim().replace(/\W+/g, '-') || 'digital-id'}.p12`
@@ -67,7 +68,7 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
   const sign = async () => {
     if (!p12) return
     setError('')
-    setBusy('Signing…')
+    setBusy(m.digitalId.signing)
     try {
       let image: Uint8Array | undefined
       if (useImage && savedImage) image = new Uint8Array(await (await fetch(savedImage)).arrayBuffer())
@@ -83,65 +84,55 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
   }
 
   return (
-    <Modal title="Sign with a digital ID" onClose={busy ? undefined : onClose} className="sign-dialog">
-        <p className="hint">
-          A certificate-based signature proves who signed and shows if the document changes afterwards. The signed PDF is
-          downloaded when you sign.{signedBefore && ' Existing signatures stay valid: your signature is added as a new revision.'}
-        </p>
+    <Modal title={m.digitalId.title} onClose={busy ? undefined : onClose} className="sign-dialog">
+        <p className="hint">{m.digitalId.intro}{signedBefore && m.digitalId.signedBefore}</p>
 
         <nav className="tabs">
-          <button className={source === 'file' ? 'is-active' : ''} onClick={() => setSource('file')}>Use my digital ID</button>
-          <button className={source === 'new' ? 'is-active' : ''} onClick={() => setSource('new')}>Create a new ID</button>
+          <button className={source === 'file' ? 'is-active' : ''} onClick={() => setSource('file')}>{m.digitalId.useMine}</button>
+          <button className={source === 'new' ? 'is-active' : ''} onClick={() => setSource('new')}>{m.digitalId.createNew}</button>
         </nav>
 
         {source === 'file' ? (
           <>
-            <label className="field"><span>Digital ID file (.p12 or .pfx)</span>
+            <label className="field"><span>{m.digitalId.file}</span>
               <input type="file" accept=".p12,.pfx,application/x-pkcs12"
                 onChange={async (e) => { const f = e.target.files?.[0]; if (f) setP12({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }) }} />
             </label>
-            {p12 && <span className="hint">Using {p12.name}</span>}
-            <label className="field"><span>Password</span>
+            {p12 && <span className="hint">{m.digitalId.using(p12.name)}</span>}
+            <label className="field"><span>{m.digitalId.password}</span>
               <input type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} />
             </label>
           </>
         ) : (
           <>
             <div className="row">
-              <label className="field"><span>Your name</span><input value={newId.name} onChange={(e) => setNewId({ ...newId, name: e.target.value })} /></label>
-              <label className="field"><span>Email</span><input type="email" value={newId.email} onChange={(e) => setNewId({ ...newId, email: e.target.value })} /></label>
+              <label className="field"><span>{m.digitalId.name}</span><input value={newId.name} onChange={(e) => setNewId({ ...newId, name: e.target.value })} /></label>
+              <label className="field"><span>{m.digitalId.email}</span><input type="email" value={newId.email} onChange={(e) => setNewId({ ...newId, email: e.target.value })} /></label>
             </div>
-            <label className="field"><span>Organization (optional)</span><input value={newId.organization} onChange={(e) => setNewId({ ...newId, organization: e.target.value })} /></label>
+            <label className="field"><span>{m.digitalId.organization}</span><input value={newId.organization} onChange={(e) => setNewId({ ...newId, organization: e.target.value })} /></label>
             <div className="row">
-              <label className="field"><span>Password</span><input type="password" autoComplete="new-password" value={newId.password} onChange={(e) => setNewId({ ...newId, password: e.target.value })} /></label>
-              <label className="field"><span>Confirm</span><input type="password" autoComplete="new-password" value={newId.confirm} onChange={(e) => setNewId({ ...newId, confirm: e.target.value })} /></label>
+              <label className="field"><span>{m.digitalId.password}</span><input type="password" autoComplete="new-password" value={newId.password} onChange={(e) => setNewId({ ...newId, password: e.target.value })} /></label>
+              <label className="field"><span>{m.digitalId.confirm}</span><input type="password" autoComplete="new-password" value={newId.confirm} onChange={(e) => setNewId({ ...newId, confirm: e.target.value })} /></label>
             </div>
-            <p className="hint">
-              Creates a self-signed ID and downloads it as a .p12 file. Keep it safe and reuse it for future signatures.
-              Readers will see your name but can't verify it with a certificate authority.
-            </p>
-            <button disabled={!newId.name.trim() || !!busy} onClick={createId}>Create &amp; download ID</button>
+            <p className="hint">{m.digitalId.createHint}</p>
+            <button disabled={!newId.name.trim() || !!busy} onClick={createId}>{m.digitalId.create}</button>
           </>
         )}
 
         <div className="row">
-          <label className="field"><span>Reason</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-          <label className="field"><span>Location</span><input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
+          <label className="field"><span>{m.digitalId.reason}</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          <label className="field"><span>{m.digitalId.location}</span><input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
         </div>
         <div className="row">
-          <label className="field"><span>Appearance</span>
+          <label className="field"><span>{m.digitalId.appearance}</span>
             <select value={corner} onChange={(e) => setCorner(e.target.value as Corner)}>
-              <option value="br">Box at bottom right of this page</option>
-              <option value="bl">Box at bottom left</option>
-              <option value="tr">Box at top right</option>
-              <option value="tl">Box at top left</option>
-              <option value="invisible">Invisible</option>
+              {(Object.entries(m.digitalId.corners) as [Corner, string][]).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
             </select>
           </label>
           {savedImage && corner !== 'invisible' && (
             <label className="check">
               <input type="checkbox" checked={useImage} onChange={(e) => setUseImage(e.target.checked)} />
-              <span>Include my handwritten signature</span>
+              <span>{m.digitalId.includeImage}</span>
             </label>
           )}
         </div>
@@ -149,8 +140,8 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
         {error && <p className="error">{error}</p>}
         <div className="row end">
           <span className="muted grow">{busy}</span>
-          <button disabled={!!busy} onClick={onClose}>Cancel</button>
-          <button className="cta" disabled={!p12 || !password || !!busy} onClick={sign}>Sign &amp; download</button>
+          <button disabled={!!busy} onClick={onClose}>{m.digitalId.cancel}</button>
+          <button className="cta" disabled={!p12 || !password || !!busy} onClick={sign}>{m.digitalId.sign}</button>
         </div>
     </Modal>
   )

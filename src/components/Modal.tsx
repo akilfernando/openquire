@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
+import { m } from '../i18n'
 
 interface Props {
   title?: string
@@ -30,7 +31,7 @@ export default function Modal({ title, onClose, className = '', children }: Prop
       <div className="modal-bg" onPointerDown={() => onClose?.()} />
       <div ref={ref} className={`modal ${className}`} role="dialog" aria-modal="true" aria-label={title}>
         {onClose && (
-          <button className="clickable-icon modal-close" aria-label="Close" onClick={onClose}>
+          <button className="clickable-icon modal-close" aria-label={m.actions.close} onClick={onClose}>
             <X size={18} />
           </button>
         )}

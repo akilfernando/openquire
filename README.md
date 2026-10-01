@@ -48,6 +48,13 @@ npm run build    # production build in dist/ (static files, host anywhere)
 
 Requires Node 20+ and a current Chrome, Edge, Firefox or Safari.
 
+## Translating
+
+All interface text lives in `src/i18n/en.ts`. To add a language, copy it (for example to `fr.ts`),
+translate every entry, and register it in `src/i18n/index.ts`. Entries with counts or names are
+functions, so each language controls its own plurals and word order, and TypeScript reports anything
+missing.
+
 ## How it works
 
 - `src/engine/core.ts` is the whole PDF engine: a class wrapping MuPDF that owns the open document.

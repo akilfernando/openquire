@@ -5,7 +5,8 @@ import {
 import { requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
 import { arrowNavigate } from '../focus'
-import { ANNOT_LABELS, kb } from '../util'
+import { kb } from '../util'
+import { m } from '../i18n'
 
 export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures'
 
@@ -112,11 +113,11 @@ function Pages({ doc, selected, actions }: Pick<Props, 'doc' | 'selected' | 'act
   }
 
   return (
-    <div className="thumbs" role="listbox" aria-label="Pages" aria-multiselectable="true" onKeyDown={onKeyDown}>
+    <div className="thumbs" role="listbox" aria-label={m.sidebar.pagesList} aria-multiselectable="true" onKeyDown={onKeyDown}>
       {doc.pages.map((p, i) => (
         <div
           key={p.id} draggable role="option" tabIndex={0} aria-selected={selected.has(p.id)}
-          aria-label={`Page ${p.label}${i === 0 ? '. Use arrow keys to move between pages and Ctrl with arrow keys to reorder' : ''}`}
+          aria-label={m.sidebar.pageOption(p.label, i === 0)}
           className={`thumb${selected.has(p.id) ? ' selected' : ''}${over === p.id ? ' over' : ''}`}
           onClick={(e) => actions.selectPage(p.id, e)}
           onDragStart={(e) => {
@@ -157,11 +158,11 @@ function Bookmarks({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
                 }}
               />
             ) : (
-              <span className="label">{b.title || 'Untitled'}</span>
+              <span className="label">{b.title || m.sidebar.untitled}</span>
             )}
             <span className="faint small tnum">{b.page >= 0 ? b.page + 1 : ''}</span>
-            <button className="clickable-icon" aria-label="Rename" title="Rename" onClick={(e) => { e.stopPropagation(); setRenaming(key) }}><Pencil size={14} /></button>
-            <button className="clickable-icon" aria-label="Delete" title="Delete" onClick={(e) => { e.stopPropagation(); actions.deleteBookmark(p) }}><X size={14} /></button>
+            <button className="clickable-icon" aria-label={m.sidebar.rename} title={m.sidebar.rename} onClick={(e) => { e.stopPropagation(); setRenaming(key) }}><Pencil size={14} /></button>
+            <button className="clickable-icon" aria-label={m.sidebar.delete} title={m.sidebar.delete} onClick={(e) => { e.stopPropagation(); actions.deleteBookmark(p) }}><X size={14} /></button>
           </div>
           {b.children.length > 0 && <ul>{tree(b.children, p)}</ul>}
         </li>
@@ -170,10 +171,10 @@ function Bookmarks({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   return (
     <div className="pane">
       <form className="row" onSubmit={(e) => { e.preventDefault(); if (title.trim()) { actions.addBookmark(title.trim()); setTitle('') } }}>
-        <input placeholder="Bookmark this page..." value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
-        <button className="clickable-icon" aria-label="Add bookmark" title="Add bookmark" style={{ flex: 'none' }}><Plus size={18} /></button>
+        <input placeholder={m.sidebar.bookmarkPlaceholder} aria-label={m.sidebar.bookmarkPlaceholder} value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
+        <button className="clickable-icon" aria-label={m.sidebar.addBookmark} title={m.sidebar.addBookmark} style={{ flex: 'none' }}><Plus size={18} /></button>
       </form>
-      {doc.outline.length ? <ul className="tree">{tree(doc.outline, [])}</ul> : <div className="empty-note">No bookmarks yet.</div>}
+      {doc.outline.length ? <ul className="tree">{tree(doc.outline, [])}</ul> : <div className="empty-note">{m.sidebar.noBookmarks}</div>}
     </div>
   )
 }
@@ -193,25 +194,25 @@ function Comment({ a, pageId, replies, focused, selected, actions }: {
     <div className={`comment${selected ? ' selected' : ''}`}>
       <div className="comment-head" onClick={() => actions.focusAnnot(pageId, a.id)}>
         <i className="swatch" style={{ background: a.color ?? 'var(--text-faint)' }} />
-        <b>{ANNOT_LABELS[a.type] ?? a.type}</b>
+        <b>{m.annotations[a.type] ?? a.type}</b>
         <span className="muted">{a.author}</span>
-        <button className="clickable-icon" aria-label="Delete" title="Delete" onClick={(e) => { e.stopPropagation(); actions.deleteAnnot(pageId, a.id) }}>
+        <button className="clickable-icon" aria-label={m.sidebar.delete} title={m.sidebar.delete} onClick={(e) => { e.stopPropagation(); actions.deleteAnnot(pageId, a.id) }}>
           <Trash2 size={14} />
         </button>
       </div>
       <textarea
-        ref={ref} key={`${a.id}:${a.contents}`} defaultValue={a.contents} placeholder="Add a comment..." rows={a.contents ? 2 : 1}
+        ref={ref} key={`${a.id}:${a.contents}`} defaultValue={a.contents} placeholder={m.sidebar.addComment} aria-label={m.sidebar.addComment} rows={a.contents ? 2 : 1}
         onBlur={(e) => e.target.value !== a.contents && actions.editComment(pageId, a.id, e.target.value)}
       />
       <span className="faint small">{when(a.modified)}</span>
       {replies.map((r) => (
         <div key={r.id} className="reply">
           <span><b>{r.author}</b> {r.contents}</span>
-          <button className="clickable-icon" aria-label="Delete reply" title="Delete reply" onClick={() => actions.deleteAnnot(pageId, r.id)}><X size={12} /></button>
+          <button className="clickable-icon" aria-label={m.sidebar.deleteReply} title={m.sidebar.deleteReply} onClick={() => actions.deleteAnnot(pageId, r.id)}><X size={12} /></button>
         </div>
       ))}
       <form onSubmit={(e) => { e.preventDefault(); if (reply.trim()) { actions.reply(pageId, a.id, reply.trim()); setReply('') } }}>
-        <input className="reply-input" placeholder="Reply..." value={reply} onChange={(e) => setReply(e.target.value)} />
+        <input className="reply-input" placeholder={m.sidebar.reply} aria-label={m.sidebar.reply} value={reply} onChange={(e) => setReply(e.target.value)} />
       </form>
     </div>
   )
@@ -227,11 +228,11 @@ function Comments({ doc, selectedAnnot, commentFocus, actions }: Pick<Props, 'do
     .filter((g) => g.items.length)
   return (
     <div className="pane">
-      <input placeholder="Filter comments..." value={filter} onChange={(e) => setFilter(e.target.value)} />
-      {!groups.length && <div className="empty-note">No comments or markup yet. Use the comment tools in the dock to add some.</div>}
+      <input placeholder={m.sidebar.filterComments} aria-label={m.sidebar.filterComments} value={filter} onChange={(e) => setFilter(e.target.value)} />
+      {!groups.length && <div className="empty-note">{m.sidebar.noComments}</div>}
       {groups.map(({ p, i, items }) => (
         <section key={p.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div className="pane-heading tnum">Page {i + 1}</div>
+          <div className="pane-heading tnum">{m.sidebar.pageHeading(i + 1)}</div>
           {items.map((a) => (
             <Comment
               key={a.id} a={a} pageId={p.id} replies={p.annots.filter((r) => r.replyTo === a.id)}
@@ -247,16 +248,16 @@ function Comments({ doc, selectedAnnot, commentFocus, actions }: Pick<Props, 'do
 function Attachments({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   return (
     <div className="pane">
-      <button onClick={actions.attach}><Plus size={16} />Attach a file</button>
-      {!doc.attachments.length && <div className="empty-note">Files embedded in the PDF appear here.</div>}
+      <button onClick={actions.attach}><Plus size={16} />{m.sidebar.attach}</button>
+      {!doc.attachments.length && <div className="empty-note">{m.sidebar.noAttachments}</div>}
       <ul className="tree">
         {doc.attachments.map((a) => (
-          <li key={a.name} className="tree-item" onClick={() => actions.saveAttachment(a.name)} title="Download">
+          <li key={a.name} className="tree-item" onClick={() => actions.saveAttachment(a.name)} title={m.sidebar.download}>
             <Paperclip size={14} />
             <span className="label">{a.name}</span>
             <span className="faint small tnum">{kb(a.size)}</span>
-            <button className="clickable-icon" aria-label="Download" title="Download"><Download size={14} /></button>
-            <button className="clickable-icon" aria-label="Remove" title="Remove" onClick={(e) => { e.stopPropagation(); actions.removeAttachment(a.name) }}><X size={14} /></button>
+            <button className="clickable-icon" aria-label={m.sidebar.download} title={m.sidebar.download}><Download size={14} /></button>
+            <button className="clickable-icon" aria-label={m.sidebar.remove} title={m.sidebar.remove} onClick={(e) => { e.stopPropagation(); actions.removeAttachment(a.name) }}><X size={14} /></button>
           </li>
         ))}
       </ul>
@@ -267,32 +268,30 @@ function Attachments({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
 function Signatures({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   return (
     <div className="pane">
-      <button onClick={actions.digitalSign}><BadgeCheck size={16} />Sign with a digital ID</button>
-      {!doc.signatures.length && <div className="empty-note">This document has no digital signatures.</div>}
+      <button onClick={actions.digitalSign}><BadgeCheck size={16} />{m.panel.signWithId}</button>
+      {!doc.signatures.length && <div className="empty-note">{m.sidebar.noSignatures}</div>}
       {doc.signatures.map((s) => (
         <div key={s.field} className={`sig ${s.valid ? 'ok' : 'bad'}`}>
           <span className="sig-status">
             {s.valid ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
-            {s.valid ? 'Valid signature' : 'Invalid signature'}
+            {s.valid ? m.sidebar.validSignature : m.sidebar.invalidSignature}
           </span>
           <span>{s.signer}{s.email ? ` <${s.email}>` : ''}</span>
-          <span className="muted small">
-            Signed {s.signedAt ? when(s.signedAt) : 'at an unknown time'}{s.reason ? `. ${s.reason}` : ''}{s.location ? `, ${s.location}` : ''}
-          </span>
+          <span className="muted small">{m.sidebar.signedAt(s.signedAt ? when(s.signedAt) : null, s.reason, s.location)}</span>
           {s.problem && <span className="error small">{s.problem}</span>}
           {s.valid && (
             <span className="faint small">
-              {s.coversWholeFile ? 'The document has not changed since it was signed.' : 'Later revisions were added after this signature, such as comments or more signatures.'}
+              {s.coversWholeFile ? m.sidebar.unchanged : m.sidebar.laterRevisions}
             </span>
           )}
           <span className="faint small">
             {s.selfSigned
-              ? "Self-signed ID: the signer's identity isn't confirmed by a certificate authority."
-              : `Issued by ${s.issuer}. Certificate trust chains and revocation aren't checked yet.`}
+              ? m.sidebar.selfSigned
+              : m.sidebar.issuedBy(s.issuer)}
           </span>
         </div>
       ))}
-      {doc.signatures.length > 0 && <p className="hint">Changes you save are appended to the file, so existing signatures stay intact.</p>}
+      {doc.signatures.length > 0 && <p className="hint">{m.sidebar.appendNote}</p>}
     </div>
   )
 }
@@ -301,20 +300,20 @@ export default function Sidebar(props: Props) {
   const { doc, tab, onTab } = props
   const comments = doc.pages.reduce((n, p) => n + p.annots.filter((a) => a.replyTo === null).length, 0)
   const tabs: { id: SideTab; label: string; Icon: typeof BookmarkIcon; count?: number }[] = [
-    { id: 'pages', label: 'Pages', Icon: GalleryVerticalEnd },
-    { id: 'bookmarks', label: 'Bookmarks', Icon: BookmarkIcon, count: doc.outline.length },
-    { id: 'comments', label: 'Comments', Icon: MessageSquare, count: comments },
-    { id: 'attachments', label: 'Attachments', Icon: Paperclip, count: doc.attachments.length },
-    { id: 'signatures', label: 'Signatures', Icon: BadgeCheck, count: doc.signatures.length },
+    { id: 'pages', label: m.sidebar.tabs.pages, Icon: GalleryVerticalEnd },
+    { id: 'bookmarks', label: m.sidebar.tabs.bookmarks, Icon: BookmarkIcon, count: doc.outline.length },
+    { id: 'comments', label: m.sidebar.tabs.comments, Icon: MessageSquare, count: comments },
+    { id: 'attachments', label: m.sidebar.tabs.attachments, Icon: Paperclip, count: doc.attachments.length },
+    { id: 'signatures', label: m.sidebar.tabs.signatures, Icon: BadgeCheck, count: doc.signatures.length },
   ]
   const current = tabs.find((t) => t.id === tab)!
   return (
     <aside className="sidebar left">
-      <div className="sidebar-header" role="tablist" aria-label="Sidebar" onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
+      <div className="sidebar-header" role="tablist" aria-label={m.sidebar.label} onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
         {tabs.map(({ id, label, Icon, count }) => (
           <button
             key={id} role="tab" aria-selected={tab === id} className={`clickable-icon${tab === id ? ' is-active' : ''}`}
-            aria-label={count ? `${label}, ${count}` : label} title={label} onClick={() => onTab(id)}
+            aria-label={count ? m.sidebar.tabWithCount(label, count) : label} title={label} onClick={() => onTab(id)}
           >
             <Icon size={18} />
             {!!count && tab !== id && <span className="badge tnum">{count > 99 ? '99+' : count}</span>}

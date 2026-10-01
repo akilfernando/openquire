@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { canvasPng } from '../util'
 import Modal from './Modal'
+import { m } from '../i18n'
 
 interface Props {
   onPlace: (png: Uint8Array, aspect: number) => void
@@ -106,23 +107,23 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
   }
 
   return (
-    <Modal title="Add your signature" onClose={onClose}>
+    <Modal title={m.signature.title} onClose={onClose}>
         {saved && (
           <div className="saved-sig">
-            <img src={saved.url} alt="Saved signature" />
-            <span className="grow">Saved on this device</span>
-            <button onClick={() => { localStorage.removeItem(SAVED); setSaved(null) }}>Forget</button>
-            <button className="cta" onClick={placeSaved}>Use</button>
+            <img src={saved.url} alt={m.signature.savedAlt} />
+            <span className="grow">{m.signature.saved}</span>
+            <button onClick={() => { localStorage.removeItem(SAVED); setSaved(null) }}>{m.signature.forget}</button>
+            <button className="cta" onClick={placeSaved}>{m.signature.use}</button>
           </div>
         )}
         <nav className="tabs">
-          {(['draw', 'type', 'upload'] as Mode[]).map((m) => (
-            <button key={m} className={mode === m ? 'is-active' : ''} onClick={() => { setMode(m); clear() }}>
-              {m[0].toUpperCase() + m.slice(1)}
+          {(['draw', 'type', 'upload'] as Mode[]).map((mode_) => (
+            <button key={mode_} className={mode === mode_ ? 'is-active' : ''} onClick={() => { setMode(mode_); clear() }}>
+              {m.signature.modes[mode_]}
             </button>
           ))}
         </nav>
-        {mode === 'type' && <input autoFocus placeholder="Type your name" value={name} onChange={(e) => setName(e.target.value)} />}
+        {mode === 'type' && <input autoFocus placeholder={m.signature.typePlaceholder} aria-label={m.signature.typePlaceholder} value={name} onChange={(e) => setName(e.target.value)} />}
         {mode === 'upload' && <input type="file" accept="image/*" onChange={(e) => void upload(e.target.files?.[0])} />}
         <canvas
           ref={ref} width={W} height={H} className={`sig-pad${mode === 'draw' ? ' drawable' : ''}`}
@@ -148,13 +149,13 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
         />
         <label className="check">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          <span>Remember on this device</span>
+          <span>{m.signature.remember}</span>
         </label>
-        <p className="hint">This places an image of your signature. To prove who signed, use Sign with a digital ID instead.</p>
+        <p className="hint">{m.signature.hint}</p>
         <div className="row end">
-          <button onClick={clear}>Clear</button>
-          <button onClick={onClose}>Cancel</button>
-          <button className="cta" disabled={empty} onClick={place}>Place on page</button>
+          <button onClick={clear}>{m.signature.clear}</button>
+          <button onClick={onClose}>{m.signature.cancel}</button>
+          <button className="cta" disabled={empty} onClick={place}>{m.signature.place}</button>
         </div>
     </Modal>
   )
