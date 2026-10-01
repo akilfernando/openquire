@@ -56,10 +56,14 @@ pub fn list(module: &str) -> Result<Vec<TokenCert>, String> {
     let p = open(module)?;
     let mut out = Vec::new();
     for slot in p.get_slots_with_token().map_err(|e| e.to_string())? {
-        let info = p.get_token_info(slot).map_err(|e| e.to_string())?;
+        // Readers can show empty or uninitialized tokens (SoftHSM always has one); skip them.
+        let Ok(info) = p.get_token_info(slot) else { continue };
+        if !info.token_initialized() {
+            continue;
+        }
         let token = info.label().trim().to_string();
         let pinpad = info.protected_authentication_path();
-        let session = p.open_ro_session(slot).map_err(|e| e.to_string())?;
+        let Ok(session) = p.open_ro_session(slot) else { continue };
         let certs = session
             .find_objects(&[Attribute::Class(ObjectClass::CERTIFICATE)])
             .map_err(|e| e.to_string())?;

@@ -47,6 +47,10 @@ const DIGESTS: Record<string, () => forge.md.MessageDigest> = {
   [pki.oids.sha512]: () => forge.md.sha512.create(),
 }
 
+// Signatures are BIT STRINGs; by default forge tries to parse their bytes as nested ASN.1, which
+// garbles the occasional signature that happens to look like valid ASN.1.
+const RAW_BITS = { decodeBitStrings: false } as unknown as boolean
+
 export const certFromDer = (bytes: string) => pki.certificateFromAsn1(asn1.fromDer(bytes))
 export const certToDer = (c: Cert) => der(pki.certificateToAsn1(c))
 export const nameOf = (c: Cert) => String(c.subject.getField('CN')?.value ?? c.subject.getField('O')?.value ?? 'Unknown')
@@ -263,12 +267,12 @@ export function ocspRequest(cert: Cert, issuer: Cert) {
 
 /** Parses and verifies an OCSP response for a certificate. */
 export function parseOcspResponse(responseDer: string, cert: Cert, issuer: Cert): OcspResult {
-  const res = children(asn1.fromDer(responseDer))
+  const res = children(asn1.fromDer(responseDer, RAW_BITS))
   const code = (res[0].value as string).charCodeAt(0)
   if (code !== 0 || !res[1]) throw new Error(`The OCSP responder returned status ${code}`)
   const bytes = children(children(res[1])[0])
   if (asn1.derToOid(bytes[0].value as string) !== OIDS.ocspBasic) throw new Error('Unsupported OCSP response type')
-  const basic = children(asn1.fromDer(bytes[1].value as string))
+  const basic = children(asn1.fromDer(bytes[1].value as string, RAW_BITS))
   const tbs = basic[0]
   const sigAlg = asn1.derToOid(children(basic[1])[0].value as string)
   const signature = (basic[2].value as string).slice(1)
@@ -321,7 +325,7 @@ export interface Crl {
 }
 
 export function parseCrl(crlDer: string): Crl {
-  const top = children(asn1.fromDer(crlDer))
+  const top = children(asn1.fromDer(crlDer, RAW_BITS))
   const tbs = top[0]
   const sigAlg = asn1.derToOid(children(top[1])[0].value as string)
   const signature = (top[2].value as string).slice(1)
