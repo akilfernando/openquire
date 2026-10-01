@@ -184,6 +184,24 @@ function toBlock(lines: TextLine[]): TextBlock {
   return { bbox, lines, text, align, leading, ...pick(first, ['size', 'font', 'bold', 'italic', 'serif', 'mono', 'color']) }
 }
 
+/** A page number in a /PageLabels style: D, r, R, a or A (none for prefix only). */
+function formatPageNumber(n: number, style: string) {
+  if (style === 'D') return String(n)
+  if (style === 'r' || style === 'R') {
+    const table: [number, string][] = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']]
+    let out = ''
+    for (const [v, s] of table) while (n >= v) { out += s; n -= v }
+    return style === 'R' ? out.toUpperCase() : out
+  }
+  if (style === 'a' || style === 'A') {
+    // a..z, then aa..zz, then aaa..zzz, as the PDF specification defines.
+    const letter = String.fromCharCode(97 + ((n - 1) % 26))
+    const out = letter.repeat(Math.floor((n - 1) / 26) + 1)
+    return style === 'A' ? out.toUpperCase() : out
+  }
+  return ''
+}
+
 const pick = <T, K extends keyof T>(o: T, keys: K[]) => Object.fromEntries(keys.map((k) => [k, o[k]])) as Pick<T, K>
 
 // ---- the engine --------------------------------------------------------------
@@ -200,6 +218,7 @@ export class Engine {
   private revs = new Map<number, number>()
   private fonts = new Map<string, mupdf.Font>()
   private stext = new Map<string, mupdf.StructuredText>()
+  private infoCache = new Map<number, PageInfo>()
 
   // ---- document lifecycle ----
 
@@ -296,6 +315,7 @@ export class Engine {
   private touch(ids: number[] | 'all') {
     if (ids === 'all') {
       this.revs.clear()
+      this.infoCache.clear()
       for (const [k, st] of this.stext) this.dropText(k, st)
       this.tick++
     } else {
@@ -406,28 +426,67 @@ export class Engine {
     return info
   }
 
-  private pageInfo(index: number): PageInfo {
+  /**
+   * Information about one page. Pages are cached by revision, so an edit only recomputes the
+   * pages it touched; labels and internal link targets depend on page order and are refreshed.
+   */
+  private pageInfo(index: number, label: string): PageInfo {
     const doc = this.d
     const id = doc.findPage(index).asIndirect()
+    const rev = this.revs.get(id) ?? this.tick
+    const cached = this.infoCache.get(id)
+    if (cached && cached.rev === rev) {
+      if (!cached.links.some((l) => l.page >= 0)) return { ...cached, label }
+      const page = doc.loadPage(index)
+      const links = this.linksOf(page)
+      page.destroy()
+      return { ...cached, links, label }
+    }
     const page = doc.loadPage(index)
     const [x0, y0, x1, y1] = page.getBounds()
     const rot = page.getObject().getInheritable('Rotate')
     const info: PageInfo = {
       id,
-      rev: this.revs.get(id) ?? this.tick,
+      rev,
       width: x1 - x0,
       height: y1 - y0,
       rotation: ((((rot.isNumber() ? rot.asNumber() : 0) % 360) + 360) % 360),
-      label: page.getLabel() || String(index + 1),
+      label,
       annots: page
         .getAnnotations()
         .map((a, i) => (a.getType() === 'Popup' || a.getType() === 'Link' ? null : this.annotInfo(a, i)))
         .filter((a): a is AnnotInfo => !!a),
       widgets: page.getWidgets().map((w, i) => this.widgetInfo(w, i)),
-      links: page.getLinks().map((l, i) => ({ index: i, rect: l.getBounds() as Rect, uri: l.getURI(), page: l.isExternal() ? -1 : doc.resolveLink(l) })),
+      links: this.linksOf(page),
     }
     page.destroy()
+    this.infoCache.set(id, info)
     return info
+  }
+
+  private linksOf(page: mupdf.PDFPage) {
+    return page.getLinks().map((l, i) => ({ index: i, rect: l.getBounds() as Rect, uri: l.getURI(), page: l.isExternal() ? -1 : this.d.resolveLink(l) }))
+  }
+
+  /** Page labels for every page, computed from the document's /PageLabels number tree. */
+  private pageLabels(count: number): string[] {
+    const nums = this.d.getTrailer().get('Root', 'PageLabels', 'Nums')
+    const ranges: { start: number; style: string; prefix: string; first: number }[] = []
+    if (nums.isArray())
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const d = nums.get(i + 1).resolve()
+        ranges.push({
+          start: nums.get(i).asNumber(),
+          style: d.get('S').isName() ? d.get('S').asName() : '',
+          prefix: d.get('P').isString() ? d.get('P').asString() : '',
+          first: d.get('St').isNumber() ? d.get('St').asNumber() : 1,
+        })
+      }
+    ranges.sort((a, b) => a.start - b.start)
+    return Array.from({ length: count }, (_, i) => {
+      const r = ranges.filter((x) => x.start <= i).at(-1)
+      return r ? r.prefix + formatPageNumber(r.first + i - r.start, r.style) : String(i + 1)
+    })
   }
 
   private outline(): Bookmark[] {
@@ -445,7 +504,11 @@ export class Engine {
     const doc = this.d
     return {
       name: this.name,
-      pages: Array.from({ length: doc.countPages() }, (_, i) => this.pageInfo(i)),
+      pages: (() => {
+        const count = doc.countPages()
+        const labels = this.pageLabels(count)
+        return Array.from({ length: count }, (_, i) => this.pageInfo(i, labels[i]))
+      })(),
       canUndo: doc.canUndo(),
       canRedo: doc.canRedo(),
       outline: this.outline(),
