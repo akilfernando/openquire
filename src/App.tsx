@@ -3,7 +3,7 @@ import {
   BadgeCheck, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
   ImagePlus, Loader2, Lock, MousePointer2, MoveUpRight, PanelLeft, PanelRight, Pencil, Redo2, ScanText, Search, Settings as SettingsIcon,
   ShieldAlert, ShieldCheck, Signature, Square, SquareTerminal, StickyNote, Strikethrough, TextCursorInput, Trash2, Type, Underline, Undo2,
-  X, ZoomIn, ZoomOut, Link2, SquareX, FormInput, Columns2, type LucideProps,
+  X, ZoomIn, ZoomOut, Link2, SquareX, FormInput, Columns2, Workflow as WorkflowIcon, Square as StopIcon, type LucideProps,
 } from 'lucide-react'
 import CommandPalette, { type Command } from './components/CommandPalette'
 import DigitalSignDialog from './components/DigitalSignDialog'
@@ -16,6 +16,9 @@ import SettingsModal, { type Settings } from './components/SettingsModal'
 import Sidebar, { type CompareInfo, type SideActions, type SideTab } from './components/Sidebar'
 import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
+import WorkflowsDialog from './components/WorkflowsDialog'
+import { OUTPUT_ACTIONS, newWorkflow, pageSetOf, type Workflow, type WorkflowStep } from './engine/workflow'
+import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
 import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
 import { EngineError, activeDocument, closeDocument, engine, engineFor, newDocument, setActiveDocument } from './engine/client'
@@ -111,6 +114,10 @@ export default function App() {
   const [linked, setLinked] = useState(true)
   const sideRef = useRef<HTMLDivElement>(null)
   const [comparison, setComparison] = useState<CompareInfo['result']>(null)
+  const [workflows, setWorkflowsState] = useState(loadWorkflows)
+  const [workflowsOpen, setWorkflowsOpen] = useState<{ index: number } | null>(null)
+  // Steps recorded so far while recording a workflow.
+  const [recording, setRecording] = useState<WorkflowStep[] | null>(null)
 
   const mainRef = useRef<HTMLElement>(null)
   const findRef = useRef<HTMLInputElement>(null)
@@ -350,6 +357,62 @@ export default function App() {
     to.scrollTop = target.offsetTop + fraction * target.offsetHeight
   }
 
+  // ---- workflows -----------------------------------------------------------------------------
+
+  const setWorkflows = (list: Workflow[]) => {
+    setWorkflowsState(list)
+    saveWorkflows(list)
+  }
+
+  /** Adds a step to the workflow being recorded, if any. */
+  const record = (step: WorkflowStep) => setRecording((r) => (r ? [...r, step] : r))
+
+  /** The pages an action applies to, as a page set: the selection, or all pages. */
+  const pageSetNow = () => {
+    const d = docRef.current
+    if (!d || !selected.size) return 'all'
+    return pageSetOf(d.pages.flatMap((p, i) => (selected.has(p.id) ? [i] : [])), d.pages.length)
+  }
+
+  const startRecording = () => {
+    setWorkflowsOpen(null)
+    setRecording([])
+    setStatus(m.workflows.started)
+  }
+
+  const stopRecording = () => {
+    const steps = recording ?? []
+    setRecording(null)
+    if (!steps.length) return setStatus(m.workflows.discarded)
+    // Only the last save is kept, as the workflow's output.
+    const output = steps.filter((s) => OUTPUT_ACTIONS.includes(s.action)).at(-1)
+    const body = steps.filter((s) => !OUTPUT_ACTIONS.includes(s.action))
+    const wf = newWorkflow(m.workflows.untitled(workflows.length + 1), output ? [...body, output] : body)
+    setWorkflows([...workflows, wf])
+    setStatus(m.workflows.saved(wf.name, wf.steps.length))
+    setWorkflowsOpen({ index: workflows.length })
+  }
+
+  const runWorkflowHere = (wf: Workflow) => {
+    setWorkflowsOpen(null)
+    void run(m.busy.runningWorkflow, async () => {
+      const r = await runOnDocument(activeDocument(), wf)
+      if (r.state) apply(r.state)
+      if (r.bytes) download(r.bytes, `${docRef.current?.name ?? 'document'}.pdf`)
+      setStatus([m.workflows.ran(wf.name), ...r.notes].join(' '))
+    })
+  }
+
+  const runWorkflowOnFiles = (wf: Workflow, files: File[]) => {
+    setWorkflowsOpen(null)
+    void run(m.busy.runningWorkflow, async () => {
+      const r = await runBatch(files, wf, (i, n, name) => setBusy(m.workflows.progress(Math.min(i + 1, n), n, name)))
+      const file = `${wf.name}.zip`
+      download(r.zip, file, 'application/zip')
+      setStatus(m.workflows.batchDone(r.done, r.failed.length, file))
+    })
+  }
+
   // ---- compare -------------------------------------------------------------------------------
 
   const compareWith = (otherId: number) =>
@@ -440,6 +503,8 @@ export default function App() {
     run(m.busy.saving, async () => {
       const bytes = await engine.save(saveOpts)
       download(bytes, `${docRef.current!.name}.pdf`)
+      // Passwords aren't recorded: a shared workflow file would reveal them.
+      if (saveOpts.security.mode !== 'set') record({ action: 'save', options: saveOpts })
       // Signed documents are reloaded after an incremental save, so refresh their state.
       if (docRef.current!.signatures.length) apply(await engine.state())
       setStatus(m.status.saved(`${docRef.current!.name}.pdf`, kb(bytes.length)))
@@ -682,6 +747,7 @@ export default function App() {
         const { state, notes } = await engine.autoTag(lang)
         apply(state)
         setStatus(m.status.tagged(notes))
+        record({ action: 'tag', lang })
       }),
     updateTag: (id, change) =>
       void run(m.busy.tagging, async () => {
@@ -698,12 +764,21 @@ export default function App() {
   // ---- tool panel actions -------------------------------------------------------------------
 
   const panelActions: PanelActions = {
-    rotate: (delta) => void run(m.busy.rotating, async () => apply(await engine.rotatePages(targets(), delta))),
-    remove: () =>
+    rotate: (delta) => {
+      const pages = pageSetNow()
+      void run(m.busy.rotating, async () => {
+        apply(await engine.rotatePages(targets(), delta))
+        record({ action: 'rotate', pages, delta: (delta % 360) as 90 | 180 | 270 })
+      })
+    },
+    remove: () => {
+      const pages = pageSetNow()
       void run(m.busy.deletingPages, async () => {
         apply(await engine.deletePages([...selected]))
         setSelected(new Set())
-      }),
+        record({ action: 'deletePages', pages })
+      })
+    },
     extract: () =>
       void run(m.busy.extracting, async () => {
         const ids = doc!.pages.filter((p) => selected.has(p.id)).map((p) => p.id)
@@ -716,12 +791,19 @@ export default function App() {
         download(await engine.split(groups), `${doc!.name}-split.zip`, 'application/zip')
         setStatus(m.status.split(groups.length))
       }),
-    stamp: (spec) => void run(m.busy.stamping, async () => apply(await engine.stamp({ ...spec, pageIds: targets() }))),
+    stamp: (spec) => {
+      const pages = pageSetNow()
+      void run(m.busy.stamping, async () => {
+        apply(await engine.stamp({ ...spec, pageIds: targets() }))
+        record({ action: 'stamp', pages, stamp: spec })
+      })
+    },
     markTerms: (terms) =>
       void run(m.busy.searching, async () => {
         const { count, state } = await engine.markForRedaction(terms)
         apply(state)
         setStatus(m.status.marked(count))
+        record({ action: 'markTerms', terms })
       }),
     markPatterns: (patterns) =>
       void run(m.busy.searching, async () => {
@@ -732,18 +814,32 @@ export default function App() {
           apply(state)
         }
         setStatus(m.status.marked(total))
+        record({ action: 'markPatterns', patterns })
       }),
     applyRedactions: () =>
       void run(m.busy.redacting, async () => {
         const { count, state } = await engine.applyRedactions()
         apply(state)
         setStatus(m.status.redacted(count))
+        record({ action: 'applyRedactions' })
       }),
-    flatten: (annots, widgets) => void run(m.busy.flattening, async () => apply(await engine.flatten(annots, widgets))),
+    flatten: (annots, widgets) =>
+      void run(m.busy.flattening, async () => {
+        apply(await engine.flatten(annots, widgets))
+        record({ action: 'flatten', annots, widgets })
+      }),
     exportImages: () => void run(m.busy.renderingImages, async () => download(await engine.exportImages(2), `${doc!.name}-images.zip`, 'application/zip')),
     exportText: () => void run(m.busy.extractingText, async () => download(await engine.exportText(), `${doc!.name}.txt`, 'text/plain')),
     exportHtml: () => void run(m.busy.converting, async () => download(await engine.exportHtml(), `${doc!.name}.html`, 'text/html')),
-    setMeta: (meta) => void run(m.busy.savingProperties, async () => apply(await engine.setMeta(meta))),
+    setMeta: (meta) => {
+      // Only the properties that changed are recorded, so a workflow doesn't copy this file's title.
+      const before = docRef.current!.meta
+      const changed = Object.fromEntries(Object.entries(meta).filter(([k, v]) => before[k as keyof typeof before] !== v))
+      void run(m.busy.savingProperties, async () => {
+        apply(await engine.setMeta(meta))
+        record({ action: 'setMeta', meta: changed })
+      })
+    },
     pagesWithoutText: async () => (await engine.pagesWithoutText()).length,
     ocr: (scope) =>
       void run(m.busy.startingOcr, async () => {
@@ -753,6 +849,7 @@ export default function App() {
         const state = await recognizePages(ids, (done, total) => setBusy(m.busy.recognizing(Math.min(done + 1, total), total)))
         if (state) apply(state)
         setStatus(state ? m.status.recognized(ids.length) : m.status.noTextFound)
+        record({ action: 'ocr' })
       }),
     digitalSign: () => setDigitalSigning(true),
     setLabels: (style, prefix, start) => void run(m.busy.numbering, async () => apply(await engine.setPageLabels(labelPageId(), style, prefix, start))),
@@ -764,6 +861,7 @@ export default function App() {
         const file = `${doc!.name}-pdfa.pdf`
         download(bytes, file)
         setStatus(m.status.pdfaSaved(file, notes))
+        record({ action: 'pdfa', part })
       }),
     checkPdfA: () =>
       void run(m.busy.checking, async () => {
@@ -775,6 +873,7 @@ export default function App() {
         const { count, state } = await engine.detectFields()
         apply(state)
         setStatus(m.panel.detected(count))
+        record({ action: 'detectFields' })
         if (count) setTool('field')
       }),
     removeLabels: () => void run(m.busy.numbering, async () => apply(await engine.removePageLabels(labelPageId()))),
@@ -846,6 +945,10 @@ export default function App() {
     { id: 'save-pdfa', name: m.actions.savePdfA, enabled: has, run: () => panelActions.savePdfA(doc?.attachments.length ? 3 : 2) },
     { id: 'check-pdfa', name: m.actions.checkPdfA, enabled: has, run: panelActions.checkPdfA },
     { id: 'export-html', name: m.actions.exportHtml, enabled: has, run: panelActions.exportHtml },
+    { id: 'workflows', name: m.actions.workflows, icon: WorkflowIcon, run: () => setWorkflowsOpen({ index: 0 }) },
+    recording
+      ? { id: 'stop-recording', name: m.actions.stopRecording, run: stopRecording }
+      : { id: 'record-workflow', name: m.actions.recordWorkflow, run: startRecording },
     { id: 'settings', name: m.actions.openSettings, icon: SettingsIcon, hotkey: mod(','), run: () => setSettingsOpen(true) },
     { id: 'theme', name: m.actions.toggleTheme, run: () => setSettings({ ...settings, theme: dark ? 'light' : 'dark' }) },
   ]
@@ -955,6 +1058,7 @@ export default function App() {
         <IconButton Icon={Signature} label={m.actions.signImage} disabled={!doc} onClick={() => setSigning(true)} />
         <IconButton Icon={BadgeCheck} label={m.actions.digitalSign} disabled={!doc} onClick={() => setDigitalSigning(true)} />
         <IconButton Icon={ImagePlus} label={m.actions.placeImage} disabled={!doc} onClick={() => imageRef.current!.click()} />
+        <IconButton Icon={WorkflowIcon} label={m.actions.workflows} onClick={() => setWorkflowsOpen({ index: 0 })} />
         <IconButton Icon={SquareTerminal} label={m.actions.commandPalette} hotkey={mod('P')} onClick={() => setPalette(true)} />
         <span className="spacer" />
         <IconButton Icon={SettingsIcon} label={m.actions.settings} hotkey={mod(',')} onClick={() => setSettingsOpen(true)} />
@@ -1125,6 +1229,12 @@ export default function App() {
       {doc && narrow && (leftOpen || rightOpen) && <div className="drawer-scrim" onClick={() => { setLeftOpen(false); setRightOpen(false) }} />}
 
       <div className="status-bar">
+        {recording && (
+          <span className="status-item recording">
+            <Circle size={10} className="rec-dot" />{m.workflows.recording(recording.length)}
+            <button className="clickable-icon" aria-label={m.workflows.stop} title={m.workflows.stop} onClick={stopRecording}><StopIcon size={12} /></button>
+          </span>
+        )}
         {busy && <span className="status-item"><Loader2 size={13} className="spin" />{busy}</span>}
         {!busy && status && <span className={`status-item${status === statusError ? ' error' : ''}`}>{status}</span>}
         {doc?.encrypted && <span className="status-item" title={m.status.passwordProtected}><Lock size={13} />{m.status.protected}</span>}
@@ -1171,6 +1281,7 @@ export default function App() {
               const { report, state } = await engine.sanitize(opts)
               apply(state)
               setStatus(m.sanitize.summary(report))
+              record({ action: 'sanitize', options: opts })
             })
           }}
         />
@@ -1213,6 +1324,14 @@ export default function App() {
             setLinkEdit(null)
             if (index !== null) void run(m.busy.linking, async () => apply(await engine.deleteLink(pageId, index)))
           }}
+        />
+      )}
+      {workflowsOpen && (
+        <WorkflowsDialog
+          workflows={workflows} onChange={setWorkflows} hasDocument={!!doc} initial={workflowsOpen.index}
+          onRecord={startRecording} onRunHere={runWorkflowHere} onRunFiles={runWorkflowOnFiles}
+          onExport={(wf) => download(workflowJson(wf), `${wf.name}.json`, 'application/json')}
+          onClose={() => setWorkflowsOpen(null)}
         />
       )}
       {pwPrompt && <PasswordDialog file={pwPrompt.file} retry={pwPrompt.retry} onDone={pwPrompt.resolve} />}

@@ -201,6 +201,36 @@ kbd {
 .tree-item.problem > svg { flex: none; margin-top: 2px; }
 .tree-item .label.wrap { white-space: normal; }
 
+/* Workflows */
+.modal.mod-workflows { width: min(860px, calc(100vw - 32px)); }
+.workflows { display: grid; grid-template-columns: 220px 1fr; gap: 16px; min-height: 320px; }
+.workflow-list { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--border); padding-right: 12px; }
+.workflow-item {
+  all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; cursor: pointer;
+  border-radius: var(--radius-s); color: var(--text-normal);
+}
+.workflow-item:hover { background: var(--hover); }
+.workflow-item.is-active { background: var(--accent-soft); }
+.workflow-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.workflow-item .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-list-actions { margin-top: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.workflow-detail { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.workflow-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow-y: auto; }
+.workflow-step { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; border-radius: var(--radius-s); }
+.workflow-step:hover { background: var(--hover); }
+.workflow-step .label { flex: 1; min-width: 0; }
+.workflow-step .clickable-icon { padding: 2px; }
+.workflow-actions { flex-wrap: wrap; margin-top: auto; }
+.rec-dot { color: var(--red); fill: currentColor; }
+.status-item.recording { color: var(--text-normal); }
+.status-item.recording .rec-dot { animation: rec-pulse 1.6s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .status-item.recording .rec-dot { animation: none; } }
+@media (max-width: 700px) {
+  .workflows { grid-template-columns: 1fr; }
+  .workflow-list { border-right: none; padding-right: 0; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+}
+
 /* Compare */
 .diff { fill: var(--diff-bg); stroke: var(--diff); stroke-width: 0.75; }
 .diff.active { stroke-width: 2; }

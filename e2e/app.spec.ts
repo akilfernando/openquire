@@ -423,3 +423,40 @@ test('compares two versions of a document', async ({ page }) => {
   const results = await new AxeBuilder({ page }).include('.sidebar.left').withTags(['wcag2a', 'wcag2aa']).analyze()
   expect(results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ') + ' ' + n.failureSummary).join(', ')}`)).toEqual([])
 })
+
+test('records a workflow and runs it on several files', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('button', { name: 'Workflows' }).click()
+  await page.getByRole('button', { name: 'Record new' }).click()
+  await expect(page.locator('.status-item.recording')).toContainText('Recording, 0 steps')
+
+  await openSection(page, 'Organize pages')
+  await page.getByRole('button', { name: 'Right', exact: true }).click()
+  await expect(page.locator('.status-item.recording')).toContainText('1 step')
+  await save(page)
+  await expect(page.locator('.status-item.recording')).toContainText('2 steps')
+  await page.getByRole('button', { name: 'Stop recording' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Workflows' })
+  await expect(dialog.locator('.workflow-step')).toHaveText([/Rotate all pages by 90 degrees/, /Save with standard compression/])
+  const axe = await new AxeBuilder({ page }).include('.modal').withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([])
+
+  // Run it on three files at once.
+  const files = await Promise.all(['a', 'b', 'c'].map(async (n) => ({ name: `${n}.pdf`, mimeType: 'application/pdf', buffer: await reportPdf() })))
+  const download = page.waitForEvent('download')
+  await dialog.locator('input[type=file][multiple]').setInputFiles(files)
+  const d = await download
+  expect(d.suggestedFilename()).toBe('Workflow 1.zip')
+  const { unzipSync } = await import('fflate')
+  const zip = unzipSync(await bytesOf(d))
+  expect(Object.keys(zip).sort()).toEqual(['a.pdf', 'b.pdf', 'c.pdf'])
+  const out = mupdf.Document.openDocument(zip['b.pdf'], 'application/pdf')
+  expect(out.loadPage(0).getBounds()[2]).toBeCloseTo(842, 0)
+  await expect(page.locator('.status-bar')).toContainText('Processed 3 files')
+
+  // Workflows are kept between visits.
+  await page.reload()
+  await page.getByRole('button', { name: 'Workflows' }).click()
+  await expect(page.getByRole('dialog', { name: 'Workflows' }).locator('.workflow-item')).toHaveText([/Workflow 1/])
+})

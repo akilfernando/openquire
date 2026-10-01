@@ -6,6 +6,7 @@ import roots from './roots.json'
 import forge from 'node-forge'
 import { checkPdfA, convertToPdfA, type PdfAPart } from './pdfa'
 import { compare, type ComparisonResult } from './compare'
+import { resolvePages, type WorkflowStep } from './workflow'
 import { autoTag, checkAccessibility, moveTag, structure, updateTag, type TagType } from './tagging'
 import { addValidationData, checkRevocationOnline, createDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
 import {
@@ -1387,6 +1388,69 @@ export class Engine {
   /** A quick check of the current document against common PDF/A requirements. */
   checkPdfA() {
     return checkPdfA(this.save({ compress: 'none', security: { mode: 'keep' } }))
+  }
+
+  // ---- workflows ----
+
+  /**
+   * Runs one workflow step. OCR steps are run by the app, which hosts the OCR engine. Output
+   * steps return the finished file. `ctx.bates` carries Bates numbering from one file to the next.
+   */
+  runStep(step: WorkflowStep, ctx: { bates?: number } = {}): { state: DocState; bytes?: Uint8Array; bates?: number; notes?: string[] } {
+    const ids = this.pageIds()
+    const pick = (set: string) => resolvePages(set, ids.length).map((i) => ids[i])
+    let bates = ctx.bates
+    switch (step.action) {
+      case 'rotate':
+        this.rotatePages(pick(step.pages), step.delta)
+        break
+      case 'deletePages': {
+        const chosen = pick(step.pages)
+        if (chosen.length) this.deletePages(chosen)
+        break
+      }
+      case 'stamp': {
+        const pageIds = pick(step.pages)
+        const numbered = step.stamp.template.includes('{bates}')
+        const batesStart = numbered ? (ctx.bates ?? step.stamp.batesStart ?? 1) : step.stamp.batesStart
+        if (pageIds.length) this.stamp({ ...step.stamp, batesStart, pageIds })
+        if (numbered) bates = (batesStart ?? 1) + pageIds.length
+        break
+      }
+      case 'markTerms':
+        if (step.terms.length) this.markForRedaction(step.terms)
+        break
+      case 'markPatterns':
+        for (const p of step.patterns) this.markPattern(p)
+        break
+      case 'applyRedactions':
+        this.applyRedactions()
+        break
+      case 'flatten':
+        this.flatten(step.annots, step.widgets)
+        break
+      case 'sanitize':
+        this.sanitize(step.options)
+        break
+      case 'setMeta':
+        this.setMeta({ ...this.meta(), ...step.meta })
+        break
+      case 'detectFields':
+        this.detectFields()
+        break
+      case 'tag':
+        this.autoTag(step.lang)
+        break
+      case 'ocr':
+        throw new Error('OCR steps run in the app')
+      case 'save':
+        return { state: this.state(), bytes: this.save(step.options), bates }
+      case 'pdfa': {
+        const { bytes, notes } = this.convertToPdfA(step.part)
+        return { state: this.state(), bytes, bates, notes }
+      }
+    }
+    return { state: this.state(), bates }
   }
 
   // ---- compare ----

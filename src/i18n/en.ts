@@ -3,6 +3,8 @@
  * translate every string and function, and register it in ./index.ts. Functions receive the
  * values they need, so each language can handle its own plurals and word order.
  */
+import type { PageSet, WorkflowStep } from '../engine/workflow'
+
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 export const en = {
@@ -56,6 +58,9 @@ export const en = {
     toggleLeft: 'Toggle left sidebar',
     toggleRight: 'Toggle right sidebar',
     showPanel: { pages: 'Show pages', bookmarks: 'Show bookmarks', comments: 'Show comments', attachments: 'Show attachments', signatures: 'Show signatures', accessibility: 'Show accessibility and tags', compare: 'Compare with another document' },
+    workflows: 'Workflows',
+    recordWorkflow: 'Record a workflow',
+    stopRecording: 'Stop recording the workflow',
     tool: (name: string) => `Tool: ${name}`,
     signImage: 'Add signature image',
     digitalSign: 'Sign with a digital ID',
@@ -92,6 +97,7 @@ export const en = {
   },
 
   busy: {
+    runningWorkflow: 'Running workflow',
     comparing: 'Comparing',
     tagging: 'Updating tags',
     opening: 'Opening', saving: 'Saving', searching: 'Searching', placingImage: 'Placing image', adding: 'Adding', moving: 'Moving',
@@ -367,6 +373,54 @@ export const en = {
     add: 'Add field',
   },
 
+  workflows: {
+    title: 'Workflows',
+    empty: 'No workflows yet. Record one: start recording, then use the tools as usual.',
+    record: 'Record new',
+    import: 'Import',
+    export: 'Export',
+    delete: 'Delete',
+    name: 'Name',
+    steps: 'Steps',
+    stepCount: (n: number) => plural(n, 'step', 'steps'),
+    noSteps: 'This workflow has no steps.',
+    runHere: 'Run on this document',
+    runFiles: 'Run on files',
+    outputNote: 'The workflow has no save step, so results are saved with standard compression.',
+    earlier: 'Move step up',
+    later: 'Move step down',
+    removeStep: 'Remove step',
+    importError: (message: string) => `Couldn't import the workflow. ${message}`,
+    untitled: (n: number) => `Workflow ${n}`,
+    recording: (n: number) => `Recording, ${plural(n, 'step', 'steps')}`,
+    stop: 'Stop recording',
+    started: 'Recording a workflow. Use the tools as usual; each change becomes a step.',
+    saved: (name: string, n: number) => `Saved ${name} with ${plural(n, 'step', 'steps')}.`,
+    discarded: 'Nothing was recorded.',
+    ran: (name: string) => `Ran ${name}.`,
+    progress: (i: number, n: number, file: string) => `Processing ${i} of ${n}: ${file}`,
+    batchDone: (done: number, failed: number, file: string) =>
+      `Processed ${plural(done, 'file', 'files')}${failed ? `, ${failed} failed (see failed.txt)` : ''}. Saved ${file}.`,
+    describe: (s: WorkflowStep): string => {
+      const pages = (set: PageSet) => ({ all: 'all pages', odd: 'odd pages', even: 'even pages' } as Record<string, string>)[set] ?? `pages ${set}`
+      switch (s.action) {
+        case 'rotate': return `Rotate ${pages(s.pages)} by ${s.delta} degrees`
+        case 'deletePages': return `Delete ${pages(s.pages)}`
+        case 'stamp': return `Stamp "${s.stamp.template}" on ${pages(s.pages)}`
+        case 'markTerms': return `Mark for redaction: ${s.terms.join(', ')}`
+        case 'markPatterns': return `Mark ${plural(s.patterns.length, 'pattern', 'patterns')} for redaction`
+        case 'applyRedactions': return 'Apply redactions'
+        case 'flatten': return s.annots && s.widgets ? 'Flatten comments and form fields' : s.annots ? 'Flatten comments' : 'Flatten form fields'
+        case 'sanitize': return 'Sanitize'
+        case 'setMeta': return `Set ${Object.keys(s.meta).join(', ') || 'no properties'}`
+        case 'detectFields': return 'Detect form fields'
+        case 'tag': return `Tag for accessibility (${s.lang})`
+        case 'ocr': return 'Recognize text on pages without text'
+        case 'save': return `Save with ${s.options.compress === 'none' ? 'no' : s.options.compress} compression${s.options.security.mode === 'set' ? ' and a password' : s.options.security.mode === 'none' ? ', removing the password' : ''}`
+        case 'pdfa': return `Save as PDF/A-${s.part}b`
+      }
+    },
+  },
   sanitize: {
     title: 'Sanitize document',
     intro: 'Removes hidden and potentially sensitive information before you share a document. Choose what to remove:',

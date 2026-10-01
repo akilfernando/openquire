@@ -11,6 +11,7 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Edit | Edit whole paragraphs that reflow, in the document's own embedded fonts; text boxes; move, resize, replace and delete images; erase graphics; whiteout; links |
 | Comment | Highlight, underline and strike through text; sticky notes; pen, rectangles, ellipses, arrows; threaded replies; comments panel with filtering |
 | Compare | Compare two versions: changed, added, removed and moved text, and changed graphics, highlighted in both documents side by side |
+| Workflows | Record steps as you work, then replay them on the open document or on hundreds of files at once (results in a zip, Bates numbers continuing across files); share workflows as JSON |
 | Organize | Merge PDFs and other files, drag to reorder, rotate, delete, extract, insert blank pages, crop |
 | Split | By page ranges (`1-3, 4-6, 7-`) or every page, as a zip; each part keeps its structure |
 | Forms | Fill text fields, checkboxes, radio buttons and dropdowns on the page; design forms (add, move, resize and configure fields); detect fields automatically; flatten |
