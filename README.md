@@ -17,7 +17,7 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Forms | Fill text fields, checkboxes, radio buttons and dropdowns on the page; design forms (add, move, resize and configure fields); detect fields automatically; flatten |
 | Sign | Draw, type or upload a signature, remembered on this device |
 | Digital signatures | Sign with a certificate (.p12/.pfx) or a self-signed ID created in the app; certify documents; trusted timestamps and long-term validation (PAdES B-T, B-LT and B-LTA); trust chains checked against bundled and user-added roots; later edits are appended so signatures stay valid |
-| OCR | Recognize text on scanned pages (English) and add an invisible, searchable, selectable text layer, entirely on-device |
+| OCR | Recognize text on scanned pages and add an invisible, searchable, selectable text layer, entirely on-device; twelve Western European languages, detected automatically (English built in, others downloaded on request); crooked scans straightened first |
 | Redact | Mark areas, text selections, search terms or patterns (emails, phone/card numbers, dates, URLs), then apply. Only the covered content is removed. |
 | Accessibility | Check against PDF/UA; tag untagged documents automatically (headings, paragraphs, figures, links, form fields); edit tag types, reading order and alternate text |
 | Archive | Save as PDF/A-2b or 3b (validated with veraPDF) and run a quick PDF/A check |
@@ -83,7 +83,7 @@ missing.
   password-protected document requires removing the password first.
 - **Automatic tagging** recognises headings, paragraphs and figures, but not tables or lists, and reading
   order follows the content order. Review the result in the Accessibility panel.
-- **OCR** is English only, and its text uses the standard Latin font set.
+- **OCR** covers Western European languages only, because its text layer uses the standard Latin fonts.
 - **Office conversion** is basic: complex layouts, and some formatting such as bold headings, may not survive.
 - **No PDF to Word** export.
 - **Large downloads:** the WebAssembly engine is about 10 MB (4.8 MB gzipped) on first load; OCR

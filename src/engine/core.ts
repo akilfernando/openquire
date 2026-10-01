@@ -6,6 +6,7 @@ import roots from './roots.json'
 import forge from 'node-forge'
 import { checkPdfA, convertToPdfA, type PdfAPart } from './pdfa'
 import { compare, type ComparisonResult } from './compare'
+import { rotationAbout, skewAngle } from './scan'
 import { resolvePages, type WorkflowStep } from './workflow'
 import { autoTag, checkAccessibility, moveTag, structure, updateTag, type TagType } from './tagging'
 import { addValidationData, checkRevocationOnline, createDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
@@ -1388,6 +1389,45 @@ export class Engine {
   /** A quick check of the current document against common PDF/A requirements. */
   checkPdfA() {
     return checkPdfA(this.save({ compress: 'none', security: { mode: 'keep' } }))
+  }
+
+  // ---- scan clean-up ----
+
+  private pageSkew(pageId: number) {
+    const page = this.page(pageId)
+    const scale = 150 / 72
+    const pix = page.toPixmap(mupdf.Matrix.scale(scale, scale), mupdf.ColorSpace.DeviceGray, false, false)
+    const angle = skewAngle(pix.getPixels(), pix.getWidth(), pix.getHeight())
+    pix.destroy()
+    page.destroy()
+    return angle
+  }
+
+  /** How far each page is rotated off straight, in degrees (0 when straight or unmeasurable). */
+  detectSkew(pageIds = this.pageIds()) {
+    return pageIds.map((id) => this.pageSkew(id))
+  }
+
+  /** Rotates the content of skewed pages (usually scans) so their lines run straight. */
+  straighten(pageIds = this.pageIds(), minAngle = 0.2) {
+    let count = 0
+    this.op('Straighten pages', () => {
+      for (const id of pageIds) {
+        const angle = this.pageSkew(id)
+        if (Math.abs(angle) < minAngle) continue
+        const c = this.pageContent(id)
+        const page = this.page(id)
+        const [x0, y0, x1, y1] = page.getBounds()
+        page.destroy()
+        const [cx, cy] = ((m: CMatrix, x: number, y: number) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]])(invert(c.transform), (x0 + x1) / 2, (y0 + y1) / 2)
+        // Which way is straight depends on the page's own rotation, so measure and correct.
+        const write = (deg: number) => c.write(`q ${fmt(rotationAbout(deg, cx, cy))} cm\n${c.text}\nQ`)
+        write(angle)
+        if (Math.abs(this.pageSkew(id)) > Math.abs(angle) / 2) write(-angle)
+        count++
+      }
+    }, pageIds)
+    return { count, state: this.state() }
   }
 
   // ---- workflows ----

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
 import { m } from '../i18n'
+import { OCR_LANGUAGES } from '../ocr-languages'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -13,6 +14,12 @@ export interface Settings {
   tsa: string
   /** Certificates the user trusts, as PEM with a display name. */
   trusted: { pem: string; name: string; issuer: string; expires: string }[]
+  /** OCR language code, or 'auto'. */
+  ocrLang: string
+  /** Whether OCR language packs other than English may be downloaded. */
+  ocrDownload: boolean
+  /** Whether skewed pages are straightened before text is recognized. */
+  ocrStraighten: boolean
 }
 
 export const ACCENTS: { key: string; hue: number }[] = [
@@ -24,7 +31,7 @@ export const ACCENTS: { key: string; hue: number }[] = [
   { key: 'rose', hue: 340 },
 ]
 
-type Tab = 'appearance' | 'comments' | 'signatures' | 'about'
+type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'about'
 
 interface Props {
   settings: Settings
@@ -98,6 +105,23 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                   defaultValue={settings.author} placeholder={m.settings.authorPlaceholder} aria-label={m.settings.author}
                   onBlur={(e) => e.target.value.trim() !== settings.author && set({ author: e.target.value.trim() })}
                 />
+              </Item>
+            </>
+          )}
+          {tab === 'ocr' && (
+            <>
+              <h2>{m.settings.tabs.ocr}</h2>
+              <Item name={m.settings.ocrLang} desc={m.settings.ocrLangDesc}>
+                <select value={settings.ocrLang} aria-label={m.settings.ocrLang} onChange={(e) => set({ ocrLang: e.target.value })}>
+                  <option value="auto">{m.settings.ocrAuto}</option>
+                  {OCR_LANGUAGES.map((l) => <option key={l.code} value={l.code}>{m.settings.languages[l.code] ?? l.code}</option>)}
+                </select>
+              </Item>
+              <Item name={m.settings.ocrDownload} desc={m.settings.ocrDownloadDesc}>
+                <input type="checkbox" className="toggle" checked={settings.ocrDownload} aria-label={m.settings.ocrDownload} onChange={(e) => set({ ocrDownload: e.target.checked })} />
+              </Item>
+              <Item name={m.settings.ocrStraighten} desc={m.settings.ocrStraightenDesc}>
+                <input type="checkbox" className="toggle" checked={settings.ocrStraighten} aria-label={m.settings.ocrStraighten} onChange={(e) => set({ ocrStraighten: e.target.checked })} />
               </Item>
             </>
           )}

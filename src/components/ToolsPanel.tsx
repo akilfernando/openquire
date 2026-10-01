@@ -8,6 +8,7 @@ export interface PanelActions {
   remove: () => void
   extract: () => void
   insertBlank: () => void
+  straighten: () => void
   split: (spec: string | null) => void
   stamp: (spec: Omit<StampSpec, 'pageIds'>) => void
   markTerms: (terms: string[]) => void
@@ -261,6 +262,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
             <button disabled={!selectedCount} onClick={actions.extract}>{m.panel.extract}</button>
           </div>
           <button onClick={actions.insertBlank}>{m.panel.insertBlank}</button>
+          <button onClick={actions.straighten}>{m.panel.straighten}</button>
         </Section>
 
         <Labels labelPage={labelPage} actions={actions} />

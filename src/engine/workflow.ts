@@ -22,7 +22,7 @@ export type WorkflowStep =
   | { action: 'detectFields' }
   | { action: 'tag'; lang: string }
   /** Recognizes text on pages that have none. Runs in the app, where the OCR engine lives. */
-  | { action: 'ocr' }
+  | { action: 'ocr'; lang?: string; straighten?: boolean }
   /** Output steps: only the last step may be one of these. */
   | { action: 'save'; options: SaveOptions }
   | { action: 'pdfa'; part: 2 | 3 }

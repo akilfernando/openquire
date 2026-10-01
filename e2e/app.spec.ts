@@ -126,7 +126,7 @@ test('recognizes text on a scanned page', async ({ page }) => {
   await expect(page.locator('.page canvas[width]').first()).toBeVisible()
   await openSection(page, 'Recognize text (OCR)')
   await page.getByRole('button', { name: 'Pages without text (1)' }).click()
-  await expect(page.locator('.status-bar')).toContainText('Recognized text on 1 page', { timeout: 60_000 })
+  await expect(page.locator('.status-bar')).toContainText('Recognized English text on 1 page', { timeout: 60_000 })
   await page.keyboard.press('Control+f')
   await page.getByPlaceholder('Find...').fill('thirty days')
   await page.keyboard.press('Enter')
@@ -459,4 +459,60 @@ test('records a workflow and runs it on several files', async ({ page }) => {
   await page.reload()
   await page.getByRole('button', { name: 'Workflows' }).click()
   await expect(page.getByRole('dialog', { name: 'Workflows' }).locator('.workflow-item')).toHaveText([/Workflow 1/])
+})
+
+const FRENCH = [
+  'Compte rendu de la réunion du conseil',
+  'La société a présenté ses résultats pour l’année.',
+  'Les membres ont approuvé le budget et la stratégie.',
+  'Une nouvelle équipe sera créée à Genève en été.',
+  'La prochaine réunion aura lieu le premier février.',
+  'Le président a remercié les employés pour leur travail.',
+]
+
+/** A crooked (3 degree) scan of a French letter. Accented letters are written as WinAnsi codes. */
+function crookedFrenchScan() {
+  const d = new mupdf.PDFDocument()
+  const font = d.addSimpleFont(new mupdf.Font('Times-Roman'))
+  const winAnsi = (s: string) => [...s.replace('’', "'")].map((c) => (c.charCodeAt(0) > 127 ? '\\' + c.charCodeAt(0).toString(8) : c)).join('')
+  const body = FRENCH.map((l, i) => `BT /F1 15 Tf 60 ${760 - i * 30} Td (${winAnsi(l)}) Tj ET`).join('\n')
+  d.insertPage(-1, d.addPage([0, 0, 595, 842], 0, { Font: { F1: font } }, body))
+  const k = 200 / 72
+  const m = mupdf.Matrix.concat(mupdf.Matrix.concat(mupdf.Matrix.translate(-297.5, -421), mupdf.Matrix.rotate(3)), mupdf.Matrix.concat(mupdf.Matrix.translate(297.5, 421), mupdf.Matrix.scale(k, k)))
+  const pix = new mupdf.Pixmap(mupdf.ColorSpace.DeviceGray, [0, 0, Math.round(595 * k), Math.round(842 * k)], false)
+  pix.clear(255)
+  const dev = new mupdf.DrawDevice(mupdf.Matrix.identity, pix)
+  d.loadPage(0).run(dev, m)
+  dev.close()
+  const out = new mupdf.PDFDocument()
+  const img = out.addImage(new mupdf.Image(pix))
+  out.insertPage(-1, out.addPage([0, 0, 595, 842], 0, { XObject: { Im0: img } }, 'q 595 0 0 842 0 0 cm /Im0 Do Q'))
+  return Buffer.from(out.saveToBuffer('compress').asUint8Array())
+}
+
+test('detects the language of a crooked French scan, straightens it and recognizes it', async ({ page, context }) => {
+  test.slow()
+  // The French language pack comes from jsDelivr; serve the same file from node_modules.
+  await context.route('https://cdn.jsdelivr.net/npm/@tesseract.js-data/fra/**', (route) =>
+    route.fulfill({ path: 'node_modules/@tesseract.js-data/fra/4.0.0_best_int/fra.traineddata.gz', contentType: 'application/gzip' }))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByRole('button', { name: 'Text recognition' }).click()
+  await expect(page.getByRole('combobox', { name: 'Language' })).toHaveValue('auto')
+  const axe = await new AxeBuilder({ page }).include('.modal').withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([])
+  await page.getByRole('checkbox', { name: 'Download language packs' }).check()
+  await page.keyboard.press('Escape')
+
+  await openFile(page, 'lettre.pdf', crookedFrenchScan())
+  await expect(page.locator('.page canvas[width]').first()).toBeVisible()
+  await page.getByRole('button', { name: 'Recognize text (OCR)' }).first().click()
+  await expect(page.locator('.status-bar')).toContainText('Recognized French text on 1 page, after straightening 1', { timeout: 90_000 })
+
+  const text = pdfText(await save(page)).replace(/\s+/g, ' ')
+  const words = FRENCH.join(' ').replace('’', "'").split(/\s+/).map((w) => w.replace(/[.,]$/, ''))
+  const found = words.filter((w) => text.includes(w))
+  expect(found.length / words.length).toBeGreaterThan(0.9)
+  expect(text).toContain('réunion')
+  expect(text).toContain('créée à Genève en été')
 })

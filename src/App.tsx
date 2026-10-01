@@ -51,7 +51,9 @@ const STAMP_PRESETS: [string, Omit<StampSpec, 'pageIds'>][] = [
 
 const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
-  const fallback: Settings = { theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [] }
+  const fallback: Settings = {
+    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true,
+  }
   try {
     const legacyAuthor = localStorage.getItem('openquire.author') ?? ''
     return { ...fallback, author: legacyAuthor, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') }
@@ -396,7 +398,7 @@ export default function App() {
   const runWorkflowHere = (wf: Workflow) => {
     setWorkflowsOpen(null)
     void run(m.busy.runningWorkflow, async () => {
-      const r = await runOnDocument(activeDocument(), wf)
+      const r = await runOnDocument(activeDocument(), wf, undefined, { lang: settings.ocrLang, allowDownload: settings.ocrDownload })
       if (r.state) apply(r.state)
       if (r.bytes) download(r.bytes, `${docRef.current?.name ?? 'document'}.pdf`)
       setStatus([m.workflows.ran(wf.name), ...r.notes].join(' '))
@@ -406,7 +408,7 @@ export default function App() {
   const runWorkflowOnFiles = (wf: Workflow, files: File[]) => {
     setWorkflowsOpen(null)
     void run(m.busy.runningWorkflow, async () => {
-      const r = await runBatch(files, wf, (i, n, name) => setBusy(m.workflows.progress(Math.min(i + 1, n), n, name)))
+      const r = await runBatch(files, wf, { lang: settings.ocrLang, allowDownload: settings.ocrDownload }, (i, n, name) => setBusy(m.workflows.progress(Math.min(i + 1, n), n, name)))
       const file = `${wf.name}.zip`
       download(r.zip, file, 'application/zip')
       setStatus(m.workflows.batchDone(r.done, r.failed.length, file))
@@ -784,6 +786,12 @@ export default function App() {
         const ids = doc!.pages.filter((p) => selected.has(p.id)).map((p) => p.id)
         download(await engine.extract(ids), `${doc!.name}-extract.pdf`)
       }),
+    straighten: () =>
+      void run(m.busy.straightening, async () => {
+        const { count, state } = await engine.straighten(targets())
+        apply(state)
+        setStatus(m.status.straightened(count))
+      }),
     insertBlank: () => void run(m.busy.addingPage, async () => apply(await engine.insertBlank(currentPage()?.id ?? null))),
     split: (spec) =>
       void run(m.busy.splitting, async () => {
@@ -845,11 +853,24 @@ export default function App() {
       void run(m.busy.startingOcr, async () => {
         const ids = scope === 'notext' ? await engine.pagesWithoutText() : scope === 'selected' ? [...selected] : doc!.pages.map((p) => p.id)
         if (!ids.length) return setStatus(m.status.allHaveText)
+        let straightened = 0
+        if (settings.ocrStraighten) {
+          setBusy(m.busy.straightening)
+          const r = await engine.straighten(ids)
+          straightened = r.count
+          if (r.count) apply(r.state)
+        }
         const { recognizePages } = await import('./ocr')
-        const state = await recognizePages(ids, (done, total) => setBusy(m.busy.recognizing(Math.min(done + 1, total), total)))
-        if (state) apply(state)
-        setStatus(state ? m.status.recognized(ids.length) : m.status.noTextFound)
-        record({ action: 'ocr' })
+        const r = await recognizePages(ids, (done, total) => setBusy(m.busy.recognizing(Math.min(done + 1, total), total)), activeDocument(), {
+          lang: settings.ocrLang, allowDownload: settings.ocrDownload,
+        })
+        if (r.state) apply(r.state)
+        const name = (code: string) => m.settings.languages[code] ?? code
+        setStatus([
+          r.state ? m.status.recognized(ids.length, name(r.lang), straightened) : m.status.noTextFound,
+          r.wanted ? m.status.languageNotAllowed(name(r.wanted)) : '',
+        ].filter(Boolean).join('. '))
+        record({ action: 'ocr', lang: settings.ocrLang, straighten: settings.ocrStraighten })
       }),
     digitalSign: () => setDigitalSigning(true),
     setLabels: (style, prefix, start) => void run(m.busy.numbering, async () => apply(await engine.setPageLabels(labelPageId(), style, prefix, start))),
@@ -945,6 +966,7 @@ export default function App() {
     { id: 'save-pdfa', name: m.actions.savePdfA, enabled: has, run: () => panelActions.savePdfA(doc?.attachments.length ? 3 : 2) },
     { id: 'check-pdfa', name: m.actions.checkPdfA, enabled: has, run: panelActions.checkPdfA },
     { id: 'export-html', name: m.actions.exportHtml, enabled: has, run: panelActions.exportHtml },
+    { id: 'straighten', name: m.actions.straighten, enabled: has, run: panelActions.straighten },
     { id: 'workflows', name: m.actions.workflows, icon: WorkflowIcon, run: () => setWorkflowsOpen({ index: 0 }) },
     recording
       ? { id: 'stop-recording', name: m.actions.stopRecording, run: stopRecording }

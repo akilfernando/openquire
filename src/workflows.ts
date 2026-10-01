@@ -6,6 +6,7 @@ import { zipSync } from 'fflate'
 import { closeDocument, engineFor, newDocument } from './engine/client'
 import type { DocState } from './engine/types'
 import { newWorkflow, parseWorkflow, type Workflow } from './engine/workflow'
+import type { OcrOptions } from './ocr'
 
 const STORE = 'openquire.workflows'
 
@@ -43,15 +44,16 @@ export interface RunResult {
 }
 
 /** Runs a workflow's steps on an open document. */
-export async function runOnDocument(doc: number, wf: Workflow, bates?: number): Promise<RunResult> {
+export async function runOnDocument(doc: number, wf: Workflow, bates: number | undefined, ocr: OcrOptions): Promise<RunResult> {
   const engine = engineFor(doc)
   const result: RunResult = { state: null, bates, notes: [] }
   for (const step of wf.steps) {
     if (step.action === 'ocr') {
       const ids = await engine.pagesWithoutText()
       if (!ids.length) continue
+      if (step.straighten) await engine.straighten(ids)
       const { recognizePages } = await import('./ocr')
-      result.state = (await recognizePages(ids, () => {}, doc)) ?? result.state
+      result.state = (await recognizePages(ids, () => {}, doc, { ...ocr, lang: step.lang ?? ocr.lang })).state ?? result.state
       continue
     }
     const r = await engine.runStep(step, { bates: result.bates })
@@ -73,7 +75,7 @@ export interface BatchResult {
  * Runs a workflow on each file in turn and collects the results in a zip, with a report of any
  * files that failed. Bates numbering continues from one file to the next.
  */
-export async function runBatch(files: File[], wf: Workflow, onProgress: (done: number, total: number, name: string) => void): Promise<BatchResult> {
+export async function runBatch(files: File[], wf: Workflow, ocr: OcrOptions, onProgress: (done: number, total: number, name: string) => void): Promise<BatchResult> {
   const out: Record<string, Uint8Array> = {}
   const failed: BatchResult['failed'] = []
   let bates: number | undefined
@@ -84,7 +86,7 @@ export async function runBatch(files: File[], wf: Workflow, onProgress: (done: n
     try {
       const engine = engineFor(doc)
       const state = await engine.open(file.name, new Uint8Array(await file.arrayBuffer()))
-      const r = await runOnDocument(doc, wf, bates)
+      const r = await runOnDocument(doc, wf, bates, ocr)
       bates = r.bates
       const bytes = r.bytes ?? (await engine.save({ compress: 'standard', security: { mode: 'keep' } }))
       // Two inputs with the same name would otherwise overwrite each other in the zip.
