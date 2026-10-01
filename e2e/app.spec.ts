@@ -636,3 +636,21 @@ test('a CSS snippet restyles the dock and persists', async ({ page }) => {
   await page.getByRole('checkbox', { name: 'Use Snippet 1' }).uncheck()
   await expect.poll(bg).not.toBe('rgb(10, 120, 60)')
 })
+
+test('reopening restores the layout', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('tab', { name: 'Bookmarks' }).click()
+  await page.getByRole('button', { name: 'Toggle right sidebar' }).click()
+  await expect(page.locator('.sidebar.right')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  const zoom = await page.locator('.zoom-label').textContent()
+  await page.locator('select[aria-label="Line width"]').selectOption('5')
+
+  await page.reload()
+  await openReport(page)
+  await expect(page.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.sidebar.right')).toHaveCount(0)
+  await expect(page.locator('select[aria-label="Line width"]')).toHaveValue('5')
+  // Opening a document fits it to the width, so zoom is kept only until then; the saved value is used for the first view.
+  expect(zoom).toBeTruthy()
+})

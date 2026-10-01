@@ -23,6 +23,7 @@ import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
 import WorkflowsDialog from './components/WorkflowsDialog'
 import { OUTPUT_ACTIONS, newWorkflow, pageSetOf, type Workflow, type WorkflowStep } from './engine/workflow'
+import { loadLayout, saveLayout } from './layout'
 import { WHILE_TYPING, commandFor, comboOf, displayCombo, effectiveHotkeys } from './hotkeys'
 import { OFFICE_EXTENSIONS, addRecent, fileName, isDesktop, nativeConvert, nativeTools, pickFiles, readPath, recentFiles, removeRecent, saveAs, tokenSign, watchOpenedFiles, writePath, type TokenKey } from './native'
 import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
@@ -72,26 +73,29 @@ function loadSettings(): Settings {
 
 
 export default function App() {
+  // The last session's layout, read once.
+  const [saved] = useState(loadLayout)
   const [doc, setDoc] = useState<DocState | null>(null)
   const docRef = useRef(doc)
   docRef.current = doc
-  const [zoom, setZoom] = useState(1.25)
+  const [zoom, setZoom] = useState(saved.zoom ?? 1.25)
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
   const [tool, setTool] = useState<Tool>('select')
-  const [colors, setColors] = useState({ markup: '#ffd400', draw: '#e11d48', text: '#111111' })
-  const [strokeWidth, setStrokeWidth] = useState(2)
+  const [colors, setColors] = useState(saved.colors ?? { markup: '#ffd400', draw: '#e11d48', text: '#111111' })
+  const [strokeWidth, setStrokeWidth] = useState(saved.strokeWidth ?? 2)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const anchor = useRef<number | null>(null)
   const [selAnnot, setSelAnnot] = useState<{ pageId: number; id: number } | null>(null)
   const [editingAnnot, setEditingAnnot] = useState<number | null>(null)
   const [textSel, setTextSel] = useState<{ pageId: number; quads: Quad[]; text: string } | null>(null)
-  const [tab, setTab] = useState<SideTab>('pages')
+  const [tab, setTab] = useState<SideTab>((saved.tab as SideTab) ?? 'pages')
   // On narrow screens the sidebars are drawers that start closed.
   const narrowQuery = useMemo(() => matchMedia('(max-width: 900px)'), [])
   const [narrow, setNarrow] = useState(narrowQuery.matches)
-  const [leftOpen, setLeftOpen] = useState(!narrowQuery.matches)
-  const [rightOpen, setRightOpen] = useState(!narrowQuery.matches)
+  // On narrow screens the sidebars are drawers, so they always start closed.
+  const [leftOpen, setLeftOpen] = useState(!narrowQuery.matches && (saved.leftOpen ?? true))
+  const [rightOpen, setRightOpen] = useState(!narrowQuery.matches && (saved.rightOpen ?? true))
   const [commentFocus, setCommentFocus] = useState<number | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [status, setStatus] = useState('')
@@ -100,7 +104,7 @@ export default function App() {
   const [digitalSigning, setDigitalSigning] = useState(false)
   const [palette, setPalette] = useState(false)
   const [sanitizing, setSanitizing] = useState(false)
-  const [fieldKind, setFieldKind] = useState<FieldKind>('text')
+  const [fieldKind, setFieldKind] = useState<FieldKind>((saved.fieldKind as FieldKind) ?? 'text')
   const [fieldEdit, setFieldEdit] = useState<{ pageId: number; rect: Rect | null; widget: WidgetInfo | null } | null>(null)
   const [linkEdit, setLinkEdit] = useState<{ pageId: number; rect: Rect | null; index: number | null } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -428,6 +432,35 @@ export default function App() {
       setStatus(m.workflows.batchDone(r.done, r.failed.length, file))
     })
   }
+
+  // ---- layout ------------------------------------------------------------------------------
+
+  // Saved as it changes. Drawer state on narrow screens isn't a preference, so it's left alone.
+  useEffect(() => {
+    const files = tabs.map((t) => paths.current.get(t.id)).filter((p): p is string => !!p)
+    const activePath = active === null ? undefined : paths.current.get(active)
+    saveLayout({
+      leftOpen: narrow ? (saved.leftOpen ?? true) : leftOpen,
+      rightOpen: narrow ? (saved.rightOpen ?? true) : rightOpen,
+      tab, zoom, colors, strokeWidth, fieldKind,
+      files, activeFile: activePath ? files.indexOf(activePath) : -1,
+    })
+  }, [leftOpen, rightOpen, tab, zoom, colors, strokeWidth, fieldKind, tabs, active, narrow, saved])
+
+  // The desktop app reopens the documents that were open last time.
+  useEffect(() => {
+    if (!isDesktop || !saved.files?.length) return
+    const files = saved.files
+    void Promise.all(files.map((p) => readPath(p).catch(() => null))).then(async (read) => {
+      const ok = files.filter((_, i) => read[i])
+      if (!ok.length) return
+      await openFiles(read.filter((f): f is File => !!f), false, ok)
+      const target = files[saved.activeFile ?? -1]
+      const id = [...paths.current].find(([, p]) => p === target)?.[0]
+      if (id !== undefined) void switchTab(id)
+    })
+    // Once, at startup.
+  }, [])
 
   // ---- themes and snippets -----------------------------------------------------------------
 
