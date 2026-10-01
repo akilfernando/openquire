@@ -8,19 +8,22 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Area | What you can do |
 | --- | --- |
 | View | Fast, accurate rendering, zoom, thumbnails, find with match navigation, text selection and copy |
-| Edit | Edit existing lines of text in place; text boxes; images; whiteout |
+| Edit | Edit whole paragraphs that reflow, in the document's own embedded fonts; text boxes; move, resize, replace and delete images; erase graphics; whiteout; links |
 | Comment | Highlight, underline and strike through text; sticky notes; pen, rectangles, ellipses, arrows; threaded replies; comments panel with filtering |
 | Organize | Merge PDFs and other files, drag to reorder, rotate, delete, extract, insert blank pages, crop |
 | Split | By page ranges (`1-3, 4-6, 7-`) or every page, as a zip; each part keeps its structure |
-| Forms | Fill text fields, checkboxes, radio buttons and dropdowns directly on the page; flatten |
+| Forms | Fill text fields, checkboxes, radio buttons and dropdowns on the page; design forms (add, move, resize and configure fields); detect fields automatically; flatten |
 | Sign | Draw, type or upload a signature, remembered on this device |
-| Digital signatures | Sign with a certificate (.p12/.pfx) or a self-signed ID created in the app; visible or invisible; multiple signatures; validity panel that detects tampering. Later edits are appended so signatures stay valid. |
+| Digital signatures | Sign with a certificate (.p12/.pfx) or a self-signed ID created in the app; certify documents; trusted timestamps and long-term validation (PAdES B-T, B-LT and B-LTA); trust chains checked against bundled and user-added roots; later edits are appended so signatures stay valid |
 | OCR | Recognize text on scanned pages (English) and add an invisible, searchable, selectable text layer, entirely on-device |
 | Redact | Mark areas, text selections, search terms or patterns (emails, phone/card numbers, dates, URLs), then apply. Only the covered content is removed. |
+| Accessibility | Check against PDF/UA; tag untagged documents automatically (headings, paragraphs, figures, links, form fields); edit tag types, reading order and alternate text |
+| Archive | Save as PDF/A-2b or 3b (validated with veraPDF) and run a quick PDF/A check |
+| Sanitize | Remove metadata, hidden text and layers, scripts, attachments, comments and earlier revisions |
 | Stamp | Headers, footers, page numbers, Bates numbering and watermarks, written into the page |
 | Protect | Open password-protected PDFs; add, change or remove AES-256 passwords and permissions |
 | Compress | Lossless clean-up, or image downsampling and re-compression |
-| Bookmarks & files | Add, rename and delete bookmarks; attach, extract and remove embedded files |
+| Bookmarks & files | Add, rename and delete bookmarks; page labels; attach, extract and remove embedded files |
 | Convert | Open Word, Excel, PowerPoint, EPUB, HTML, text and images as PDF; export PNG, text or HTML |
 | Properties | Title, author, subject and keywords |
 | Undo | Unlimited undo and redo for every change |
@@ -71,15 +74,16 @@ missing.
 
 ## Known limitations
 
-- **Text editing** works one line at a time and uses the closest standard font (Helvetica, Times or
-  Courier), with Western European characters only.
-- **Digital signatures** check integrity and the signer's certificate, but not trust chains, revocation
-  or timestamps (no LTV). Signatures are `adbe.pkcs7.detached`, not PAdES baseline profiles. Signing a
+- **Text editing** falls back to a standard font when the original font is not embedded or is missing
+  characters for the new text.
+- **Revocation checks** (OCSP and CRL) can't run from a web page, because certificate authorities don't
+  allow cross-origin requests. The desktop app and command-line tool (0.6) will do them. Signing a
   password-protected document requires removing the password first.
+- **Automatic tagging** recognises headings, paragraphs and figures, but not tables or lists, and reading
+  order follows the content order. Review the result in the Accessibility panel.
 - **OCR** is English only, and its text uses the standard Latin font set.
 - **Office conversion** is basic: complex layouts, and some formatting such as bold headings, may not survive.
 - **No PDF to Word** export.
-- **No accessibility tagging** or PDF/A validation.
 - **Large downloads:** the WebAssembly engine is about 10 MB (4.8 MB gzipped) on first load; OCR
   fetches a further 15 MB the first time it's used.
 

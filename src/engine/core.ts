@@ -5,6 +5,7 @@ import { certFromDer, certsFromPem, nameOf, binary, type Fetcher } from './pki'
 import roots from './roots.json'
 import forge from 'node-forge'
 import { checkPdfA, convertToPdfA, type PdfAPart } from './pdfa'
+import { autoTag, checkAccessibility, moveTag, structure, updateTag, type TagType } from './tagging'
 import { addValidationData, checkRevocationOnline, createDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
 import {
   hexOf,
@@ -1377,6 +1378,35 @@ export class Engine {
   /** A quick check of the current document against common PDF/A requirements. */
   checkPdfA() {
     return checkPdfA(this.save({ compress: 'none', security: { mode: 'keep' } }))
+  }
+
+  // ---- accessibility ----
+
+  /** Tags the whole document for assistive technology, replacing any existing tags. */
+  autoTag(lang: string) {
+    let notes: string[] = []
+    const title = this.meta().title || this.name.replace(/.pdf$/i, '')
+    this.op('Add tags', () => (notes = autoTag(this.d, { lang, title })))
+    return { state: this.state(), notes }
+  }
+
+  checkAccessibility() {
+    return checkAccessibility(this.d)
+  }
+
+  /** The document's tags in reading order. */
+  tags() {
+    return structure(this.d)
+  }
+
+  updateTag(id: number, change: { type?: TagType; alt?: string }) {
+    this.op('Edit tag', () => updateTag(this.d, id, change), [])
+    return this.tags()
+  }
+
+  moveTag(id: number, delta: number) {
+    this.op('Reorder tags', () => moveTag(this.d, id, delta), [])
+    return this.tags()
   }
 
   // ---- sanitize ----

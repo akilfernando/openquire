@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  BadgeCheck, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
+  Accessibility as AccessibilityIcon, ArrowDown, ArrowUp, BadgeCheck, CircleAlert, CircleCheck, TriangleAlert, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
 } from 'lucide-react'
-import { requestRender } from '../engine/client'
+import { engine, requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
+import { TAG_TYPES, type AccessibilityProblem, type TagNode, type TagType } from '../engine/tagging'
 import { arrowNavigate } from '../focus'
 import { kb } from '../util'
 import { m } from '../i18n'
 
-export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures'
+export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures' | 'accessibility'
 
 export interface SideActions {
   goTo: (pageId: number) => void
@@ -28,6 +29,9 @@ export interface SideActions {
   checkRevocation: () => void
   addValidationData: () => void
   addDocumentTimestamp: () => void
+  autoTag: (lang: string) => void
+  updateTag: (id: number, change: { type?: TagType; alt?: string }) => void
+  moveTag: (id: number, delta: number) => void
 }
 
 interface Props {
@@ -321,6 +325,89 @@ function Signatures({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   )
 }
 
+function Accessibility({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
+  const [tags, setTags] = useState<TagNode[]>([])
+  const [report, setReport] = useState<{ tagged: boolean; problems: AccessibilityProblem[] } | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [lang, setLang] = useState(() => navigator.language || 'en-US')
+  // Tags and the report follow every change to the document.
+  useEffect(() => {
+    let live = true
+    void engine.tags().then((t) => live && setTags(t))
+    if (checking) void engine.checkAccessibility().then((r) => live && setReport(r))
+    return () => {
+      live = false
+    }
+  }, [doc, checking])
+  const go = (i: number | undefined) => {
+    const page = i !== undefined && i >= 0 ? doc.pages[i] : undefined
+    if (page) actions.goTo(page.id)
+  }
+  const errors = report?.problems.filter((p) => p.severity === 'error').length ?? 0
+  return (
+    <div className="pane">
+      <label className="field">
+        <span>{m.sidebar.a11y.language}</span>
+        <input value={lang} onChange={(e) => setLang(e.target.value)} spellCheck={false} />
+      </label>
+      <div className="row">
+        <button onClick={() => actions.autoTag(lang.trim() || 'en-US')}>{tags.length ? m.sidebar.a11y.retag : m.sidebar.a11y.tag}</button>
+        <button onClick={() => setChecking(true)}>{m.sidebar.a11y.check}</button>
+      </div>
+      <p className="hint">{m.sidebar.a11y.hint}</p>
+
+      {checking && report && (
+        <section className="a11y-report" aria-live="polite">
+          <div className={`pane-heading${errors ? ' error' : ''}`}>
+            {errors ? <CircleAlert size={14} /> : <CircleCheck size={14} />}
+            {m.sidebar.a11y.summary(errors, report.problems.length - errors)}
+          </div>
+          <ul className="tree">
+            {report.problems.map((p, i) => (
+              <li key={i} className="tree-item problem" onClick={() => go(p.page)}>
+                {p.severity === 'error' ? <CircleAlert size={14} className="error" /> : <TriangleAlert size={14} className="faint" />}
+                <span className="label wrap">{p.message}</span>
+                {p.page !== undefined && <span className="faint small tnum">{m.sidebar.a11y.page(p.page + 1)}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <div className="pane-heading">{m.sidebar.a11y.order}</div>
+      {!tags.length && <div className="empty-note">{m.sidebar.a11y.untagged}</div>}
+      <ol className="tag-list">
+        {tags.map((t, i) => (
+          <li key={t.id} className="tag-item">
+            <div className="tag-head">
+              {(TAG_TYPES as string[]).includes(t.type) ? (
+                <select aria-label={m.sidebar.a11y.type} value={t.type} onChange={(e) => actions.updateTag(t.id, { type: e.target.value as TagType })}>
+                  {TAG_TYPES.map((k) => <option key={k} value={k}>{m.sidebar.a11y.types[k]}</option>)}
+                </select>
+              ) : (
+                <span className="tag-type">{m.sidebar.a11y.types[t.type] ?? t.type}</span>
+              )}
+              <span className="muted small tnum">{t.page >= 0 ? m.sidebar.a11y.page(t.page + 1) : ''}</span>
+              <span className="grow" />
+              <button className="clickable-icon" aria-label={m.sidebar.a11y.earlier} title={m.sidebar.a11y.earlier} disabled={i === 0} onClick={() => actions.moveTag(t.id, -1)}><ArrowUp size={14} /></button>
+              <button className="clickable-icon" aria-label={m.sidebar.a11y.later} title={m.sidebar.a11y.later} disabled={i === tags.length - 1} onClick={() => actions.moveTag(t.id, 1)}><ArrowDown size={14} /></button>
+            </div>
+            {t.type === 'Figure' ? (
+              <input
+                key={t.alt} defaultValue={t.alt} placeholder={m.sidebar.a11y.altPlaceholder} aria-label={m.sidebar.a11y.alt}
+                onBlur={(e) => e.target.value !== t.alt && actions.updateTag(t.id, { alt: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              />
+            ) : (
+              <button className="tag-text" onClick={() => go(t.page)}>{t.text || m.sidebar.a11y.noText}</button>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 export default function Sidebar(props: Props) {
   const { doc, tab, onTab } = props
   const comments = doc.pages.reduce((n, p) => n + p.annots.filter((a) => a.replyTo === null).length, 0)
@@ -330,6 +417,7 @@ export default function Sidebar(props: Props) {
     { id: 'comments', label: m.sidebar.tabs.comments, Icon: MessageSquare, count: comments },
     { id: 'attachments', label: m.sidebar.tabs.attachments, Icon: Paperclip, count: doc.attachments.length },
     { id: 'signatures', label: m.sidebar.tabs.signatures, Icon: BadgeCheck, count: doc.signatures.length },
+    { id: 'accessibility', label: m.sidebar.tabs.accessibility, Icon: AccessibilityIcon },
   ]
   const current = tabs.find((t) => t.id === tab)!
   return (
@@ -352,6 +440,7 @@ export default function Sidebar(props: Props) {
       {tab === 'comments' && <Comments {...props} />}
       {tab === 'attachments' && <Attachments {...props} />}
       {tab === 'signatures' && <Signatures {...props} />}
+      {tab === 'accessibility' && <Accessibility {...props} />}
     </aside>
   )
 }

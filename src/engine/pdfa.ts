@@ -149,6 +149,22 @@ export function convertToPdfA(source: mupdf.PDFDocument, opts: PdfAOptions): Pdf
     const annots = doc.findPage(i).get('Annots')
     if (annots.isArray()) annots.forEach((a) => a.resolve().get('Subtype').toString() !== '/Popup' && a.resolve().put('F', 4))
   }
+  // TrueType CID fonts must state their glyph mapping; Identity is what a missing entry means.
+  const fonts = new Set<number>()
+  const fixFonts = (res: mupdf.PDFObject, depth: number) => {
+    if (!res.isDictionary() || depth > 8) return
+    res.get('Font').forEach((f) => {
+      if (f.isIndirect() && fonts.has(f.asIndirect())) return
+      if (f.isIndirect()) fonts.add(f.asIndirect())
+      f.resolve().get('DescendantFonts').forEach((c) => {
+        const cid = c.resolve()
+        if (cid.get('Subtype').toString() === '/CIDFontType2' && cid.get('CIDToGIDMap').isNull()) cid.put('CIDToGIDMap', 'Identity')
+      })
+    })
+    res.get('XObject').forEach((x) => fixFonts(x.resolve().get('Resources'), depth + 1))
+  }
+  for (let i = 0; i < count; i++) fixFonts(doc.findPage(i).getInheritable('Resources'), 0)
+
   const it = doc.outlineIterator()
   const insert = (items: Bookmark[]) => {
     for (const b of items) {
@@ -234,22 +250,8 @@ export function checkPdfA(bytes: Uint8Array): { part: number | null; problems: s
   const open = root.get('OpenAction')
   if (!root.get('Names', 'JavaScript').isNull() || (open.isDictionary() && open.get('S').toString() === '/JavaScript')) problems.push('The file contains JavaScript.')
 
-  const fonts = new Set<number>()
+  for (const font of unembeddedFonts(pdf)) problems.push(`The font ${font} is not embedded.`)
   for (let i = 0; i < pdf.countPages(); i++) {
-    const walk = (res: mupdf.PDFObject, depth: number) => {
-      if (!res.isDictionary() || depth > 8) return
-      res.get('Font').forEach((f) => {
-        if (!f.isIndirect() || fonts.has(f.asIndirect())) return
-        fonts.add(f.asIndirect())
-        const d = f.resolve()
-        if (d.get('Subtype').toString() === '/Type3') return
-        const desc = d.get('DescendantFonts').isArray() ? d.get('DescendantFonts').get(0).resolve().get('FontDescriptor') : d.get('FontDescriptor')
-        if (!['FontFile', 'FontFile2', 'FontFile3'].some((k) => desc.isDictionary() && !desc.get(k).isNull()))
-          problems.push(`The font ${d.get('BaseFont').isName() ? d.get('BaseFont').asName() : 'unnamed'} is not embedded.`)
-      })
-      res.get('XObject').forEach((x) => walk(x.resolve().get('Resources'), depth + 1))
-    }
-    walk(pdf.findPage(i).getInheritable('Resources'), 0)
     const annots = pdf.findPage(i).get('Annots')
     if (annots.isArray())
       annots.forEach((a) => {
@@ -263,4 +265,25 @@ export function checkPdfA(bytes: Uint8Array): { part: number | null; problems: s
   }
   pdf.destroy()
   return { part, problems: [...new Set(problems)] }
+}
+
+/** Names of the fonts used by page content that are not embedded. */
+export function unembeddedFonts(pdf: mupdf.PDFDocument): string[] {
+  const seen = new Set<number>()
+  const names: string[] = []
+  const walk = (res: mupdf.PDFObject, depth: number) => {
+    if (!res.isDictionary() || depth > 8) return
+    res.get('Font').forEach((f) => {
+      if (!f.isIndirect() || seen.has(f.asIndirect())) return
+      seen.add(f.asIndirect())
+      const d = f.resolve()
+      if (d.get('Subtype').toString() === '/Type3') return
+      const desc = d.get('DescendantFonts').isArray() ? d.get('DescendantFonts').get(0).resolve().get('FontDescriptor') : d.get('FontDescriptor')
+      if (!['FontFile', 'FontFile2', 'FontFile3'].some((k) => desc.isDictionary() && !desc.get(k).isNull()))
+        names.push(d.get('BaseFont').isName() ? d.get('BaseFont').asName() : 'unnamed')
+    })
+    res.get('XObject').forEach((x) => walk(x.resolve().get('Resources'), depth + 1))
+  }
+  for (let i = 0; i < pdf.countPages(); i++) walk(pdf.findPage(i).getInheritable('Resources'), 0)
+  return names
 }

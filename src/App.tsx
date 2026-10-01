@@ -498,6 +498,22 @@ export default function App() {
         download(bytes, `${state.name}.pdf`)
         setStatus(m.status.timestampAdded)
       }),
+    autoTag: (lang) =>
+      void run(m.busy.tagging, async () => {
+        const { state, notes } = await engine.autoTag(lang)
+        apply(state)
+        setStatus(m.status.tagged(notes))
+      }),
+    updateTag: (id, change) =>
+      void run(m.busy.tagging, async () => {
+        await engine.updateTag(id, change)
+        apply(await engine.state())
+      }),
+    moveTag: (id, delta) =>
+      void run(m.busy.tagging, async () => {
+        await engine.moveTag(id, delta)
+        apply(await engine.state())
+      }),
   }
 
   // ---- tool panel actions -------------------------------------------------------------------
@@ -627,7 +643,7 @@ export default function App() {
     { id: 'zoom-actual', name: m.actions.actualSize, enabled: has, run: () => setZoom(1) },
     { id: 'left', name: m.actions.toggleLeft, icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
     { id: 'right', name: m.actions.toggleRight, icon: PanelRight, enabled: has, run: () => setRightOpen((o) => !o) },
-    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures'] as SideTab[]).map((t) => ({
+    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility'] as SideTab[]).map((t) => ({
       id: `show-${t}`, name: m.actions.showPanel[t], enabled: has, run: () => { setLeftOpen(true); setTab(t) },
     })),
     ...ALL_TOOLS.map((t) => ({ id: `tool-${t.id}`, name: m.actions.tool(t.name), icon: t.Icon, enabled: has, run: () => setTool(t.id) })),

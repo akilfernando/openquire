@@ -328,3 +328,31 @@ test('saves a PDF/A copy', async ({ page }) => {
   await page.getByRole('button', { name: 'Check PDF/A' }).click()
   await expect(page.locator('.status-bar')).toContainText('Not PDF/A')
 })
+
+test('tags a document and edits its reading order', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('tab', { name: 'Accessibility' }).click()
+  await expect(page.getByText('This document has no tags yet.')).toBeVisible()
+  await page.getByRole('button', { name: 'Check accessibility' }).click()
+  await expect(page.locator('.a11y-report')).toContainText('The document is not tagged')
+
+  await page.getByRole('button', { name: 'Tag document' }).click()
+  await expect(page.locator('.status-bar')).toContainText('Tagged the document.')
+  const items = page.locator('.tag-item')
+  await expect(items.first()).toBeVisible()
+  await expect(page.locator('.a11y-report')).not.toContainText('The document is not tagged')
+  const count = await items.count()
+  expect(count).toBeGreaterThan(2)
+
+  // Move the second tag first, then change its type.
+  const second = (await items.nth(1).locator('.tag-text').textContent())!
+  await items.nth(1).getByRole('button', { name: 'Read earlier' }).click()
+  await expect(items.first().locator('.tag-text')).toHaveText(second)
+  await items.first().getByRole('combobox', { name: 'Tag type' }).selectOption('H1')
+  await expect(items.first().getByRole('combobox', { name: 'Tag type' })).toHaveValue('H1')
+
+  const results = await new AxeBuilder({ page }).include('.sidebar.left').withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ') + ' ' + n.failureSummary).join(', ')}`)).toEqual([])
+  const bytes = new TextDecoder('latin1').decode(await save(page))
+  expect(bytes).toContain('StructTreeRoot')
+})

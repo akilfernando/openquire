@@ -55,7 +55,7 @@ export const en = {
     actualSize: 'Actual size',
     toggleLeft: 'Toggle left sidebar',
     toggleRight: 'Toggle right sidebar',
-    showPanel: { pages: 'Show pages', bookmarks: 'Show bookmarks', comments: 'Show comments', attachments: 'Show attachments', signatures: 'Show signatures' },
+    showPanel: { pages: 'Show pages', bookmarks: 'Show bookmarks', comments: 'Show comments', attachments: 'Show attachments', signatures: 'Show signatures', accessibility: 'Show accessibility and tags' },
     tool: (name: string) => `Tool: ${name}`,
     signImage: 'Add signature image',
     digitalSign: 'Sign with a digital ID',
@@ -92,6 +92,7 @@ export const en = {
   },
 
   busy: {
+    tagging: 'Updating tags',
     opening: 'Opening', saving: 'Saving', searching: 'Searching', placingImage: 'Placing image', adding: 'Adding', moving: 'Moving',
     resizing: 'Resizing', savingText: 'Saving text', fillingForm: 'Filling form', editingText: 'Editing text', cropping: 'Cropping',
     movingPages: 'Moving pages', addingBookmark: 'Adding bookmark', renaming: 'Renaming', deleting: 'Deleting', replying: 'Replying',
@@ -104,6 +105,7 @@ export const en = {
   },
 
   status: {
+    tagged: (notes: string[]) => ['Tagged the document.', ...notes].join(' '),
     error: (message: string) => `Error: ${message}`,
     saved: (file: string, size: string) => `Saved ${file}, ${size}`,
     split: (n: number) => `Split into ${plural(n, 'file', 'files')}`,
@@ -151,8 +153,29 @@ export const en = {
 
   sidebar: {
     label: 'Sidebar',
-    tabs: { pages: 'Pages', bookmarks: 'Bookmarks', comments: 'Comments', attachments: 'Attachments', signatures: 'Signatures' },
+    tabs: { pages: 'Pages', bookmarks: 'Bookmarks', comments: 'Comments', attachments: 'Attachments', signatures: 'Signatures', accessibility: 'Accessibility' },
     tabWithCount: (label: string, count: number) => `${label}, ${count}`,
+    a11y: {
+      language: 'Document language',
+      tag: 'Tag document',
+      retag: 'Tag again',
+      check: 'Check accessibility',
+      hint: 'Tagging marks headings, paragraphs, figures, links and form fields so screen readers can follow the document. Tagging again replaces your changes to the tags.',
+      summary: (errors: number, warnings: number) =>
+        errors || warnings
+          ? [errors ? plural(errors, 'problem', 'problems') : '', warnings ? plural(warnings, 'warning', 'warnings') : ''].filter(Boolean).join(', ')
+          : 'No problems found',
+      page: (n: number) => `p. ${n}`,
+      order: 'Reading order',
+      untagged: 'This document has no tags yet.',
+      type: 'Tag type',
+      types: { P: 'Paragraph', H1: 'Heading 1', H2: 'Heading 2', H3: 'Heading 3', Figure: 'Figure', Link: 'Link', Form: 'Form field', Annot: 'Comment', Document: 'Document', Table: 'Table', L: 'List' } as Record<string, string>,
+      earlier: 'Read earlier',
+      later: 'Read later',
+      alt: 'Alternate text',
+      altPlaceholder: 'Describe this figure',
+      noText: 'No text',
+    },
     pagesList: 'Pages',
     pageOption: (label: string, first: boolean) =>
       `Page ${label}${first ? '. Use arrow keys to move between pages and Ctrl with arrow keys to reorder' : ''}`,
