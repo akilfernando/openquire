@@ -74,6 +74,7 @@ export const en = {
     applyRedactions: 'Apply redactions',
     flattenForm: 'Flatten form fields',
     flattenComments: 'Flatten comments and markup',
+    sanitize: 'Sanitize document',
     exportPng: 'Export pages as PNG images',
     exportText: 'Export text',
     exportHtml: 'Export HTML',
@@ -96,7 +97,7 @@ export const en = {
     splitting: 'Splitting', stamping: 'Stamping', redacting: 'Redacting', flattening: 'Flattening', renderingImages: 'Rendering images',
     extractingText: 'Extracting text', converting: 'Converting', savingProperties: 'Saving properties', startingOcr: 'Starting OCR',
     recoloring: 'Recoloring', undoing: 'Undoing', redoing: 'Redoing', creating: 'Creating', attaching: 'Attaching', resizingText: 'Resizing text',
-    numbering: 'Numbering pages', linking: 'Updating links', editingImage: 'Editing image', erasing: 'Erasing graphics', editingForm: 'Editing form', detecting: 'Detecting fields',
+    numbering: 'Numbering pages', linking: 'Updating links', editingImage: 'Editing image', erasing: 'Erasing graphics', editingForm: 'Editing form', detecting: 'Detecting fields', sanitizing: 'Sanitizing',
     recognizing: (page: number, total: number) => `Recognizing text, page ${page} of ${total}`,
   },
 
@@ -234,6 +235,9 @@ export const en = {
     flattenForm: 'Flatten form',
     flattenComments: 'Flatten comments',
     flattenHint: 'Flattening makes field values and markup a permanent part of the page.',
+    sanitize: 'Sanitize',
+    sanitizeHint: 'Remove metadata, attachments, scripts, hidden text and other hidden information before sharing.',
+    sanitizeButton: 'Sanitize document',
     designForm: 'Design form',
     detectFields: 'Detect fields',
     designHint: 'Add fields with the Form field tool, or detect them on a flat form from its boxes, lines and blanks.',
@@ -282,6 +286,32 @@ export const en = {
     cancel: 'Cancel',
     save: 'Save',
     add: 'Add field',
+  },
+
+  sanitize: {
+    title: 'Sanitize document',
+    intro: 'Removes hidden and potentially sensitive information before you share a document. Choose what to remove:',
+    options: {
+      metadata: 'Metadata (author, title, XMP, application data)',
+      attachments: 'Attached files',
+      scripts: 'JavaScript and other actions',
+      comments: 'Comments and markup',
+      links: 'Links',
+      bookmarks: 'Bookmarks',
+      hiddenLayers: 'Content on hidden layers',
+      hiddenText: 'Hidden text, including OCR text layers',
+    } as Record<string, string>,
+    formData: 'Form data',
+    formModes: { keep: 'Keep', clear: 'Clear the answers', flatten: 'Flatten into the page' },
+    signedWarning: 'This document is digitally signed. Sanitizing changes it, so its signatures will be removed.',
+    saveNote: 'Save afterwards: the saved file is rewritten completely, so removed information does not survive in earlier revisions.',
+    cancel: 'Cancel',
+    apply: 'Sanitize',
+    summary: (r: Record<string, number>) => {
+      const labels: Record<string, string> = { metadata: 'metadata', attachments: 'attachments', scripts: 'scripts', comments: 'comments', links: 'links', bookmarks: 'bookmarks', formFields: 'form answers', hiddenText: 'hidden text runs', hiddenLayers: 'hidden layer items', signatures: 'signatures' }
+      const parts = Object.entries(r).filter(([, n]) => n).map(([k, n]) => `${n} ${labels[k]}`)
+      return parts.length ? `Removed ${parts.join(', ')}. Save to keep the result.` : 'Nothing needed removing.'
+    },
   },
 
   images: {

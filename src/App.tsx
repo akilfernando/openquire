@@ -9,6 +9,7 @@ import CommandPalette, { type Command } from './components/CommandPalette'
 import DigitalSignDialog from './components/DigitalSignDialog'
 import LinkDialog from './components/LinkDialog'
 import FieldDialog from './components/FieldDialog'
+import SanitizeDialog from './components/SanitizeDialog'
 import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsModal, { type Settings } from './components/SettingsModal'
@@ -85,6 +86,7 @@ export default function App() {
   const [signing, setSigning] = useState(false)
   const [digitalSigning, setDigitalSigning] = useState(false)
   const [palette, setPalette] = useState(false)
+  const [sanitizing, setSanitizing] = useState(false)
   const [fieldKind, setFieldKind] = useState<FieldKind>('text')
   const [fieldEdit, setFieldEdit] = useState<{ pageId: number; rect: Rect | null; widget: WidgetInfo | null } | null>(null)
   const [linkEdit, setLinkEdit] = useState<{ pageId: number; rect: Rect | null; index: number | null } | null>(null)
@@ -535,6 +537,7 @@ export default function App() {
     digitalSign: () => setDigitalSigning(true),
     setLabels: (style, prefix, start) => void run(m.busy.numbering, async () => apply(await engine.setPageLabels(labelPageId(), style, prefix, start))),
     designForm: () => setTool('field'),
+    sanitize: () => setSanitizing(true),
     detectFields: () =>
       void run(m.busy.detecting, async () => {
         const { count, state } = await engine.detectFields()
@@ -604,6 +607,7 @@ export default function App() {
     ...STAMP_PRESETS.map(([name, spec], i) => ({ id: `stamp-${i}`, name, enabled: has, run: () => panelActions.stamp(spec) })),
     { id: 'apply-redactions', name: m.actions.applyRedactions, icon: EyeOff, enabled: has, run: panelActions.applyRedactions },
     { id: 'flatten-form', name: m.actions.flattenForm, enabled: has, run: () => panelActions.flatten(false, true) },
+    { id: 'sanitize', name: m.actions.sanitize, enabled: has, run: () => setSanitizing(true) },
     { id: 'flatten-comments', name: m.actions.flattenComments, enabled: has, run: () => panelActions.flatten(true, false) },
     { id: 'export-png', name: m.actions.exportPng, enabled: has, run: panelActions.exportImages },
     { id: 'export-text', name: m.actions.exportText, enabled: has, run: panelActions.exportText },
@@ -896,6 +900,19 @@ export default function App() {
           />
         )
       })()}
+      {sanitizing && doc && (
+        <SanitizeDialog
+          signed={doc.signatures.length > 0} onClose={() => setSanitizing(false)}
+          onApply={(opts) => {
+            setSanitizing(false)
+            void run(m.busy.sanitizing, async () => {
+              const { report, state } = await engine.sanitize(opts)
+              apply(state)
+              setStatus(m.sanitize.summary(report))
+            })
+          }}
+        />
+      )}
       {fieldEdit && doc && (() => {
         const groups = [...new Set(doc.pages.flatMap((p) => p.widgets).filter((w) => w.kind === 'radio').map((w) => w.name))]
         const w = fieldEdit.widget

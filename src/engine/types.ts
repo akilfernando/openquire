@@ -240,3 +240,19 @@ export interface FieldProps {
   maxLen?: number
   options?: string[]
 }
+
+export interface SanitizeOptions {
+  metadata?: boolean
+  attachments?: boolean
+  /** JavaScript and other active actions (launch, submit, multimedia). */
+  scripts?: boolean
+  comments?: boolean
+  links?: boolean
+  bookmarks?: boolean
+  formData?: 'keep' | 'clear' | 'flatten'
+  /** Text that is never drawn, including OCR text layers. */
+  hiddenText?: boolean
+  hiddenLayers?: boolean
+}
+
+export type SanitizeReport = Record<'metadata' | 'attachments' | 'scripts' | 'comments' | 'links' | 'bookmarks' | 'formFields' | 'hiddenText' | 'hiddenLayers' | 'signatures', number>

@@ -23,6 +23,7 @@ export interface PanelActions {
   digitalSign: () => void
   setLabels: (style: PageLabelStyle, prefix: string, start: number) => void
   designForm: () => void
+  sanitize: () => void
   detectFields: () => void
   removeLabels: () => void
 }
@@ -273,6 +274,11 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
         <Ocr doc={doc} selectedCount={selectedCount} actions={actions} />
         <Stamps actions={actions} scope={scope} />
         <Redaction doc={doc} actions={actions} />
+
+        <Section title={m.panel.sanitize}>
+          <p className="hint">{m.panel.sanitizeHint}</p>
+          <button onClick={actions.sanitize}>{m.panel.sanitizeButton}</button>
+        </Section>
 
         <Section title={m.panel.digitalSignature} count={doc.signatures.length || undefined}>
           <p className="hint">{m.panel.digitalSignatureHint}</p>

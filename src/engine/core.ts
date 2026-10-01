@@ -1,6 +1,6 @@
 import * as mupdf from 'mupdf'
 import { zipSync } from 'fflate'
-import { findImageDraws, fmt, imageWarp, invert, multiply, patch, type Matrix as CMatrix } from './content'
+import { findImageDraws, fmt, imageWarp, invert, multiply, patch, stripHidden, type Matrix as CMatrix } from './content'
 import { createDigitalId, readDigitalId, signPdf, verifySignatures } from './signing'
 import {
   hexOf,
@@ -23,6 +23,8 @@ import {
   type Quad,
   type RGB,
   type Rect,
+  type SanitizeOptions,
+  type SanitizeReport,
   type SaveOptions,
   type SearchHit,
   type SignRequest,
@@ -1350,6 +1352,189 @@ export class Engine {
   deleteBookmark(path: number[]) {
     this.op('Delete bookmark', () => this.outlineAt(path).delete(), [])
     return this.state()
+  }
+
+  // ---- sanitize ----
+
+  /**
+   * Removes hidden and potentially sensitive information. The next save rewrites the whole file,
+   * so earlier revisions and unused objects are dropped too. Existing digital signatures can't
+   * survive a rewrite, so they are removed rather than left broken.
+   */
+  sanitize(opts: SanitizeOptions) {
+    const report: SanitizeReport = {
+      metadata: 0, attachments: 0, scripts: 0, comments: 0, links: 0, bookmarks: 0,
+      formFields: 0, hiddenText: 0, hiddenLayers: 0, signatures: 0,
+    }
+    this.op('Sanitize document', () => {
+      const doc = this.d
+      const trailer = doc.getTrailer()
+      const root = trailer.get('Root')
+      const names = root.get('Names')
+      const objects = () => Array.from({ length: doc.countObjects() - 1 }, (_, i) => doc.newIndirect(i + 1).resolve()).filter((o) => o.isDictionary())
+
+      if (opts.metadata) {
+        const info = trailer.get('Info')
+        if (info.isDictionary()) {
+          info.forEach(() => report.metadata++)
+          trailer.delete('Info')
+        }
+        for (const o of objects())
+          for (const key of ['Metadata', 'PieceInfo', 'Thumb', 'LastModified'])
+            if (!o.get(key).isNull() && !(key === 'Metadata' && o === root)) {
+              o.delete(key)
+              report.metadata++
+            }
+        if (!root.get('Metadata').isNull()) {
+          root.delete('Metadata')
+          report.metadata++
+        }
+      }
+
+      if (opts.attachments && names.isDictionary() && !names.get('EmbeddedFiles').isNull()) {
+        report.attachments += Object.keys(doc.getEmbeddedFiles()).length
+        names.delete('EmbeddedFiles')
+      }
+
+      if (opts.scripts) {
+        if (names.isDictionary() && !names.get('JavaScript').isNull()) {
+          names.delete('JavaScript')
+          report.scripts++
+        }
+        const open = root.get('OpenAction')
+        if (open.isDictionary()) {
+          root.delete('OpenAction')
+          report.scripts++
+        }
+        for (const o of objects()) {
+          if (!o.get('AA').isNull()) {
+            o.delete('AA')
+            report.scripts++
+          }
+          const a = o.get('A')
+          const s = a.isDictionary() ? a.get('S').toString() : ''
+          if (['/JavaScript', '/Launch', '/SubmitForm', '/ImportData', '/ResetForm', '/Rendition', '/Sound', '/Movie'].includes(s)) {
+            o.delete('A')
+            report.scripts++
+          }
+        }
+      }
+
+      if (opts.bookmarks && !root.get('Outlines').isNull()) {
+        const count = (items: Bookmark[]): number => items.reduce((n, b) => n + 1 + count(b.children), 0)
+        report.bookmarks += count(this.outline())
+        root.delete('Outlines')
+      }
+
+      // Existing signatures are removed (see above).
+      const fields = root.get('AcroForm', 'Fields')
+      const walkFields = (fn: (f: mupdf.PDFObject) => void) => {
+        const visit = (f: mupdf.PDFObject) => {
+          fn(f)
+          const kids = f.get('Kids')
+          if (kids.isArray()) kids.forEach((k) => visit(k.resolve()))
+        }
+        if (fields.isArray()) fields.forEach((f) => visit(f.resolve()))
+      }
+      walkFields((f) => {
+        if (f.getInheritable('FT').toString() === '/Sig' && !f.get('V').isNull()) {
+          f.delete('V')
+          report.signatures++
+        }
+      })
+      if (report.signatures) root.get('AcroForm').delete('SigFlags')
+
+      // Optional content: which layers are hidden by default.
+      const oc = root.get('OCProperties')
+      const hidden = new Set<number>()
+      if (oc.isDictionary()) {
+        const d = oc.get('D')
+        const on = new Set<number>()
+        const refs = (arr: mupdf.PDFObject, set: Set<number>) => arr.isArray() && arr.forEach((r) => r.isIndirect() && set.add(r.asIndirect()))
+        refs(d.get('ON'), on)
+        if (d.get('BaseState').toString() === '/OFF') {
+          const all = new Set<number>()
+          refs(oc.get('OCGs'), all)
+          all.forEach((r) => !on.has(r) && hidden.add(r))
+        }
+        refs(d.get('OFF'), hidden)
+      }
+      const isHiddenOC = (ref: mupdf.PDFObject) => {
+        if (!ref.isIndirect()) return false
+        if (hidden.has(ref.asIndirect())) return true
+        // Membership dictionaries: hidden when every layer they depend on is hidden.
+        const ocgs = ref.resolve().get('OCGs')
+        if (ocgs.isArray() && ocgs.length) {
+          let all = true
+          ocgs.forEach((g) => (all &&= g.isIndirect() && hidden.has(g.asIndirect())))
+          return all
+        }
+        return false
+      }
+
+      for (const pageId of this.pageIds()) {
+        const page = this.page(pageId)
+        const pageObj = page.getObject()
+        for (const a of [...page.getAnnotations()]) {
+          const type = a.getType()
+          const layerHidden = opts.hiddenLayers && isHiddenOC(a.getObject().get('OC'))
+          if (layerHidden) report.hiddenLayers++
+          else if (opts.links && type === 'Link') report.links++
+          else if (opts.comments && type !== 'Link' && type !== 'Widget') {
+            if (type !== 'Popup') report.comments++
+          } else if (opts.attachments && type === 'FileAttachment') report.attachments++
+          else continue
+          page.deleteAnnotation(a)
+        }
+        if (opts.links) {
+          for (const l of page.getLinks()) {
+            page.deleteLink(l)
+            report.links++
+          }
+        }
+        page.destroy()
+
+        if (opts.hiddenText || opts.hiddenLayers) {
+          const res = pageObj.getInheritable('Resources')
+          const props = res.get('Properties')
+          const xobjects = res.get('XObject')
+          const c = this.pageContent(pageId)
+          const { text, counts } = stripHidden(c.text, {
+            invisibleText: !!opts.hiddenText,
+            isHiddenLayer: (name) => !!opts.hiddenLayers && props.isDictionary() && isHiddenOC(props.get(name)),
+            isHiddenXObject: (name) => !!opts.hiddenLayers && xobjects.isDictionary() && isHiddenOC(xobjects.get(name).resolve().get('OC')),
+          })
+          if (counts.text || counts.layers) c.write(text)
+          report.hiddenText += counts.text
+          report.hiddenLayers += counts.layers
+        }
+      }
+      if (opts.hiddenLayers && oc.isDictionary()) root.delete('OCProperties')
+
+      if (opts.formData === 'clear') {
+        walkFields((f) => {
+          if (!f.get('V').isNull() && f.getInheritable('FT').toString() !== '/Sig') {
+            f.delete('V')
+            report.formFields++
+          }
+        })
+        for (const pageId of this.pageIds()) {
+          const page = this.page(pageId)
+          for (const w of page.getWidgets()) {
+            if (w.isCheckbox() || w.isRadioButton()) w.getObject().put('AS', 'Off')
+            w.update()
+          }
+          page.destroy()
+        }
+      } else if (opts.formData === 'flatten') {
+        walkFields((f) => !f.get('FT').isNull() && report.formFields++)
+        doc.bake(false, true)
+      }
+    })
+    // The next save must rewrite everything, so nothing removed survives in an older revision.
+    this.signatures = []
+    this.lastSave = null
+    return { report, state: this.state() }
   }
 
   // ---- form designer ----

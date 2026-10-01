@@ -297,3 +297,17 @@ test('designs a form field and fills it in', async ({ page }) => {
   const values = Object.fromEntries(saved.loadPage(0).getWidgets().map((w) => [w.getName(), w.getValue()]))
   expect(values).toEqual({ Company: 'Teams Squared', Phone: '' })
 })
+
+test('sanitizes a document', async ({ page }) => {
+  await openReport(page)
+  await openSection(page, 'Properties')
+  await page.getByLabel('Author').fill('Secret Author')
+  await page.getByLabel('Author').blur()
+  await openSection(page, 'Sanitize')
+  await page.getByRole('button', { name: 'Sanitize document' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Sanitize document' })
+  await dialog.getByRole('button', { name: 'Sanitize' }).click()
+  await expect(page.locator('.status-bar')).toContainText('Removed')
+  const raw = new TextDecoder('latin1').decode(await save(page))
+  expect(raw).not.toContain('Secret Author')
+})

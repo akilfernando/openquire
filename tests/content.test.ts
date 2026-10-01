@@ -35,3 +35,37 @@ describe('content stream scanner', () => {
     expect(multiply(m, invert(m)).map((v) => +v.toFixed(9) + 0)).toEqual([1, 0, 0, 1, 0, 0])
   })
 })
+
+import { stripHidden } from '../src/engine/content'
+
+describe('stripping hidden content', () => {
+  const none = { isHiddenLayer: () => false, isHiddenXObject: () => false }
+
+  it('removes invisible text but keeps line moves and visible text', () => {
+    const src = 'BT /F1 12 Tf 3 Tr 10 10 Td (hidden) Tj [(a) 5 (b)] TJ (next) \' 0 Tr (shown) Tj ET'
+    const { text, counts } = stripHidden(src, { ...none, invisibleText: true })
+    expect(counts.text).toBe(3)
+    expect(text).not.toMatch(/hidden|\(a\)|next/)
+    expect(text).toContain('T*')
+    expect(text).toContain('(shown) Tj')
+  })
+
+  it('restores the render mode after Q', () => {
+    const src = 'q BT 3 Tr ET Q BT (visible) Tj ET'
+    expect(stripHidden(src, { ...none, invisibleText: true }).text).toContain('(visible) Tj')
+  })
+
+  it('removes hidden layer sections, including nested ones, and hidden forms', () => {
+    const src = '/OC /L1 BDC (secret) Tj /Span <<>> BDC (inner) Tj EMC EMC (kept) Tj /OC /L2 BDC (also kept) Tj EMC /Fm1 Do /Fm2 Do'
+    const { text, counts } = stripHidden(src, {
+      invisibleText: false,
+      isHiddenLayer: (n) => n === 'L1',
+      isHiddenXObject: (n) => n === 'Fm1',
+    })
+    expect(text).not.toMatch(/secret|inner|Fm1/)
+    expect(text).toContain('(kept) Tj')
+    expect(text).toContain('(also kept) Tj')
+    expect(text).toContain('/Fm2 Do')
+    expect(counts.layers).toBe(2)
+  })
+})

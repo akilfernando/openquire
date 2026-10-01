@@ -1,11 +1,23 @@
 /**
- * A small PDF content-stream scanner. It finds where images are drawn (`/Name Do` on an image
- * XObject) together with the transformation in effect, so individual images can be moved,
- * resized, replaced or removed by patching just those operators and leaving the rest of the
- * stream byte-for-byte intact.
+ * A small PDF content-stream tokenizer. It walks operators with their operands and offsets, so
+ * specific operations (an image draw, invisible text, a hidden layer's content) can be patched
+ * while the rest of the stream stays byte-for-byte intact.
  */
 
 export type Matrix = [number, number, number, number, number, number]
+
+export interface Operand {
+  text: string
+  start: number
+}
+
+export interface Op {
+  op: string
+  operands: Operand[]
+  /** From the first operand (or the operator itself) to the end of the operator. */
+  start: number
+  end: number
+}
 
 export interface ImageDraw {
   /** Resource name of the image XObject. */
@@ -33,17 +45,15 @@ const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0]
 const isSpace = (c: number) => c === 0 || c === 9 || c === 10 || c === 12 || c === 13 || c === 32
 const isDelim = (c: number) => c === 40 || c === 41 || c === 60 || c === 62 || c === 91 || c === 93 || c === 123 || c === 125 || c === 47 || c === 37
 
-/**
- * Lists every image drawn directly by a content stream. `isImage` says whether a resource
- * name refers to an image XObject (forms are drawn but not descended into).
- */
-export function findImageDraws(src: string, isImage: (name: string) => boolean): ImageDraw[] {
-  const draws: ImageDraw[] = []
-  const stack: Matrix[] = []
-  let ctm = IDENTITY
-  let operands: { text: string; start: number }[] = []
+/** Calls `visit` for every operator in a content stream, with its operands and offsets. */
+export function tokenize(src: string, visit: (op: Op) => void) {
+  let operands: Operand[] = []
   let i = 0
   const n = src.length
+  const emit = (op: string, start: number, end: number) => {
+    visit({ op, operands, start: operands[0]?.start ?? start, end })
+    operands = []
+  }
 
   while (i < n) {
     const c = src.charCodeAt(i)
@@ -79,54 +89,104 @@ export function findImageDraws(src: string, isImage: (name: string) => boolean):
       operands.push({ text: src.slice(start, i), start })
       continue
     }
-    // number or operator
     while (i < n && !isSpace(src.charCodeAt(i)) && !isDelim(src.charCodeAt(i))) i++
     const word = src.slice(start, i)
     if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(word) || word === 'true' || word === 'false' || word === 'null') {
       operands.push({ text: word, start })
       continue
     }
-    // An operator: act on it, then clear the operands.
-    switch (word) {
-      case 'q':
-        stack.push(ctm)
-        break
-      case 'Q':
-        ctm = stack.pop() ?? IDENTITY
-        break
-      case 'cm': {
-        const v = operands.slice(-6).map((o) => Number(o.text))
-        if (v.length === 6 && v.every(Number.isFinite)) ctm = multiply(v as Matrix, ctm)
-        break
+    if (word === 'BI') {
+      // Inline image: its data can contain anything, so skip straight to the EI operator.
+      const id = src.indexOf('ID', i)
+      let j = id < 0 ? n : id + 3
+      while (j < n) {
+        const e = src.indexOf('EI', j)
+        if (e < 0) { j = n; break }
+        if (isSpace(src.charCodeAt(e - 1)) && (e + 2 >= n || isSpace(src.charCodeAt(e + 2)))) { j = e + 2; break }
+        j = e + 2
       }
-      case 'Do': {
-        const op = operands.at(-1)
-        if (op?.text.startsWith('/')) {
-          const name = decodeName(op.text.slice(1))
-          if (isImage(name)) draws.push({ name, start: op.start, end: i, ctm })
-        }
-        break
-      }
-      case 'BI': {
-        // Inline image: skip its data, which can contain anything, up to the EI operator.
-        const id = src.indexOf('ID', i)
-        let j = id < 0 ? n : id + 3
-        while (j < n) {
-          const e = src.indexOf('EI', j)
-          if (e < 0) { j = n; break }
-          if (isSpace(src.charCodeAt(e - 1)) && (e + 2 >= n || isSpace(src.charCodeAt(e + 2)))) { j = e + 2; break }
-          j = e + 2
-        }
-        i = j
-        break
+      i = j
+      emit('BI', start, i)
+      continue
+    }
+    emit(word, start, i)
+  }
+}
+
+export const decodeName = (s: string) => s.replace(/#([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+
+/**
+ * Lists every image drawn directly by a content stream. `isImage` says whether a resource
+ * name refers to an image XObject (forms are drawn but not descended into).
+ */
+export function findImageDraws(src: string, isImage: (name: string) => boolean): ImageDraw[] {
+  const draws: ImageDraw[] = []
+  const stack: Matrix[] = []
+  let ctm = IDENTITY
+  tokenize(src, ({ op, operands, end }) => {
+    if (op === 'q') stack.push(ctm)
+    else if (op === 'Q') ctm = stack.pop() ?? IDENTITY
+    else if (op === 'cm') {
+      const v = operands.slice(-6).map((o) => Number(o.text))
+      if (v.length === 6 && v.every(Number.isFinite)) ctm = multiply(v as Matrix, ctm)
+    } else if (op === 'Do') {
+      const name = operands.at(-1)
+      if (name?.text.startsWith('/')) {
+        const decoded = decodeName(name.text.slice(1))
+        if (isImage(decoded)) draws.push({ name: decoded, start: name.start, end, ctm })
       }
     }
-    operands = []
-  }
+  })
   return draws
 }
 
-const decodeName = (s: string) => s.replace(/#([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+/**
+ * Removes content a reader never sees: text drawn invisibly (render mode 3, as OCR layers do)
+ * and content in hidden optional-content layers or hidden form XObjects.
+ */
+export function stripHidden(
+  src: string,
+  opts: { invisibleText: boolean; isHiddenLayer: (propertiesName: string) => boolean; isHiddenXObject: (name: string) => boolean },
+) {
+  const edits: { start: number; end: number; text: string }[] = []
+  const counts = { text: 0, layers: 0 }
+  const modes: number[] = []
+  let mode = 0
+  // Marked-content stack: the start offset of a hidden layer's BDC, or null for other sections.
+  const marked: (number | null)[] = []
+  const inHidden = () => marked.some((m) => m !== null)
+
+  tokenize(src, ({ op, operands, start, end }) => {
+    if (op === 'q') modes.push(mode)
+    else if (op === 'Q') mode = modes.pop() ?? 0
+    else if (op === 'Tr') mode = Number(operands.at(-1)?.text) || 0
+    else if (op === 'BMC') marked.push(null)
+    else if (op === 'BDC') {
+      const [tag, props] = operands
+      const hidden = !inHidden() && tag?.text === '/OC' && props?.text.startsWith('/') && opts.isHiddenLayer(decodeName(props.text.slice(1)))
+      marked.push(hidden ? start : null)
+    } else if (op === 'EMC') {
+      const from = marked.pop()
+      if (from !== null && from !== undefined) {
+        // Drop edits nested inside the removed section, then remove the whole section.
+        for (let k = edits.length - 1; k >= 0; k--) if (edits[k].start >= from) edits.splice(k, 1)
+        edits.push({ start: from, end, text: '' })
+        counts.layers++
+      }
+    } else if (inHidden()) {
+      return
+    } else if (op === 'Do' && operands.at(-1)?.text.startsWith('/') && opts.isHiddenXObject(decodeName(operands.at(-1)!.text.slice(1)))) {
+      edits.push({ start, end, text: '' })
+      counts.layers++
+    } else if (opts.invisibleText && mode === 3 && (op === 'Tj' || op === 'TJ' || op === "'" || op === '"')) {
+      // Keep the line moves that ' and " make, so any visible text after them stays in place.
+      const keep = op === "'" ? 'T*' : op === '"' ? `${operands[0]?.text ?? 0} Tw ${operands[1]?.text ?? 0} Tc T*` : ''
+      edits.push({ start, end, text: keep })
+      counts.text++
+    }
+  })
+  return { text: patch(src, edits), counts }
+}
 
 /** Applies replacements (by offset range) to a stream, working from the end so offsets stay valid. */
 export function patch(src: string, edits: { start: number; end: number; text: string }[]) {
