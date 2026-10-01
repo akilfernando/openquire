@@ -4,3 +4,6 @@ public/ocr
 *.local
 test-results
 playwright-report
+cli/dist
+cli/LICENSE
+cli/*.tgz

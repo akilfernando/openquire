@@ -1,0 +1,24 @@
+{
+  "name": "openquire",
+  "version": "0.6.0",
+  "description": "PDF tools on the command line and in Node: redact, stamp, OCR, sign, tag, convert to PDF/A, Word and Excel, and run OpenQuire workflows.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "bin": { "openquire": "dist/openquire.mjs" },
+  "main": "dist/index.mjs",
+  "types": "dist/types/cli/src/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/types/cli/src/index.d.ts", "import": "./dist/index.mjs" }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "mupdf": "^1.28.1",
+    "tesseract.js": "^7.0.0"
+  },
+  "keywords": ["pdf", "redact", "ocr", "sign", "pdfa", "accessibility", "cli", "mupdf"],
+  "homepage": "https://akilfernando.dev/openquire/",
+  "repository": { "type": "git", "url": "git+https://github.com/akilfernando/openquire.git", "directory": "cli" },
+  "bugs": "https://github.com/akilfernando/openquire/issues"
+}

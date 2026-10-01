@@ -54,6 +54,13 @@ npm run build    # production build in dist/ (static files, host anywhere)
 
 Requires Node 20+ and a current Chrome, Edge, Firefox or Safari.
 
+## Command line and Node
+
+The same engine runs without a browser. `cli/` builds the `openquire` package: a command-line tool
+(`openquire redact --pattern email ./folder`, `stamp`, `ocr`, `sign`, `run workflow.json`, `merge`,
+`compress`, `pdfa`, `tag`, `export`) and a Node library exporting the `Engine`. Build it with
+`npm run build:cli` and run `node cli/dist/openquire.mjs --help`. See [cli/README.md](cli/README.md).
+
 ## Translating
 
 All interface text lives in `src/i18n/en.ts`. To add a language, copy it (for example to `fr.ts`),

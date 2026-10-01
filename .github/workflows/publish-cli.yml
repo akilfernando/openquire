@@ -1,0 +1,30 @@
+name: Publish CLI
+
+# Publishes the openquire command-line tool to npm when a tag such as cli-v0.6.0 is pushed.
+# Needs an npm automation token in the repository secret NPM_TOKEN.
+on:
+  push:
+    tags: ['cli-v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: Check the tag matches the package version
+        run: test "cli-v$(node -p "require('./cli/package.json').version")" = "$GITHUB_REF_NAME"
+      - run: npm run build:cli
+      - run: npx vitest run tests/cli.test.ts
+      - run: npm publish --provenance --access public
+        working-directory: cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

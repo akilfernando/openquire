@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { ChevronRight, RotateCcw, RotateCw, Wrench } from 'lucide-react'
 import { rgbOf, type CompressLevel, type DocState, type Metadata, type PageLabelStyle, type Permission, type SaveOptions, type StampPosition, type StampSpec } from '../engine/types'
 import { m } from '../i18n'
+import { REDACTION_PATTERNS, type PatternName } from '../engine/patterns'
 
 export interface PanelActions {
   rotate: (delta: 90 | 270) => void
@@ -60,13 +61,7 @@ const Field = ({ label, children }: { label: string; children: ReactNode }) => (
   <label className="field"><span>{label}</span>{children}</label>
 )
 
-const PATTERNS: { key: keyof typeof m.panel.patterns; source: string }[] = [
-  { key: 'email', source: '[\\w.+-]+@[\\w-]+(\\.[\\w-]+)+' },
-  { key: 'phone', source: '\\+?\\d[\\d ()-]{7,}\\d' },
-  { key: 'card', source: '\\b(?:\\d[ -]?){13,19}\\b' },
-  { key: 'date', source: '\\b\\d{1,4}[/.-]\\d{1,2}[/.-]\\d{1,4}\\b' },
-  { key: 'url', source: 'https?://\\S+' },
-]
+const PATTERNS = (Object.keys(REDACTION_PATTERNS) as PatternName[]).map((key) => ({ key, source: REDACTION_PATTERNS[key] }))
 
 const PRESETS: Record<keyof typeof m.panel.presets, Omit<StampSpec, 'pageIds'>> = {
   pageNumbers: { template: 'Page {page} of {pages}', position: 'bc', size: 10, color: [0.2, 0.2, 0.2], opacity: 1, angle: 0 },

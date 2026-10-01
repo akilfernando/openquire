@@ -572,6 +572,16 @@ export class Engine {
     return out
   }
 
+  /** A page rendered as PNG, with comments and form fields (for OCR outside the browser). */
+  renderPng(pageId: number, dpi = 150) {
+    const page = this.page(pageId)
+    const pix = page.toPixmap(mupdf.Matrix.scale(dpi / 72, dpi / 72), mupdf.ColorSpace.DeviceRGB, false, true)
+    const png = pix.asPNG().slice()
+    pix.destroy()
+    page.destroy()
+    return png
+  }
+
   // ---- pages ----
 
   movePages(ids: number[], beforeId: number | null) {
