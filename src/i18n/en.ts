@@ -58,6 +58,8 @@ export const en = {
     toggleLeft: 'Toggle left sidebar',
     toggleRight: 'Toggle right sidebar',
     straighten: 'Straighten crooked pages',
+    exportDocx: 'Export to Word',
+    exportXlsx: 'Export tables to Excel',
     showPanel: { pages: 'Show pages', bookmarks: 'Show bookmarks', comments: 'Show comments', attachments: 'Show attachments', signatures: 'Show signatures', accessibility: 'Show accessibility and tags', compare: 'Compare with another document' },
     workflows: 'Workflows',
     recordWorkflow: 'Record a workflow',
@@ -98,6 +100,7 @@ export const en = {
   },
 
   busy: {
+    exportingOffice: 'Exporting',
     straightening: 'Straightening pages',
     runningWorkflow: 'Running workflow',
     comparing: 'Comparing',
@@ -114,6 +117,8 @@ export const en = {
   },
 
   status: {
+    noTables: 'No tables were found to export',
+    exported: (file: string) => `Saved ${file}`,
     tagged: (notes: string[]) => ['Tagged the document.', ...notes].join(' '),
     error: (message: string) => `Error: ${message}`,
     saved: (file: string, size: string) => `Saved ${file}, ${size}`,
@@ -347,6 +352,8 @@ export const en = {
     exportPng: 'PNG images',
     exportText: 'Text',
     exportHtml: 'HTML',
+    exportDocx: 'Word',
+    exportXlsx: 'Excel',
     archive: 'Archive (PDF/A)',
     pdfaParts: { 2: 'PDF/A-2b', 3: 'PDF/A-3b (keeps attachments)' } as Record<string, string>,
     savePdfA: 'Save as PDF/A',

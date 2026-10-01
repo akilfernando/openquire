@@ -7,6 +7,8 @@ import forge from 'node-forge'
 import { checkPdfA, convertToPdfA, type PdfAPart } from './pdfa'
 import { compare, type ComparisonResult } from './compare'
 import { rotationAbout, skewAngle } from './scan'
+import { buildDocx, buildXlsx, type ExportImage, type ExportPage } from './office'
+import { detectTables, pageWords } from './tables'
 import { resolvePages, type WorkflowStep } from './workflow'
 import { autoTag, checkAccessibility, moveTag, structure, updateTag, type TagType } from './tagging'
 import { addValidationData, checkRevocationOnline, createDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
@@ -2363,6 +2365,63 @@ export class Engine {
 
   exportText() {
     return this.pageIds().map((id) => this.pageText(id)).join('\n\f\n')
+  }
+
+  /** Tables found on each page, from the layout of their text. */
+  tables(pageIds = this.pageIds()) {
+    return pageIds.map((id) => {
+      const page = this.page(id)
+      const found = detectTables(pageWords(page))
+      page.destroy()
+      return found
+    })
+  }
+
+  /** Pictures on a page as PNG, except full-page scans behind text (OCR'd pages). */
+  private exportImagesOf(pageId: number, hasText: boolean): ExportImage[] {
+    const page = this.page(pageId)
+    const [x0, y0, x1, y1] = page.getBounds()
+    const pageArea = (x1 - x0) * (y1 - y0)
+    const out: ExportImage[] = []
+    const st = page.toStructuredText('preserve-images')
+    st.walk({
+      onImageBlock(bbox, _transform, image) {
+        const r = bbox as Rect
+        if ((r[2] - r[0]) * (r[3] - r[1]) < 16) return
+        if (hasText && (r[2] - r[0]) * (r[3] - r[1]) > pageArea * 0.8) return
+        let pix = image.toPixmap()
+        const cs = pix.getColorSpace()
+        if (cs && !cs.isRGB() && !cs.isGray()) {
+          const rgb = pix.convertToColorSpace(mupdf.ColorSpace.DeviceRGB, true)
+          pix.destroy()
+          pix = rgb
+        }
+        out.push({ rect: r, png: pix.asPNG().slice(), width: pix.getWidth(), height: pix.getHeight() })
+        pix.destroy()
+      },
+    })
+    st.destroy()
+    page.destroy()
+    return out
+  }
+
+  /** The document as an editable Word file: paragraphs, headings, images and tables. */
+  exportDocx() {
+    const tables = this.tables()
+    const pages: ExportPage[] = this.pageIds().map((id, i) => {
+      const page = this.page(id)
+      const [x0, y0, x1, y1] = page.getBounds()
+      page.destroy()
+      const blocks = this.textBlocks(id)
+      return { width: x1 - x0, height: y1 - y0, blocks, tables: tables[i], images: this.exportImagesOf(id, blocks.length > 0) }
+    })
+    return buildDocx(pages, this.meta())
+  }
+
+  /** The document's tables as an Excel workbook, one sheet per table; null when there are none. */
+  exportXlsx() {
+    const tables = this.tables().flatMap((list, page) => list.map((table) => ({ page, table })))
+    return buildXlsx(tables, this.meta())
   }
 
   exportHtml() {

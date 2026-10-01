@@ -26,7 +26,7 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Protect | Open password-protected PDFs; add, change or remove AES-256 passwords and permissions |
 | Compress | Lossless clean-up, or image downsampling and re-compression |
 | Bookmarks & files | Add, rename and delete bookmarks; page labels; attach, extract and remove embedded files |
-| Convert | Open Word, Excel, PowerPoint, EPUB, HTML, text and images as PDF; export PNG, text or HTML |
+| Convert | Open Word, Excel, PowerPoint, EPUB, HTML, text and images as PDF; export Word (paragraphs, headings, images and tables), Excel (detected tables, numbers as numbers), PNG, text or HTML |
 | Properties | Title, author, subject and keywords |
 | Undo | Unlimited undo and redo for every change |
 
@@ -85,7 +85,7 @@ missing.
   order follows the content order. Review the result in the Accessibility panel.
 - **OCR** covers Western European languages only, because its text layer uses the standard Latin fonts.
 - **Office conversion** is basic: complex layouts, and some formatting such as bold headings, may not survive.
-- **No PDF to Word** export.
+- **Word export** rebuilds the document as flowing text, so complex layouts (columns, text wrapped around pictures) come out simplified.
 - **Large downloads:** the WebAssembly engine is about 10 MB (4.8 MB gzipped) on first load; OCR
   fetches a further 15 MB the first time it's used.
 

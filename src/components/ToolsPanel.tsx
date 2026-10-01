@@ -18,6 +18,8 @@ export interface PanelActions {
   exportImages: () => void
   exportText: () => void
   exportHtml: () => void
+  exportDocx: () => void
+  exportXlsx: () => void
   setMeta: (meta: Metadata) => void
   ocr: (scope: 'notext' | 'selected' | 'all') => void
   pagesWithoutText: () => Promise<number>
@@ -311,6 +313,8 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
             <button onClick={actions.exportImages}>{m.panel.exportPng}</button>
             <button onClick={actions.exportText}>{m.panel.exportText}</button>
             <button onClick={actions.exportHtml}>{m.panel.exportHtml}</button>
+            <button onClick={actions.exportDocx}>{m.panel.exportDocx}</button>
+            <button onClick={actions.exportXlsx}>{m.panel.exportXlsx}</button>
           </div>
         </Section>
 

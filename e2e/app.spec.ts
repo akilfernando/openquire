@@ -516,3 +516,17 @@ test('detects the language of a crooked French scan, straightens it and recogniz
   expect(text).toContain('réunion')
   expect(text).toContain('créée à Genève en été')
 })
+
+test('exports to Word', async ({ page }) => {
+  await openReport(page)
+  await openSection(page, 'Export')
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Word', exact: true }).click()
+  const d = await download
+  expect(d.suggestedFilename()).toBe('report.docx')
+  const { default: mammoth } = await import('mammoth')
+  const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(await bytesOf(d)) })
+  expect(html).toContain(LINES.revenue)
+  await page.getByRole('button', { name: 'Excel', exact: true }).click()
+  await expect(page.locator('.status-bar')).toContainText('No tables were found to export')
+})

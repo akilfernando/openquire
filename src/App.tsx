@@ -838,6 +838,20 @@ export default function App() {
       }),
     exportImages: () => void run(m.busy.renderingImages, async () => download(await engine.exportImages(2), `${doc!.name}-images.zip`, 'application/zip')),
     exportText: () => void run(m.busy.extractingText, async () => download(await engine.exportText(), `${doc!.name}.txt`, 'text/plain')),
+    exportDocx: () =>
+      void run(m.busy.exportingOffice, async () => {
+        const file = `${doc!.name}.docx`
+        download(await engine.exportDocx(), file, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        setStatus(m.status.exported(file))
+      }),
+    exportXlsx: () =>
+      void run(m.busy.exportingOffice, async () => {
+        const bytes = await engine.exportXlsx()
+        if (!bytes) return setStatus(m.status.noTables)
+        const file = `${doc!.name}.xlsx`
+        download(bytes, file, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        setStatus(m.status.exported(file))
+      }),
     exportHtml: () => void run(m.busy.converting, async () => download(await engine.exportHtml(), `${doc!.name}.html`, 'text/html')),
     setMeta: (meta) => {
       // Only the properties that changed are recorded, so a workflow doesn't copy this file's title.
@@ -966,6 +980,8 @@ export default function App() {
     { id: 'save-pdfa', name: m.actions.savePdfA, enabled: has, run: () => panelActions.savePdfA(doc?.attachments.length ? 3 : 2) },
     { id: 'check-pdfa', name: m.actions.checkPdfA, enabled: has, run: panelActions.checkPdfA },
     { id: 'export-html', name: m.actions.exportHtml, enabled: has, run: panelActions.exportHtml },
+    { id: 'export-docx', name: m.actions.exportDocx, enabled: has, run: panelActions.exportDocx },
+    { id: 'export-xlsx', name: m.actions.exportXlsx, enabled: has, run: panelActions.exportXlsx },
     { id: 'straighten', name: m.actions.straighten, enabled: has, run: panelActions.straighten },
     { id: 'workflows', name: m.actions.workflows, icon: WorkflowIcon, run: () => setWorkflowsOpen({ index: 0 }) },
     recording
