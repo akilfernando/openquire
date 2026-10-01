@@ -563,6 +563,18 @@ export default function App() {
     setLabels: (style, prefix, start) => void run(m.busy.numbering, async () => apply(await engine.setPageLabels(labelPageId(), style, prefix, start))),
     designForm: () => setTool('field'),
     sanitize: () => setSanitizing(true),
+    savePdfA: (part) =>
+      void run(m.busy.convertingPdfA, async () => {
+        const { bytes, notes } = await engine.convertToPdfA(part)
+        const file = `${doc!.name}-pdfa.pdf`
+        download(bytes, file)
+        setStatus(m.status.pdfaSaved(file, notes))
+      }),
+    checkPdfA: () =>
+      void run(m.busy.checking, async () => {
+        const { part, problems } = await engine.checkPdfA()
+        setStatus(m.status.pdfaChecked(part, problems))
+      }),
     detectFields: () =>
       void run(m.busy.detecting, async () => {
         const { count, state } = await engine.detectFields()
@@ -636,6 +648,8 @@ export default function App() {
     { id: 'flatten-comments', name: m.actions.flattenComments, enabled: has, run: () => panelActions.flatten(true, false) },
     { id: 'export-png', name: m.actions.exportPng, enabled: has, run: panelActions.exportImages },
     { id: 'export-text', name: m.actions.exportText, enabled: has, run: panelActions.exportText },
+    { id: 'save-pdfa', name: m.actions.savePdfA, enabled: has, run: () => panelActions.savePdfA(doc?.attachments.length ? 3 : 2) },
+    { id: 'check-pdfa', name: m.actions.checkPdfA, enabled: has, run: panelActions.checkPdfA },
     { id: 'export-html', name: m.actions.exportHtml, enabled: has, run: panelActions.exportHtml },
     { id: 'settings', name: m.actions.openSettings, icon: SettingsIcon, hotkey: mod(','), run: () => setSettingsOpen(true) },
     { id: 'theme', name: m.actions.toggleTheme, run: () => setSettings({ ...settings, theme: dark ? 'light' : 'dark' }) },

@@ -314,3 +314,17 @@ test('sanitizes a document', async ({ page }) => {
   const raw = new TextDecoder('latin1').decode(await save(page))
   expect(raw).not.toContain('Secret Author')
 })
+
+test('saves a PDF/A copy', async ({ page }) => {
+  await openReport(page)
+  await openSection(page, 'Archive (PDF/A)')
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Save as PDF/A' }).click()
+  const d = await download
+  expect(d.suggestedFilename()).toBe('report-pdfa.pdf')
+  await expect(page.locator('.status-bar')).toContainText('flattened')
+  const bytes = new TextDecoder('latin1').decode(await bytesOf(d))
+  expect(bytes).toContain('pdfaid:part>2<')
+  await page.getByRole('button', { name: 'Check PDF/A' }).click()
+  await expect(page.locator('.status-bar')).toContainText('Not PDF/A')
+})

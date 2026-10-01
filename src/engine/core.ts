@@ -4,6 +4,7 @@ import { findImageDraws, fmt, imageWarp, invert, multiply, patch, stripHidden, t
 import { certFromDer, certsFromPem, nameOf, binary, type Fetcher } from './pki'
 import roots from './roots.json'
 import forge from 'node-forge'
+import { checkPdfA, convertToPdfA, type PdfAPart } from './pdfa'
 import { addValidationData, checkRevocationOnline, createDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
 import {
   hexOf,
@@ -1358,6 +1359,24 @@ export class Engine {
   deleteBookmark(path: number[]) {
     this.op('Delete bookmark', () => this.outlineAt(path).delete(), [])
     return this.state()
+  }
+
+  // ---- PDF/A ----
+
+  /** A PDF/A-2b or 3b copy of the document. The open document is not changed. */
+  convertToPdfA(part: PdfAPart = 2) {
+    const src = this.reopen()
+    const attachments = Object.keys(this.d.getEmbeddedFiles()).map((name) => ({ name, data: this.attachment(name)!, mime: 'application/octet-stream' }))
+    try {
+      return convertToPdfA(src, { part, meta: this.meta(), outline: this.outline(), attachments })
+    } finally {
+      src.destroy()
+    }
+  }
+
+  /** A quick check of the current document against common PDF/A requirements. */
+  checkPdfA() {
+    return checkPdfA(this.save({ compress: 'none', security: { mode: 'keep' } }))
   }
 
   // ---- sanitize ----

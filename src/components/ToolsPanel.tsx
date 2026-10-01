@@ -23,6 +23,8 @@ export interface PanelActions {
   digitalSign: () => void
   setLabels: (style: PageLabelStyle, prefix: string, start: number) => void
   designForm: () => void
+  savePdfA: (part: 2 | 3) => void
+  checkPdfA: () => void
   sanitize: () => void
   detectFields: () => void
   removeLabels: () => void
@@ -235,6 +237,7 @@ function Labels({ labelPage, actions }: Pick<Props, 'labelPage' | 'actions'>) {
 
 export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions }: Props) {
   const [ranges, setRanges] = useState('')
+  const [pdfaPart, setPdfaPart] = useState<2 | 3>(doc.attachments.length ? 3 : 2)
   const scope = selectedCount ? m.panel.scopeSelected(selectedCount) : m.panel.scopeAll
   const widgets = doc.pages.reduce((n, p) => n + p.widgets.length, 0)
   const annots = doc.pages.reduce((n, p) => n + p.annots.length, 0)
@@ -307,6 +310,17 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
             <button onClick={actions.exportText}>{m.panel.exportText}</button>
             <button onClick={actions.exportHtml}>{m.panel.exportHtml}</button>
           </div>
+        </Section>
+
+        <Section title={m.panel.archive}>
+          <select value={pdfaPart} aria-label={m.panel.archive} onChange={(e) => setPdfaPart(Number(e.target.value) as 2 | 3)}>
+            {([2, 3] as const).map((p) => <option key={p} value={p}>{m.panel.pdfaParts[p]}</option>)}
+          </select>
+          <div className="row">
+            <button onClick={() => actions.savePdfA(pdfaPart)}>{m.panel.savePdfA}</button>
+            <button onClick={actions.checkPdfA}>{m.panel.checkPdfA}</button>
+          </div>
+          <p className="hint">{m.panel.pdfaHint}</p>
         </Section>
 
         <Section title={m.panel.properties}>

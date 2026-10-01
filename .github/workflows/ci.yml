@@ -19,6 +19,18 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      # veraPDF, the reference PDF/A validator, checks PDF/A conversion in the tests.
+      - name: Install veraPDF
+        run: |
+          curl -sSL -o /tmp/verapdf.zip https://software.verapdf.org/releases/verapdf-installer.zip
+          unzip -q /tmp/verapdf.zip -d /tmp/verapdf-inst
+          sed "s#INSTALL_PATH#$HOME/verapdf#" scripts/verapdf-auto-install.xml > /tmp/auto-install.xml
+          java -jar /tmp/verapdf-inst/*/verapdf-izpack-installer-*.jar /tmp/auto-install.xml
+          echo "VERAPDF=$HOME/verapdf/verapdf" >> "$GITHUB_ENV"
       # Type check, OCR assets and the production bundle.
       - run: npm run build
       - run: npm test
