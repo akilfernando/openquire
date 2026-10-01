@@ -3,6 +3,7 @@ import { ExternalLink, X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
 import { m } from '../i18n'
 import { OCR_LANGUAGES } from '../ocr-languages'
+import { DEFAULT_BASE_URL, DEFAULT_MODELS, type AiProvider } from '../ai'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -20,6 +21,15 @@ export interface Settings {
   ocrDownload: boolean
   /** Whether skewed pages are straightened before text is recognized. */
   ocrStraighten: boolean
+  /** The optional AI assistant: off unless turned on. */
+  aiEnabled: boolean
+  aiProvider: AiProvider
+  /** Kept on this device only. */
+  aiKey: string
+  aiModel: string
+  aiBaseUrl: string
+  /** Facts about the user for filling forms, sent only when they ask. */
+  aiProfile: string
 }
 
 export const ACCENTS: { key: string; hue: number }[] = [
@@ -31,7 +41,7 @@ export const ACCENTS: { key: string; hue: number }[] = [
   { key: 'rose', hue: 340 },
 ]
 
-type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'about'
+type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'ai' | 'about'
 
 interface Props {
   settings: Settings
@@ -162,6 +172,46 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                   <button onClick={() => set({ trusted: settings.trusted.filter((x) => x.pem !== c.pem) })}>{m.settings.removeCert}</button>
                 </div>
               ))}
+            </>
+          )}
+          {tab === 'ai' && (
+            <>
+              <h2>{m.settings.tabs.ai}</h2>
+              <Item name={m.settings.aiEnabled} desc={m.settings.aiEnabledDesc}>
+                <input type="checkbox" className="toggle" checked={settings.aiEnabled} aria-label={m.settings.aiEnabled} onChange={(e) => set({ aiEnabled: e.target.checked })} />
+              </Item>
+              {settings.aiEnabled && (
+                <>
+                  <Item name={m.settings.aiProvider} desc={m.settings.aiProviderDesc}>
+                    <select value={settings.aiProvider} aria-label={m.settings.aiProvider} onChange={(e) => set({ aiProvider: e.target.value as AiProvider, aiModel: '' })}>
+                      <option value="anthropic">{m.settings.aiProviders.anthropic}</option>
+                      <option value="openai">{m.settings.aiProviders.openai}</option>
+                    </select>
+                  </Item>
+                  {settings.aiProvider === 'openai' && (
+                    <Item name={m.settings.aiBaseUrl} desc={m.settings.aiBaseUrlDesc}>
+                      <input defaultValue={settings.aiBaseUrl} placeholder={DEFAULT_BASE_URL} aria-label={m.settings.aiBaseUrl} style={{ width: 240 }}
+                        onBlur={(e) => e.target.value.trim() !== settings.aiBaseUrl && set({ aiBaseUrl: e.target.value.trim() })} />
+                    </Item>
+                  )}
+                  <Item name={m.settings.aiKey} desc={settings.aiProvider === 'anthropic' ? m.settings.aiKeyDesc : m.settings.aiKeyOptional}>
+                    <input type="password" autoComplete="off" defaultValue={settings.aiKey} aria-label={m.settings.aiKey} style={{ width: 240 }}
+                      onBlur={(e) => e.target.value.trim() !== settings.aiKey && set({ aiKey: e.target.value.trim() })} />
+                  </Item>
+                  <Item name={m.settings.aiModel} desc={m.settings.aiModelDesc}>
+                    <input key={settings.aiProvider} defaultValue={settings.aiModel} placeholder={DEFAULT_MODELS[settings.aiProvider]} aria-label={m.settings.aiModel} style={{ width: 240 }}
+                      onBlur={(e) => e.target.value.trim() !== settings.aiModel && set({ aiModel: e.target.value.trim() })} />
+                  </Item>
+                  <div className="setting-item stacked">
+                    <div className="setting-info">
+                      <div className="setting-name">{m.settings.aiProfile}</div>
+                      <div className="setting-desc">{m.settings.aiProfileDesc}</div>
+                    </div>
+                    <textarea rows={5} defaultValue={settings.aiProfile} placeholder={m.settings.aiProfilePlaceholder} aria-label={m.settings.aiProfile}
+                      onBlur={(e) => e.target.value !== settings.aiProfile && set({ aiProfile: e.target.value })} />
+                  </div>
+                </>
+              )}
             </>
           )}
           {tab === 'about' && (

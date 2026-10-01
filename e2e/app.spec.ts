@@ -530,3 +530,66 @@ test('exports to Word', async ({ page }) => {
   await page.getByRole('button', { name: 'Excel', exact: true }).click()
   await expect(page.locator('.status-bar')).toContainText('No tables were found to export')
 })
+
+test('the AI assistant is off by default and never sends without consent', async ({ page, context }) => {
+  const sent: { headers: Record<string, string>; body: { system: string; messages: { content: { text?: string }[] }[] } }[] = []
+  await context.route('https://api.anthropic.com/**', async (route) => {
+    const body = route.request().postDataJSON()
+    sent.push({ headers: route.request().headers(), body })
+    const system: string = body.system
+    const text = system.includes('personal data') ? '["jane.doe@example.com"]'
+      : system.includes('fill in forms') ? '{"full_name": "Jane Doe", "plan": "Pro", "subscribe": true}'
+      : 'Revenue grew across all regions [p. 1]. The form asks for a name [p. 2].'
+    await route.fulfill({ json: { content: [{ type: 'text', text }] }, headers: { 'access-control-allow-origin': '*' } })
+  })
+  await openReport(page)
+  // Off by default: no assistant anywhere.
+  await expect(page.getByRole('tab', { name: 'Assistant' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByRole('button', { name: 'AI assistant' }).click()
+  await page.getByRole('checkbox', { name: 'Enable the AI assistant' }).check()
+  await page.getByLabel('API key').fill('test-key')
+  await page.getByRole('textbox', { name: 'Your details for forms' }).fill('Jane Doe. I want the Pro plan and the newsletter.')
+  await page.getByLabel('API key').focus()
+  await page.keyboard.press('Escape')
+
+  await page.getByRole('tab', { name: 'Assistant' }).click()
+  await page.getByRole('button', { name: 'Summarize' }).click()
+  const consent = page.getByRole('dialog', { name: 'Send to the AI model?' })
+  await expect(consent).toContainText('api.anthropic.com')
+  await expect(consent).toContainText('The text of 2 pages')
+  const axe = await new AxeBuilder({ page }).include('.modal').withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([])
+  await consent.getByRole('button', { name: "Don't send" }).click()
+  await expect(page.locator('.status-bar')).toContainText('Nothing was sent.')
+  expect(sent).toHaveLength(0)
+
+  await page.getByRole('button', { name: 'Summarize' }).click()
+  await consent.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.locator('.ai-entry.answer')).toContainText('Revenue grew across all regions')
+  expect(sent).toHaveLength(1)
+  expect(sent[0].headers['x-api-key']).toBe('test-key')
+  expect(sent[0].body.messages[0].content[0].text).toContain(LINES.revenue)
+  // Citations go to their page.
+  await page.getByRole('button', { name: 'Go to page 2' }).click()
+  await expect(page.locator('.view-title')).toContainText('2 of 2')
+
+  // Personal data is only marked for redaction, for the user to review.
+  await page.getByRole('button', { name: 'Find personal data' }).click()
+  await consent.getByRole('checkbox', { name: /Don't ask again/ }).check()
+  await consent.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.locator('.ai-entry').last()).toContainText('Marked 1 item for redaction: jane.doe@example.com')
+
+  // Forms are filled from the profile; no second question for this document.
+  await page.getByRole('button', { name: 'Fill form from my details' }).click()
+  await expect(page.locator('.ai-entry').last()).toContainText('Filled 3 fields')
+  expect(sent).toHaveLength(3)
+  expect(JSON.stringify(sent[2].body)).toContain('Jane Doe. I want the Pro plan')
+  const saved = mupdf.Document.openDocument(await save(page), 'application/pdf').asPDF()!
+  const values = Object.fromEntries((saved.loadPage(1) as mupdf.PDFPage).getWidgets().map((w) => [w.getName(), w.getValue()]))
+  expect(values).toMatchObject({ full_name: 'Jane Doe', plan: 'Pro' })
+
+  const sidebar = await new AxeBuilder({ page }).include('.sidebar.left').withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(sidebar.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([])
+})

@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Accessibility as AccessibilityIcon, GitCompareArrows, ArrowDown, ArrowUp, BadgeCheck, CircleAlert, CircleCheck, TriangleAlert, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
+  Accessibility as AccessibilityIcon, GitCompareArrows, Sparkles, ArrowDown, ArrowUp, BadgeCheck, CircleAlert, CircleCheck, TriangleAlert, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
 } from 'lucide-react'
 import { engine, requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
 import type { ComparisonResult } from '../engine/compare'
+import { citations } from '../ai'
 import { TAG_TYPES, type AccessibilityProblem, type TagNode, type TagType } from '../engine/tagging'
 import { arrowNavigate } from '../focus'
 import { kb } from '../util'
 import { m } from '../i18n'
 
-export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures' | 'accessibility' | 'compare'
+export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures' | 'accessibility' | 'compare' | 'assistant'
 
 export interface SideActions {
   goTo: (pageId: number) => void
@@ -36,7 +37,24 @@ export interface SideActions {
   compare: (otherId: number) => void
   /** Shows a text change (index into changes) or a visual change (index into visual). */
   focusChange: (kind: 'text' | 'visual', index: number) => void
+  ai: {
+    summarize: () => void
+    ask: (question: string) => void
+    personalData: () => void
+    fillForm: () => void
+    altText: () => void
+    clear: () => void
+  }
 }
+
+export interface AiEntry {
+  kind: 'answer' | 'info' | 'error'
+  question?: string
+  text: string
+}
+
+/** The assistant's state, or null when the assistant is turned off. */
+export type AssistantInfo = { log: AiEntry[]; busy: boolean; hasFields: boolean } | null
 
 export interface CompareInfo {
   /** Other open documents that can be compared with this one. */
@@ -52,6 +70,7 @@ interface Props {
   selectedAnnot: number | null
   commentFocus: number | null
   compare: CompareInfo
+  assistant: AssistantInfo
   actions: SideActions
 }
 
@@ -482,6 +501,68 @@ function Compare({ compare, actions }: Pick<Props, 'compare' | 'actions'>) {
   )
 }
 
+function Assistant({ doc, assistant, actions }: Pick<Props, 'doc' | 'assistant' | 'actions'>) {
+  const [question, setQuestion] = useState('')
+  const end = useRef<HTMLDivElement>(null)
+  // Braces matter: scrollIntoView returns a promise in some browsers, which isn't a valid clean-up.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: 'nearest' })
+  }, [assistant?.log.length])
+  if (!assistant) return null
+  const { log, busy, hasFields } = assistant
+  const go = (page: number) => {
+    const p = doc.pages[page - 1]
+    if (p) actions.goTo(p.id)
+  }
+  return (
+    <div className="pane assistant">
+      <p className="hint">{m.ai.intro}</p>
+      <div className="row wrap">
+        <button disabled={busy} onClick={actions.ai.summarize}>{m.ai.summarize}</button>
+        <button disabled={busy} onClick={actions.ai.personalData}>{m.ai.personalData}</button>
+        <button disabled={busy || !hasFields} onClick={actions.ai.fillForm}>{m.ai.fillForm}</button>
+        <button disabled={busy} onClick={actions.ai.altText} title={m.ai.altTextHint}>{m.ai.altText}</button>
+      </div>
+      <div className="ai-log" aria-live="polite">
+        {log.map((e, i) => (
+          <div key={i} className={`ai-entry ${e.kind}`}>
+            {e.question && <div className="ai-question"><span className="muted small">{m.ai.you}</span>{e.question}</div>}
+            <div className="ai-text">
+              {e.kind === 'answer'
+                ? citations(e.text, doc.pages.length).map((p, j) => ('page' in p
+                  ? <button key={j} className="cite" title={m.ai.goToPage(p.label)} aria-label={m.ai.goToPage(p.label)} onClick={() => go(p.page)}>{m.ai.citation(p.label)}</button>
+                  : <span key={j}>{p.text}</span>))
+                : e.text}
+            </div>
+          </div>
+        ))}
+        {busy && <div className="ai-entry info muted">{m.ai.working}</div>}
+        <div ref={end} />
+      </div>
+      <form className="ai-ask" onSubmit={(e) => {
+        e.preventDefault()
+        if (!question.trim() || busy) return
+        actions.ai.ask(question.trim())
+        setQuestion('')
+      }}>
+        <textarea
+          rows={2} value={question} placeholder={m.ai.askPlaceholder} aria-label={m.ai.askPlaceholder} onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              e.currentTarget.form?.requestSubmit()
+            }
+          }}
+        />
+        <div className="row end">
+          {!!log.length && <button type="button" onClick={actions.ai.clear}>{m.ai.clear}</button>}
+          <button type="submit" className="cta" disabled={busy || !question.trim()}>{m.ai.ask}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 export default function Sidebar(props: Props) {
   const { doc, tab, onTab } = props
   const comments = doc.pages.reduce((n, p) => n + p.annots.filter((a) => a.replyTo === null).length, 0)
@@ -492,6 +573,7 @@ export default function Sidebar(props: Props) {
     { id: 'attachments', label: m.sidebar.tabs.attachments, Icon: Paperclip, count: doc.attachments.length },
     { id: 'signatures', label: m.sidebar.tabs.signatures, Icon: BadgeCheck, count: doc.signatures.length },
     { id: 'accessibility', label: m.sidebar.tabs.accessibility, Icon: AccessibilityIcon },
+    ...(props.assistant ? [{ id: 'assistant' as const, label: m.sidebar.tabs.assistant, Icon: Sparkles }] : []),
     { id: 'compare', label: m.sidebar.tabs.compare, Icon: GitCompareArrows, count: props.compare.result ? props.compare.result.data.changes.length + props.compare.result.data.visual.length : 0 },
   ]
   const current = tabs.find((t) => t.id === tab)!
@@ -517,6 +599,7 @@ export default function Sidebar(props: Props) {
       {tab === 'signatures' && <Signatures {...props} />}
       {tab === 'accessibility' && <Accessibility {...props} />}
       {tab === 'compare' && <Compare {...props} />}
+      {tab === 'assistant' && <Assistant {...props} />}
     </aside>
   )
 }

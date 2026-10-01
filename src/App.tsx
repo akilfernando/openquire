@@ -13,7 +13,12 @@ import SanitizeDialog from './components/SanitizeDialog'
 import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsModal, { type Settings } from './components/SettingsModal'
-import Sidebar, { type CompareInfo, type SideActions, type SideTab } from './components/Sidebar'
+import Sidebar, { type AiEntry, type CompareInfo, type SideActions, type SideTab } from './components/Sidebar'
+import AiConsentDialog from './components/AiConsentDialog'
+import {
+  aiHost, altTextRequest, complete, formRequest, parseFormValues, parsePersonalData, personalDataRequest, questionRequest, selectPages, summaryRequest,
+  type AiRequest, type FormFieldInfo, type PageText,
+} from './ai'
 import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
 import WorkflowsDialog from './components/WorkflowsDialog'
@@ -21,7 +26,7 @@ import { OUTPUT_ACTIONS, newWorkflow, pageSetOf, type Workflow, type WorkflowSte
 import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
 import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
-import { EngineError, activeDocument, closeDocument, engine, engineFor, newDocument, setActiveDocument } from './engine/client'
+import { EngineError, activeDocument, requestRender, closeDocument, engine, engineFor, newDocument, setActiveDocument } from './engine/client'
 import { parseRanges } from './engine/ranges'
 import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Quad, type Rect, type WidgetInfo, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
 import { arrowNavigate } from './focus'
@@ -53,6 +58,7 @@ const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
   const fallback: Settings = {
     theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true,
+    aiEnabled: false, aiProvider: 'anthropic', aiKey: '', aiModel: '', aiBaseUrl: '', aiProfile: '',
   }
   try {
     const legacyAuthor = localStorage.getItem('openquire.author') ?? ''
@@ -120,6 +126,11 @@ export default function App() {
   const [workflowsOpen, setWorkflowsOpen] = useState<{ index: number } | null>(null)
   // Steps recorded so far while recording a workflow.
   const [recording, setRecording] = useState<WorkflowStep[] | null>(null)
+  const [aiLog, setAiLog] = useState<AiEntry[]>([])
+  const [aiBusy, setAiBusy] = useState(false)
+  const [consent, setConsent] = useState<{ host: string; items: string[]; answer: (send: boolean, remember: boolean) => void } | null>(null)
+  // Documents (by tab) whose requests the user chose not to be asked about again this session.
+  const aiAllowed = useRef(new Set<number>())
 
   const mainRef = useRef<HTMLElement>(null)
   const findRef = useRef<HTMLInputElement>(null)
@@ -413,6 +424,160 @@ export default function App() {
       download(r.zip, file, 'application/zip')
       setStatus(m.workflows.batchDone(r.done, r.failed.length, file))
     })
+  }
+
+  // ---- AI assistant --------------------------------------------------------------------------
+
+  // The conversation belongs to the document it was about.
+  useEffect(() => setAiLog([]), [active])
+
+  /** Asks the user before sending; resolves true only when they agree. */
+  const askConsent = (items: string[]) => {
+    const docId = activeDocument()
+    if (aiAllowed.current.has(docId)) return Promise.resolve(true)
+    return new Promise<boolean>((resolve) =>
+      setConsent({
+        host: aiHost({ provider: settings.aiProvider, apiKey: '', model: '', baseUrl: settings.aiBaseUrl }),
+        items,
+        answer: (send, remember) => {
+          setConsent(null)
+          if (send && remember) aiAllowed.current.add(docId)
+          resolve(send)
+        },
+      }))
+  }
+
+  /** Sends a request after the user agrees; returns null when they decline. */
+  const sendAi = async (req: AiRequest, items: string[]) => {
+    if (!settings.aiEnabled) throw new Error('The AI assistant is turned off.')
+    if (!(await askConsent(items))) {
+      setStatus(m.ai.notSent)
+      return null
+    }
+    return complete({ provider: settings.aiProvider, apiKey: settings.aiKey, model: settings.aiModel, baseUrl: settings.aiBaseUrl }, req)
+  }
+
+  /** Runs an assistant action, logging its result or error in the conversation. */
+  const aiRun = async (fn: () => Promise<AiEntry | null>) => {
+    if (aiBusy) return
+    setAiBusy(true)
+    try {
+      const entry = await fn()
+      if (entry) setAiLog((l) => [...l, entry])
+    } catch (e) {
+      setAiLog((l) => [...l, { kind: 'error', text: (e as Error).message }])
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
+  const documentText = async (): Promise<PageText[]> =>
+    Promise.all(docRef.current!.pages.map(async (p, i) => ({ page: i + 1, text: await engine.pageText(p.id) })))
+
+  const textItems = (pages: PageText[]) => [m.ai.pagesText(pages.length, pages.reduce((n, p) => n + p.text.length, 0))]
+
+  const aiActions: SideActions['ai'] = {
+    summarize: () =>
+      void aiRun(async () => {
+        const pages = selectPages(await documentText())
+        if (!pages.length) return { kind: 'info', text: m.ai.noText }
+        const text = await sendAi(summaryRequest(pages), textItems(pages))
+        return text === null ? null : { kind: 'answer', question: m.ai.summarize, text }
+      }),
+    ask: (question) =>
+      void aiRun(async () => {
+        const pages = selectPages(await documentText(), question)
+        if (!pages.length) return { kind: 'info', text: m.ai.noText }
+        const text = await sendAi(questionRequest(pages, question), [...textItems(pages), m.ai.question(question)])
+        return text === null ? null : { kind: 'answer', question, text }
+      }),
+    personalData: () =>
+      void aiRun(async () => {
+        const all = await documentText()
+        const pages = selectPages(all)
+        if (!pages.length) return { kind: 'info', text: m.ai.noText }
+        const reply = await sendAi(personalDataRequest(pages), textItems(pages))
+        if (reply === null) return null
+        const items = parsePersonalData(reply, all.map((p) => p.text).join('\n'))
+        if (items.length) {
+          const { state } = await engine.markForRedaction(items)
+          apply(state)
+        }
+        return { kind: 'info', question: m.ai.personalData, text: m.ai.marked(items) }
+      }),
+    fillForm: () =>
+      void aiRun(async () => {
+        if (!settings.aiProfile.trim()) return { kind: 'info', text: m.ai.noProfile }
+        const d = docRef.current!
+        // Each field with the text just left of it or above it, which is usually its label.
+        const fields: (FormFieldInfo & { pageId: number })[] = []
+        for (const p of d.pages) {
+          const writable = p.widgets.filter((w) => !w.readOnly && w.kind !== 'signature' && w.kind !== 'button')
+          if (!writable.length) continue
+          const lines = await engine.textLines(p.id)
+          for (const w of writable) {
+            if (fields.some((f) => f.name === w.name)) continue
+            const [x0, y0, , y1] = w.rect
+            const left = lines.filter((l) => l.bbox[2] <= x0 + 2 && l.bbox[3] > y0 - 4 && l.bbox[1] < y1 + 4).sort((a, b) => b.bbox[2] - a.bbox[2])[0]
+            const above = lines.filter((l) => l.bbox[3] <= y0 + 2 && y0 - l.bbox[3] < 24 && l.bbox[0] < w.rect[2] && l.bbox[2] > x0).sort((a, b) => b.bbox[3] - a.bbox[3])[0]
+            const label = w.tooltip || (left ?? above)?.text.trim() || ''
+            const options = w.kind === 'radio' ? p.widgets.filter((x) => x.name === w.name && x.on).map((x) => x.on!) : w.options
+            fields.push({ name: w.name, kind: w.kind === 'radio' ? 'choice' : w.kind, label, options, pageId: p.id })
+          }
+        }
+        const reply = await sendAi(formRequest(fields, settings.aiProfile), [m.ai.fields(fields.length), m.ai.profile])
+        if (reply === null) return null
+        const values = parseFormValues(reply, fields)
+        const filled: string[] = []
+        let state: DocState | null = null
+        for (const [name, value] of values) {
+          for (const p of docRef.current!.pages) {
+            const widgets = p.widgets.filter((w) => w.name === name)
+            if (!widgets.length) continue
+            const radio = widgets.find((w) => w.kind === 'radio' && w.on === value)
+            if (widgets[0].kind === 'radio') {
+              if (radio) state = await engine.setField(p.id, radio.id, true)
+            } else state = await engine.setField(p.id, widgets[0].id, value)
+            filled.push(fields.find((f) => f.name === name)?.label || name)
+            break
+          }
+        }
+        if (state) apply(state)
+        return { kind: 'info', question: m.ai.fillForm, text: m.ai.filled([...new Set(filled)]) }
+      }),
+    altText: () =>
+      void aiRun(async () => {
+        const figures = (await engine.tags()).filter((t) => t.type === 'Figure' && !t.alt && t.rect && t.page >= 0)
+        if (!figures.length) return { kind: 'info', text: (await engine.tags()).length ? m.ai.described(0) : m.ai.altTextHint }
+        if (!(await askConsent([m.ai.images(figures.length)]))) {
+          setStatus(m.ai.notSent)
+          return null
+        }
+        const pageIds = docRef.current!.pages.map((p) => p.id)
+        let done = 0
+        for (const f of figures) {
+          // A crop of the page render, at twice its size on the page.
+          const scale = 2
+          const bmp = await requestRender(pageIds[f.page], scale, 0).promise
+          if (!bmp) continue
+          const [x0, y0, x1, y1] = f.rect!
+          const canvas = document.createElement('canvas')
+          canvas.width = Math.max(1, Math.round((x1 - x0) * scale))
+          canvas.height = Math.max(1, Math.round((y1 - y0) * scale))
+          canvas.getContext('2d')!.drawImage(bmp, -x0 * scale, -y0 * scale)
+          bmp.close()
+          const png = canvas.toDataURL('image/png').split(',')[1]
+          const near = (await engine.textLines(pageIds[f.page])).filter((l) => l.bbox[1] < y1 + 60 && l.bbox[3] > y0 - 60).map((l) => l.text).join(' ')
+          const alt = await complete({ provider: settings.aiProvider, apiKey: settings.aiKey, model: settings.aiModel, baseUrl: settings.aiBaseUrl }, altTextRequest(png, near))
+          if (alt.trim()) {
+            await engine.updateTag(f.id, { alt: alt.trim().replace(/^"|"$/g, '') })
+            done++
+          }
+        }
+        apply(await engine.state())
+        return { kind: 'info', question: m.ai.altText, text: m.ai.described(done) }
+      }),
+    clear: () => setAiLog([]),
   }
 
   // ---- compare -------------------------------------------------------------------------------
@@ -743,6 +908,7 @@ export default function App() {
         setStatus(m.status.timestampAdded)
       }),
     compare: (otherId) => void compareWith(otherId),
+    ai: aiActions,
     focusChange,
     autoTag: (lang) =>
       void run(m.busy.tagging, async () => {
@@ -956,7 +1122,7 @@ export default function App() {
     { id: 'zoom-actual', name: m.actions.actualSize, enabled: has, run: () => setZoom(1) },
     { id: 'left', name: m.actions.toggleLeft, icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
     { id: 'right', name: m.actions.toggleRight, icon: PanelRight, enabled: has, run: () => setRightOpen((o) => !o) },
-    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility', 'compare'] as SideTab[]).map((t) => ({
+    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility', 'compare', ...(settings.aiEnabled ? ['assistant'] : [])] as SideTab[]).map((t) => ({
       id: `show-${t}`, name: m.actions.showPanel[t], enabled: has, run: () => { setLeftOpen(true); setTab(t) },
     })),
     ...ALL_TOOLS.map((t) => ({ id: `tool-${t.id}`, name: m.actions.tool(t.name), icon: t.Icon, enabled: has, run: () => setTool(t.id) })),
@@ -1107,6 +1273,7 @@ export default function App() {
           key={`sidebar-${active}`} doc={doc} tab={tab} onTab={setTab} selected={selected} selectedAnnot={selAnnot?.id ?? null}
           commentFocus={commentFocus} actions={sideActions}
           compare={{ others: tabs.filter((t) => t.id !== active), result: comparison }}
+          assistant={settings.aiEnabled ? { log: aiLog, busy: aiBusy, hasFields: doc.pages.some((p) => p.widgets.some((w) => !w.readOnly && w.kind !== 'signature' && w.kind !== 'button')) } : null}
         />
       )}
 
@@ -1372,6 +1539,7 @@ export default function App() {
           onClose={() => setWorkflowsOpen(null)}
         />
       )}
+      {consent && <AiConsentDialog host={consent.host} items={consent.items} onAnswer={consent.answer} />}
       {pwPrompt && <PasswordDialog file={pwPrompt.file} retry={pwPrompt.retry} onDone={pwPrompt.resolve} />}
       {busy && <div className="busy" />}
     </div>
