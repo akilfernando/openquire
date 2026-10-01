@@ -37,6 +37,7 @@
   code { font: 13px var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
   pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 13px/1.55 var(--mono); }
   pre code { background: none; padding: 0; }
+  pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
   th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
   th { color: var(--muted); font-weight: 600; }
@@ -69,7 +70,7 @@
 
 <h2 id="start">Your first plugin</h2>
 <p>A plugin is one JavaScript module. It exports a <code>manifest</code> describing itself and a default function that receives the API:</p>
-<pre><code>export const manifest = {
+<pre tabindex="0"><code>export const manifest = {
   id: 'dev.example.word-count',
   name: 'Word count',
   version: '1.0.0',
@@ -120,11 +121,11 @@ export default function activate(api) {
 <p>Everything on <code>api</code> that talks to OpenQuire returns a promise. Pages are numbered from 0, and positions are in PDF points from the page's top-left corner.</p>
 
 <h3 id="commands">Commands</h3>
-<pre><code>api.commands.add({ id, name, workflow?, run })</code></pre>
+<pre tabindex="0"><code>api.commands.add({ id, name, workflow?, run })</code></pre>
 <p>Adds <i>Plugin name: name</i> to the command palette. Users can assign it a hotkey. With <code>workflow: true</code>, running the command while recording a workflow adds it as a step, so it runs on every file when the workflow is replayed, with document calls acting on each file in turn.</p>
 
 <h3 id="panes">Panes</h3>
-<pre><code>api.panes.add({ id, title, content, onEvent? })
+<pre tabindex="0"><code>api.panes.add({ id, title, content, onEvent? })
 api.panes.update(id, content)</code></pre>
 <p>Adds a tab to the left sidebar. Content is a list of elements that OpenQuire draws in its own style, in light and dark:</p>
 <table>
@@ -138,7 +139,7 @@ api.panes.update(id, content)</code></pre>
 <p>When a button is pressed, <code>onEvent</code> receives <code>{ element, values }</code>: the button's id and the current value of every input, by id.</p>
 
 <h3 id="tools">Tools</h3>
-<pre><code>api.tools.add({ id, name, onClick })</code></pre>
+<pre tabindex="0"><code>api.tools.add({ id, name, onClick })</code></pre>
 <p>Adds a tool to the dock. While it is selected, clicking a page calls <code>onClick({ page, x, y })</code>.</p>
 
 <h3 id="document">Document</h3>
@@ -153,13 +154,13 @@ api.panes.update(id, content)</code></pre>
 </table>
 
 <h3 id="ui">Notices and downloads</h3>
-<pre><code>api.ui.notice(text)
+<pre tabindex="0"><code>api.ui.notice(text)
 api.ui.download(name, data, type?)</code></pre>
 <p><code>notice</code> shows a message in the status bar. <code>download</code> offers a file to the user (a save dialog in the desktop app); this is how a plugin adds an export format.</p>
 
 <h2 id="workflows">Workflows</h2>
 <p><code>document.runStep</code> accepts the steps OpenQuire's workflows use, so a plugin can do anything a workflow can:</p>
-<pre><code>await api.document.runStep({ action: 'rotate', pages: 'even', delta: 90 })
+<pre tabindex="0"><code>await api.document.runStep({ action: 'rotate', pages: 'even', delta: 90 })
 await api.document.runStep({ action: 'markPatterns', patterns: ['[\\w.+-]+@[\\w-]+(\\.[\\w-]+)+'] })
 await api.document.runStep({ action: 'applyRedactions' })
 await api.document.runStep({ action: 'stamp', pages: 'all', stamp: {
@@ -169,7 +170,7 @@ await api.document.runStep({ action: 'stamp', pages: 'all', stamp: {
 
 <h2 id="themes">Themes and snippets</h2>
 <p>A theme is a CSS file imported in <b>Settings, Appearance</b>; a snippet is a smaller piece of CSS that can be turned on and off. Both are added after OpenQuire's own styles. Build on the design tokens rather than fixed colors, and both light and dark will work:</p>
-<pre><code>/* A flatter, square dock */
+<pre tabindex="0"><code>/* A flatter, square dock */
 .dock { border-radius: 4px; box-shadow: none; border-color: var(--border-hover); }
 
 /* A warmer workspace background in the light theme */
