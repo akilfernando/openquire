@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { engine } from '../engine/client'
 import type { Rect, SignRequest } from '../engine/types'
 import { download } from '../util'
+import Modal from './Modal'
 
 type Corner = 'br' | 'bl' | 'tr' | 'tl' | 'invisible'
 
@@ -82,40 +83,38 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
   }
 
   return (
-    <div className="modal" onPointerDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div className="dialog sign-dialog">
-        <h3>Sign with a digital ID</h3>
+    <Modal title="Sign with a digital ID" onClose={busy ? undefined : onClose} className="sign-dialog">
         <p className="hint">
           A certificate-based signature proves who signed and shows if the document changes afterwards. The signed PDF is
           downloaded when you sign.{signedBefore && ' Existing signatures stay valid: your signature is added as a new revision.'}
         </p>
 
         <nav className="tabs">
-          <button className={source === 'file' ? 'active' : ''} onClick={() => setSource('file')}>Use my digital ID</button>
-          <button className={source === 'new' ? 'active' : ''} onClick={() => setSource('new')}>Create a new ID</button>
+          <button className={source === 'file' ? 'is-active' : ''} onClick={() => setSource('file')}>Use my digital ID</button>
+          <button className={source === 'new' ? 'is-active' : ''} onClick={() => setSource('new')}>Create a new ID</button>
         </nav>
 
         {source === 'file' ? (
           <>
-            <label><span>Digital ID file (.p12 or .pfx)</span>
+            <label className="field"><span>Digital ID file (.p12 or .pfx)</span>
               <input type="file" accept=".p12,.pfx,application/x-pkcs12"
                 onChange={async (e) => { const f = e.target.files?.[0]; if (f) setP12({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }) }} />
             </label>
             {p12 && <span className="hint">Using {p12.name}</span>}
-            <label><span>Password</span>
+            <label className="field"><span>Password</span>
               <input type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} />
             </label>
           </>
         ) : (
           <>
             <div className="row">
-              <label><span>Your name</span><input value={newId.name} onChange={(e) => setNewId({ ...newId, name: e.target.value })} /></label>
-              <label><span>Email</span><input type="email" value={newId.email} onChange={(e) => setNewId({ ...newId, email: e.target.value })} /></label>
+              <label className="field"><span>Your name</span><input value={newId.name} onChange={(e) => setNewId({ ...newId, name: e.target.value })} /></label>
+              <label className="field"><span>Email</span><input type="email" value={newId.email} onChange={(e) => setNewId({ ...newId, email: e.target.value })} /></label>
             </div>
-            <label><span>Organization (optional)</span><input value={newId.organization} onChange={(e) => setNewId({ ...newId, organization: e.target.value })} /></label>
+            <label className="field"><span>Organization (optional)</span><input value={newId.organization} onChange={(e) => setNewId({ ...newId, organization: e.target.value })} /></label>
             <div className="row">
-              <label><span>Password</span><input type="password" autoComplete="new-password" value={newId.password} onChange={(e) => setNewId({ ...newId, password: e.target.value })} /></label>
-              <label><span>Confirm</span><input type="password" autoComplete="new-password" value={newId.confirm} onChange={(e) => setNewId({ ...newId, confirm: e.target.value })} /></label>
+              <label className="field"><span>Password</span><input type="password" autoComplete="new-password" value={newId.password} onChange={(e) => setNewId({ ...newId, password: e.target.value })} /></label>
+              <label className="field"><span>Confirm</span><input type="password" autoComplete="new-password" value={newId.confirm} onChange={(e) => setNewId({ ...newId, confirm: e.target.value })} /></label>
             </div>
             <p className="hint">
               Creates a self-signed ID and downloads it as a .p12 file. Keep it safe and reuse it for future signatures.
@@ -126,11 +125,11 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
         )}
 
         <div className="row">
-          <label><span>Reason</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-          <label><span>Location</span><input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
+          <label className="field"><span>Reason</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          <label className="field"><span>Location</span><input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
         </div>
         <div className="row">
-          <label><span>Appearance</span>
+          <label className="field"><span>Appearance</span>
             <select value={corner} onChange={(e) => setCorner(e.target.value as Corner)}>
               <option value="br">Box at bottom right of this page</option>
               <option value="bl">Box at bottom left</option>
@@ -151,9 +150,8 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
         <div className="row end">
           <span className="muted grow">{busy}</span>
           <button disabled={!!busy} onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={!p12 || !password || !!busy} onClick={sign}>Sign &amp; download</button>
+          <button className="cta" disabled={!p12 || !password || !!busy} onClick={sign}>Sign &amp; download</button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

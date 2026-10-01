@@ -29,6 +29,14 @@ Changes are saved into the existing file, so links, bookmarks, form fields, tags
 preserved when you reorganize pages. Annotations are standard PDF annotations that Acrobat and other
 viewers can display and reply to.
 
+## Design
+
+The interface is modelled on [Obsidian](https://obsidian.md): its neutral base color scale, thin
+[Lucide](https://lucide.dev) icons, a ribbon, icon-tabbed collapsible sidebars, a workspace tab bar and
+view header, a floating status bar, a command palette (`Ctrl+P`) and a settings modal (`Ctrl+,`), in
+light and dark themes. OpenQuire's twist is an amber "highlighter ink" accent (other accents are in
+Settings), pages laid on a dot-grid desk, and a floating tool dock in the style of Obsidian Canvas.
+
 ## Getting started
 
 ```sh

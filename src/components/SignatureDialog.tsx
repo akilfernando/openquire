@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { canvasPng } from '../util'
+import Modal from './Modal'
 
 interface Props {
   onPlace: (png: Uint8Array, aspect: number) => void
@@ -105,19 +106,18 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
   }
 
   return (
-    <div className="modal" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog">
-        <h3>Sign</h3>
+    <Modal title="Add your signature" onClose={onClose}>
         {saved && (
           <div className="saved-sig">
             <img src={saved.url} alt="Saved signature" />
-            <button className="primary" onClick={placeSaved}>Use saved signature</button>
+            <span className="grow">Saved on this device</span>
             <button onClick={() => { localStorage.removeItem(SAVED); setSaved(null) }}>Forget</button>
+            <button className="cta" onClick={placeSaved}>Use</button>
           </div>
         )}
         <nav className="tabs">
           {(['draw', 'type', 'upload'] as Mode[]).map((m) => (
-            <button key={m} className={mode === m ? 'active' : ''} onClick={() => { setMode(m); clear() }}>
+            <button key={m} className={mode === m ? 'is-active' : ''} onClick={() => { setMode(m); clear() }}>
               {m[0].toUpperCase() + m.slice(1)}
             </button>
           ))}
@@ -150,13 +150,12 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
           <span>Remember on this device</span>
         </label>
-        <p className="hint">This places an image of your signature. Certificate-based digital signatures are not supported yet.</p>
+        <p className="hint">This places an image of your signature. To prove who signed, use Sign with a digital ID instead.</p>
         <div className="row end">
           <button onClick={clear}>Clear</button>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={empty} onClick={place}>Place on page</button>
+          <button className="cta" disabled={empty} onClick={place}>Place on page</button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
