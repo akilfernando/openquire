@@ -248,6 +248,14 @@ export class Engine {
     return this.state()
   }
 
+  /** Releases the document and everything cached for it. */
+  close() {
+    this.touch('all')
+    this.doc?.destroy()
+    this.doc = null
+    this.lastSave = null
+  }
+
   private replaceDoc(doc: mupdf.PDFDocument, name: string) {
     this.touch('all')
     this.doc?.destroy()

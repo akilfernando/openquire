@@ -294,6 +294,13 @@ label.check:hover { color: var(--text-normal); }
   background: var(--bg-primary); border-radius: var(--radius-m) var(--radius-m) 0 0; color: var(--text-normal);
   box-shadow: 0 0 0 1px var(--border); clip-path: inset(-1px -1px 0 -1px); position: relative; top: 1px;
 }
+.tab:not(.is-active) { background: transparent; box-shadow: none; color: var(--text-muted); }
+.tab:not(.is-active):hover { background: var(--hover); color: var(--text-normal); }
+.tab.is-side { box-shadow: inset 0 -2px 0 var(--accent); }
+.tab-title { all: unset; display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; height: 100%; }
+.tab-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-s); }
+.tab .tab-side { opacity: 0; }
+.tab:hover .tab-side, .tab .tab-side:focus-visible { opacity: 1; }
 .tab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab .clickable-icon { padding: 2px; }
 .tab-bar .spacer { flex: 1; }
@@ -311,8 +318,22 @@ label.check:hover { color: var(--text-normal); }
 .find-count { min-width: 44px; text-align: center; color: var(--text-faint); font-size: var(--font-smaller); }
 
 /* The desk: a dot grid under the pages. */
-.view-content { flex: 1; min-height: 0; position: relative; }
-main.desk {
+.view-content { flex: 1; min-height: 0; position: relative; display: flex; }
+.view-main { flex: 1; min-width: 0; position: relative; }
+.side-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+.side-pane-header {
+  height: 34px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border); background: var(--bg-secondary);
+}
+.side-pane-header .label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-pane-header .spacer { flex: 1; }
+.side-pane-header .clickable-icon { padding: 4px; }
+.side-pane .side-desk { position: relative; flex: 1; inset: auto; }
+@media (max-width: 900px) {
+  .view-content.is-split { flex-direction: column; }
+  .view-content.is-split .side-pane { border-left: none; border-top: 1px solid var(--border); }
+}
+.desk {
   position: absolute; inset: 0; overflow: auto; padding: 32px 32px 120px;
   /* Pages centre with auto margins, which (unlike align-items) stay scrollable when wider than the view. */
   display: flex; flex-direction: column; align-items: flex-start; gap: 24px;
@@ -504,7 +525,7 @@ a { color: var(--accent); }
   .drawer-scrim { display: block; position: absolute; inset: 0 0 0 var(--ribbon-width); z-index: 8; background: rgba(0, 0, 0, 0.35); }
   .view-title { display: none; }
   .view-header { justify-content: space-between; }
-  main.desk { padding: 16px 12px 120px; }
+  .desk { padding: 16px 12px 120px; }
   .find-bar input { width: 120px; }
 }
 @media (max-width: 560px) {

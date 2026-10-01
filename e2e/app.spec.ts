@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import * as mupdf from 'mupdf'
-import { LINES, bytesOf, openFile, openReport, openSection, pagePoint, pdfText, save, scannedPdf } from './fixtures'
+import { LINES, bytesOf, openFile, openReport, openSection, pagePoint, pdfText, reportPdf, save, scannedPdf } from './fixtures'
 
 test('opens a document and finds text', async ({ page }) => {
   await openReport(page)
@@ -355,4 +355,36 @@ test('tags a document and edits its reading order', async ({ page }) => {
   expect(results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ') + ' ' + n.failureSummary).join(', ')}`)).toEqual([])
   const bytes = new TextDecoder('latin1').decode(await save(page))
   expect(bytes).toContain('StructTreeRoot')
+})
+
+test('opens documents in tabs and shows two side by side', async ({ page }) => {
+  await openReport(page)
+  await openFile(page, 'scan.pdf', await scannedPdf())
+  const tabs = page.getByRole('navigation', { name: 'Open documents' })
+  await expect(tabs.getByRole('button', { name: 'scan', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('.view-title')).toContainText('scan')
+
+  // Each tab keeps its own document and undo history.
+  await tabs.getByRole('button', { name: 'report', exact: true }).click()
+  await expect(page.locator('.view-title')).toContainText('report')
+  await expect(page.locator('main.desk > .page')).toHaveCount(2)
+
+  // Open the scan beside the report, then link scrolling.
+  await tabs.getByRole('button', { name: 'Open scan to the side' }).click()
+  const side = page.getByRole('region', { name: 'scan, side view' })
+  await expect(side.locator('canvas[width]').first()).toBeVisible()
+  await expect(side.getByRole('button', { name: 'Link scrolling' })).toHaveAttribute('aria-pressed', 'true')
+  // The report's second page at the top of the main view brings the side view along.
+  await openFile(page, 'report2.pdf', await reportPdf())
+  await tabs.getByRole('button', { name: 'report', exact: true }).click()
+  await tabs.getByRole('button', { name: 'Open report2 to the side' }).click()
+  const side2 = page.getByRole('region', { name: 'report2, side view' })
+  await expect(side2.locator('canvas[width]').first()).toBeVisible()
+  await page.locator('main.desk').evaluate((el) => (el.scrollTop = (el.querySelectorAll('.page')[1] as HTMLElement).offsetTop))
+  await expect.poll(() => side2.locator('.desk').evaluate((el) => Math.round(el.scrollTop - (el.querySelectorAll('.page')[1] as HTMLElement).offsetTop))).toBe(0)
+
+  // Closing the active tab moves to a neighbour.
+  await tabs.getByRole('button', { name: 'Close report', exact: true }).click()
+  await expect(tabs.getByRole('button', { name: /^Close / })).toHaveCount(2)
+  await expect(page.locator('.view-title')).not.toContainText('report ')
 })

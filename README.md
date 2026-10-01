@@ -7,7 +7,7 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 
 | Area | What you can do |
 | --- | --- |
-| View | Fast, accurate rendering, zoom, thumbnails, find with match navigation, text selection and copy |
+| View | Fast, accurate rendering, zoom, thumbnails, several documents in tabs, two side by side with linked scrolling, find with match navigation, text selection and copy |
 | Edit | Edit whole paragraphs that reflow, in the document's own embedded fonts; text boxes; move, resize, replace and delete images; erase graphics; whiteout; links |
 | Comment | Highlight, underline and strike through text; sticky notes; pen, rectangles, ellipses, arrows; threaded replies; comments panel with filtering |
 | Organize | Merge PDFs and other files, drag to reorder, rotate, delete, extract, insert blank pages, crop |

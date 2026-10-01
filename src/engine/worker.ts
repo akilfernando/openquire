@@ -1,20 +1,45 @@
 /// <reference lib="webworker" />
 import { Engine, PasswordError } from './core'
 
-const engine = new Engine()
+/** One engine per open document (workspace tab), keyed by document id. */
+const engines = new Map<number, Engine>()
+// Settings shared by every document, applied to engines created later too.
+let author = 'OpenQuire user'
+let trusted: string[] = []
+
+function create() {
+  const e = new Engine()
+  e.author = author
+  if (trusted.length) e.setTrustedCertificates(trusted)
+  return e
+}
 
 export interface Request {
   id: number
+  /** The document the call is for. */
+  doc: number
   method: string
   args: unknown[]
 }
 
 self.onmessage = async ({ data }: MessageEvent<Request>) => {
-  const { id, method, args } = data
+  const { id, doc, method, args } = data
   try {
     if (method === 'setAuthor') {
-      engine.author = String(args[0] || 'OpenQuire user')
+      author = String(args[0] || 'OpenQuire user')
+      for (const e of engines.values()) e.author = author
       return self.postMessage({ id, result: null })
+    }
+    if (method === 'closeDocument') {
+      engines.get(doc)?.close()
+      engines.delete(doc)
+      return self.postMessage({ id, result: null })
+    }
+    let engine = engines.get(doc)
+    if (!engine) engines.set(doc, (engine = create()))
+    if (method === 'setTrustedCertificates') {
+      trusted = args[0] as string[]
+      for (const [d, e] of engines) if (d !== doc) e.setTrustedCertificates(trusted)
     }
     const fn = (engine as unknown as Record<string, (...a: unknown[]) => unknown>)[method]
     if (typeof fn !== 'function') throw new Error(`Unknown engine method ${method}`)

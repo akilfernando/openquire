@@ -3,7 +3,7 @@ import {
   BadgeCheck, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
   ImagePlus, Loader2, Lock, MousePointer2, MoveUpRight, PanelLeft, PanelRight, Pencil, Redo2, ScanText, Search, Settings as SettingsIcon,
   ShieldAlert, ShieldCheck, Signature, Square, SquareTerminal, StickyNote, Strikethrough, TextCursorInput, Trash2, Type, Underline, Undo2,
-  X, ZoomIn, ZoomOut, Link2, SquareX, FormInput, type LucideProps,
+  X, ZoomIn, ZoomOut, Link2, SquareX, FormInput, Columns2, type LucideProps,
 } from 'lucide-react'
 import CommandPalette, { type Command } from './components/CommandPalette'
 import DigitalSignDialog from './components/DigitalSignDialog'
@@ -14,9 +14,10 @@ import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsModal, { type Settings } from './components/SettingsModal'
 import Sidebar, { type SideActions, type SideTab } from './components/Sidebar'
+import SidePane from './components/SidePane'
 import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
-import { EngineError, engine } from './engine/client'
+import { EngineError, activeDocument, closeDocument, engine, engineFor, newDocument, setActiveDocument } from './engine/client'
 import { parseRanges } from './engine/ranges'
 import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Quad, type Rect, type WidgetInfo, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
 import { arrowNavigate } from './focus'
@@ -100,6 +101,14 @@ export default function App() {
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [hitIndex, setHitIndex] = useState(0)
   const [pageIndex, setPageIndex] = useState(0)
+  // Workspace tabs: one document each. Inactive tabs remember their zoom and scroll position.
+  const [tabs, setTabs] = useState<{ id: number; name: string }[]>([])
+  const [active, setActive] = useState<number | null>(null)
+  const views = useRef(new Map<number, { zoom: number; scroll: number }>())
+  // A second document shown beside the active one.
+  const [side, setSide] = useState<{ id: number; state: DocState } | null>(null)
+  const [linked, setLinked] = useState(true)
+  const sideRef = useRef<HTMLDivElement>(null)
 
   const mainRef = useRef<HTMLElement>(null)
   const findRef = useRef<HTMLInputElement>(null)
@@ -222,34 +231,145 @@ export default function App() {
 
   const askPassword = (file: string, retry: boolean) => new Promise<string | null>((resolve) => setPwPrompt({ file, retry, resolve }))
 
-  const openFiles = (files: File[], append: boolean) =>
+  /** Clears everything tied to the document on screen (selections, search, edits in progress). */
+  const resetView = () => {
+    setSelected(new Set())
+    setSelAnnot(null)
+    setEditingAnnot(null)
+    setTextSel(null)
+    setHits(null)
+    setFindOpen(false)
+    setFieldEdit(null)
+    setLinkEdit(null)
+    setPageIndex(0)
+  }
+
+  /** Remembers the active tab's zoom, scroll position and name before another tab takes over. */
+  const stashView = () => {
+    const d = docRef.current
+    if (!d) return
+    const id = activeDocument()
+    views.current.set(id, { zoom: zoomRef.current, scroll: mainRef.current?.scrollTop ?? 0 })
+    setTabs((t) => t.map((x) => (x.id === id ? { ...x, name: d.name } : x)))
+  }
+
+  /** Loads a document into a new tab, or returns to the previous tab if loading fails or is cancelled. */
+  const inNewTab = async (load: () => Promise<DocState | null>) => {
+    const prev = activeDocument()
+    const id = newDocument()
+    setActiveDocument(id)
+    let s: DocState | null
+    try {
+      s = await load()
+    } catch (e) {
+      setActiveDocument(prev)
+      void closeDocument(id)
+      throw e
+    }
+    if (!s) {
+      setActiveDocument(prev)
+      void closeDocument(id)
+      return
+    }
+    // The previous tab is still on screen until now, so its view is saved under its own id.
+    setActiveDocument(prev)
+    stashView()
+    setActiveDocument(id)
+    setTabs((t) => [...t, { id, name: s.name }])
+    setActive(id)
+    resetView()
+    apply(s)
+    setSaveOpts({ compress: 'standard', security: { mode: 'keep' } })
+    const opened = s
+    // The desk mounts with the document, so measure it on the next frame.
+    requestAnimationFrame(() => {
+      mainRef.current?.scrollTo(0, 0)
+      fitWidth(opened)
+    })
+  }
+
+  const switchTab = (id: number) =>
     run(m.busy.opening, async () => {
-      for (const [i, f] of files.entries()) {
-        const bytes = new Uint8Array(await f.arrayBuffer())
-        const replace = !append && i === 0
-        let password: string | undefined
-        for (;;) {
-          try {
-            const s = replace ? await engine.open(f.name, bytes.slice(), password) : await engine.append(f.name, bytes.slice(), password)
-            apply(s)
-            if (replace) {
-              setSelected(new Set())
-              setSaveOpts({ compress: 'standard', security: { mode: 'keep' } })
-              mainRef.current?.scrollTo(0, 0)
-              // The desk mounts with the first document, so measure it on the next frame.
-              requestAnimationFrame(() => fitWidth(s))
-            }
-            break
-          } catch (e) {
-            if (!(e instanceof EngineError) || e.name !== 'PasswordError') throw e
-            const pw = await askPassword(f.name, !!e.retry)
-            setPwPrompt(null)
-            if (pw === null) break
-            password = pw
-          }
-        }
+      if (id === activeDocument() && docRef.current) return
+      stashView()
+      setActiveDocument(id)
+      setActive(id)
+      setSide((sp) => (sp?.id === id ? null : sp))
+      resetView()
+      apply(await engine.state())
+      const v = views.current.get(id)
+      if (v) {
+        setZoom(v.zoom)
+        requestAnimationFrame(() => mainRef.current?.scrollTo(0, v.scroll))
       }
     })
+
+  const closeTab = (id: number) => {
+    const index = tabs.findIndex((t) => t.id === id)
+    const rest = tabs.filter((t) => t.id !== id)
+    setTabs(rest)
+    views.current.delete(id)
+    setSide((sp) => (sp?.id === id ? null : sp))
+    if (id === activeDocument()) {
+      if (rest.length) void switchTab(rest[Math.max(0, index - 1)].id)
+      else {
+        setActive(null)
+        setDoc(null)
+        resetView()
+        setStatus('')
+      }
+    }
+    void closeDocument(id)
+  }
+
+  const openSide = (id: number) =>
+    run(m.busy.opening, async () => {
+      setSide({ id, state: await engineFor(id).state() })
+      requestAnimationFrame(() => syncScroll(mainRef.current, sideRef.current))
+    })
+
+  // Linked scrolling keeps the same page, at the same relative position, at the top of both views.
+  const syncIgnore = useRef<{ el: HTMLElement | null; until: number }>({ el: null, until: 0 })
+  const syncScroll = (from: HTMLElement | null, to: HTMLElement | null) => {
+    if (!linked || !from || !to) return
+    if (syncIgnore.current.el === from && performance.now() < syncIgnore.current.until) return
+    const pages = [...from.querySelectorAll<HTMLElement>(':scope > .page')]
+    const targets = [...to.querySelectorAll<HTMLElement>(':scope > .page')]
+    if (!pages.length || !targets.length) return
+    const top = from.scrollTop
+    const i = Math.max(0, pages.findIndex((p) => p.offsetTop + p.offsetHeight > top))
+    const fraction = Math.min(1, Math.max(0, (top - pages[i].offsetTop) / pages[i].offsetHeight))
+    const target = targets[Math.min(i, targets.length - 1)]
+    syncIgnore.current = { el: to, until: performance.now() + 80 }
+    to.scrollTop = target.offsetTop + fraction * target.offsetHeight
+  }
+
+  const openFiles = (files: File[], append: boolean) =>
+    run(m.busy.opening, async () => {
+      for (const f of files) {
+        const bytes = new Uint8Array(await f.arrayBuffer())
+        const load = async (open: (password?: string) => Promise<DocState>) => {
+          let password: string | undefined
+          for (;;) {
+            try {
+              return await open(password)
+            } catch (e) {
+              if (!(e instanceof EngineError) || e.name !== 'PasswordError') throw e
+              const pw = await askPassword(f.name, !!e.retry)
+              setPwPrompt(null)
+              if (pw === null) return null
+              password = pw
+            }
+          }
+        }
+        if (append) {
+          const s = await load((pw) => engine.append(f.name, bytes.slice(), pw))
+          if (s) apply(s)
+        } else await inNewTab(() => load((pw) => engine.open(f.name, bytes.slice(), pw)))
+      }
+    })
+
+  const newBlank = () => run(m.busy.creating, () => inNewTab(() => engine.newBlank()))
 
   const save = () =>
     run(m.busy.saving, async () => {
@@ -260,15 +380,7 @@ export default function App() {
       setStatus(m.status.saved(`${docRef.current!.name}.pdf`, kb(bytes.length)))
     })
 
-  const closeDoc = () => {
-    setDoc(null)
-    setSelected(new Set())
-    setSelAnnot(null)
-    setTextSel(null)
-    setHits(null)
-    setFindOpen(false)
-    setStatus('')
-  }
+  const closeDoc = () => closeTab(activeDocument())
 
   // ---- navigation --------------------------------------------------------------------------
 
@@ -630,7 +742,7 @@ export default function App() {
   const has = !!doc
   const commands: Command[] = [
     { id: 'open', name: m.actions.openFile, icon: FolderOpen, hotkey: mod('O'), run: () => openRef.current!.click() },
-    { id: 'new', name: m.actions.newBlank, icon: FilePlus2, run: () => void run(m.busy.creating, async () => apply(await engine.newBlank())) },
+    { id: 'new', name: m.actions.newBlank, icon: FilePlus2, run: () => void newBlank() },
     { id: 'merge', name: m.actions.merge, icon: Combine, enabled: has, run: () => addRef.current!.click() },
     { id: 'save', name: m.actions.saveCopy, icon: Download, hotkey: mod('S'), enabled: has, run: () => void save() },
     { id: 'close', name: m.actions.closeDocument, icon: X, enabled: has, run: closeDoc },
@@ -770,7 +882,7 @@ export default function App() {
       <nav className="ribbon" aria-label={m.workspace.ribbon}>
         <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} onClick={() => setLeftOpen((o) => !o)} />
         <IconButton Icon={FolderOpen} label={m.actions.openFile} hotkey={mod('O')} onClick={() => openRef.current!.click()} />
-        <IconButton Icon={FilePlus2} label={m.actions.newBlank} onClick={() => run(m.busy.creating, async () => apply(await engine.newBlank()))} />
+        <IconButton Icon={FilePlus2} label={m.actions.newBlank} onClick={() => newBlank()} />
         <IconButton Icon={Combine} label={m.actions.merge} disabled={!doc} onClick={() => addRef.current!.click()} />
         <IconButton Icon={ScanText} label={m.actions.ocr} disabled={!doc} onClick={() => panelActions.ocr('notext')} />
         <IconButton Icon={Signature} label={m.actions.signImage} disabled={!doc} onClick={() => setSigning(true)} />
@@ -783,23 +895,34 @@ export default function App() {
 
       {doc && leftOpen && (
         <Sidebar
-          doc={doc} tab={tab} onTab={setTab} selected={selected} selectedAnnot={selAnnot?.id ?? null}
+          key={active} doc={doc} tab={tab} onTab={setTab} selected={selected} selectedAnnot={selAnnot?.id ?? null}
           commentFocus={commentFocus} actions={sideActions}
         />
       )}
 
       <div className="workspace">
-        <div className="tab-bar">
-          {doc && (
-            <div className="tab" title={doc.name}>
-              <FileText size={15} className="faint" />
-              <span className="label">{doc.name}</span>
-              <button className="clickable-icon" aria-label={m.actions.closeDocument} title={m.actions.close} onClick={closeDoc}><X size={14} /></button>
-            </div>
-          )}
+        <nav className="tab-bar" aria-label={m.workspace.documents}>
+          {tabs.map((t) => {
+            const isActive = t.id === active
+            const name = isActive && doc ? doc.name : t.name
+            return (
+              <div key={t.id} className={`tab${isActive ? ' is-active' : ''}${side?.id === t.id ? ' is-side' : ''}`} title={name}>
+                <button aria-current={isActive ? 'page' : undefined} className="tab-title" onClick={() => void switchTab(t.id)}>
+                  <FileText size={15} className="faint" />
+                  <span className="label">{name}</span>
+                </button>
+                {!isActive && (
+                  <button className="clickable-icon tab-side" aria-label={m.workspace.openToSide(name)} title={m.workspace.openToSideShort} onClick={() => void openSide(t.id)}>
+                    <Columns2 size={14} />
+                  </button>
+                )}
+                <button className="clickable-icon" aria-label={m.workspace.closeTab(name)} title={m.actions.close} onClick={() => closeTab(t.id)}><X size={14} /></button>
+              </div>
+            )
+          })}
           <span className="spacer" />
           {doc && <IconButton Icon={PanelRight} label={m.actions.toggleRight} onClick={() => setRightOpen((o) => !o)} />}
-        </div>
+        </nav>
 
         {doc && (
           <div className="view-header">
@@ -831,6 +954,12 @@ export default function App() {
               ) : (
                 <IconButton Icon={Search} label={m.actions.find} hotkey={mod('F')} onClick={openFind} />
               )}
+              {tabs.length > 1 && (
+                <IconButton
+                  Icon={Columns2} label={side ? m.workspace.closeSide : m.workspace.splitView}
+                  onClick={() => (side ? setSide(null) : void openSide(tabs.find((t) => t.id !== active)!.id))}
+                />
+              )}
               <IconButton Icon={ZoomOut} label={m.actions.zoomOut} hotkey={mod('-')} onClick={() => zoomBy(-0.25)} />
               <button className="clickable-icon zoom-label tnum" title={m.actions.fitWidth} onClick={() => fitWidth()}>{Math.round(zoom * 100)}%</button>
               <IconButton Icon={ZoomIn} label={m.actions.zoomIn} hotkey={mod('=')} onClick={() => zoomBy(0.25)} />
@@ -841,10 +970,11 @@ export default function App() {
           </div>
         )}
 
-        <div className="view-content">
+        <div className={`view-content${side ? ' is-split' : ''}`}>
           {doc ? (
             <>
-              <main ref={mainRef} className="desk" onScroll={trackPage}>
+              <div className="view-main">
+              <main key={active} ref={mainRef} className="desk" onScroll={() => { trackPage(); syncScroll(mainRef.current, sideRef.current) }}>
                 {doc.pages.map((p) => (
                   <PageView
                     key={p.id} page={p} zoom={zoom} tool={tool} color={group ? colors[group] : colors.draw} strokeWidth={strokeWidth}
@@ -900,13 +1030,20 @@ export default function App() {
                   </>
                 )}
               </div>
+              </div>
+              {side && (
+                <SidePane
+                  key={side.id} ref={sideRef} doc={side.id} state={side.state} zoom={zoom} linked={linked}
+                  onLink={() => setLinked((l) => !l)} onClose={() => setSide(null)} onScroll={() => syncScroll(sideRef.current, mainRef.current)}
+                />
+              )}
             </>
           ) : (
             <div className="empty-state">
               <div className="empty-state-inner">
                 <div className="empty-state-title">{m.workspace.emptyTitle}</div>
                 <button className="empty-state-action" onClick={() => openRef.current!.click()}>{m.workspace.emptyOpen}<kbd>{mod('O')}</kbd></button>
-                <button className="empty-state-action" onClick={() => run(m.busy.creating, async () => apply(await engine.newBlank()))}>{m.workspace.emptyBlank}</button>
+                <button className="empty-state-action" onClick={() => newBlank()}>{m.workspace.emptyBlank}</button>
                 <button className="empty-state-action" onClick={() => setPalette(true)}>{m.actions.commandPalette}<kbd>{mod('P')}</kbd></button>
                 <p className="empty-state-note">{m.workspace.emptyNote}</p>
               </div>
@@ -915,7 +1052,7 @@ export default function App() {
         </div>
       </div>
 
-      {doc && rightOpen && <ToolsPanel doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} />}
+      {doc && rightOpen && <ToolsPanel key={active} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} />}
       {doc && narrow && (leftOpen || rightOpen) && <div className="drawer-scrim" onClick={() => { setLeftOpen(false); setRightOpen(false) }} />}
 
       <div className="status-bar">

@@ -132,6 +132,15 @@ export const en = {
   },
 
   workspace: {
+    documents: 'Open documents',
+    closeTab: (name: string) => `Close ${name}`,
+    openToSide: (name: string) => `Open ${name} to the side`,
+    openToSideShort: 'Open to the side',
+    splitView: 'Show another document to the side',
+    closeSide: 'Close side view',
+    sidePane: (name: string) => `${name}, side view`,
+    linkScroll: 'Link scrolling',
+    pageLabel: (label: string) => `Page ${label}`,
     ribbon: 'Ribbon',
     pageOf: (label: string, page: number, total: number) =>
       label === String(page) ? `Page ${page} of ${total}` : `Page ${label} (${page} of ${total})`,
