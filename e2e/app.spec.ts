@@ -388,3 +388,38 @@ test('opens documents in tabs and shows two side by side', async ({ page }) => {
   await expect(tabs.getByRole('button', { name: /^Close / })).toHaveCount(2)
   await expect(page.locator('.view-title')).not.toContainText('report ')
 })
+
+function contractPdf(lines: string[]) {
+  const d = new mupdf.PDFDocument()
+  const font = d.addSimpleFont(new mupdf.Font('Helvetica'))
+  const body = lines.map((l, j) => `BT /F1 11 Tf 60 ${760 - j * 16} Td (${l}) Tj ET`).join('\n')
+  d.insertPage(-1, d.addPage([0, 0, 595, 842], 0, { Font: { F1: font } }, body))
+  return Buffer.from(d.saveToBuffer('').asUint8Array())
+}
+
+test('compares two versions of a document', async ({ page }) => {
+  await page.goto('/')
+  await openFile(page, 'contract-v1.pdf', contractPdf(['The Supplier will deliver within 30 days.', 'Payment is due within 60 days.', 'Either party may end this agreement.']))
+  await expect(page.locator('main.desk .page canvas[width]')).toBeVisible()
+  await openFile(page, 'contract-v2.pdf', contractPdf(['The Supplier will deliver within 14 days.', 'Payment is due within 60 days.', 'Prices exclude tax.', 'Either party may end this agreement.']))
+  await expect(page.locator('.view-title')).toContainText('contract-v2')
+
+  await page.getByRole('tab', { name: 'Compare' }).click()
+  await page.getByRole('button', { name: 'Compare', exact: true }).click()
+  await expect(page.locator('.pane-heading')).toContainText('2 differences')
+  const items = page.locator('.cmp-item')
+  await expect(items).toHaveCount(2)
+  await expect(items.first()).toContainText('30')
+  await expect(items.first()).toContainText('14')
+
+  // The older version opens beside, and both views highlight the change.
+  const side = page.getByRole('region', { name: 'contract-v1, side view' })
+  await expect(side).toBeVisible()
+  await items.first().click()
+  await expect(page.locator('main.desk .diff.active')).toHaveCount(1)
+  await expect(side.locator('.diff.active')).toHaveCount(1)
+  await expect(page.locator('main.desk .diff-insert')).toHaveCount(1)
+
+  const results = await new AxeBuilder({ page }).include('.sidebar.left').withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ') + ' ' + n.failureSummary).join(', ')}`)).toEqual([])
+})

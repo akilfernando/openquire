@@ -41,6 +41,11 @@ self.onmessage = async ({ data }: MessageEvent<Request>) => {
       trusted = args[0] as string[]
       for (const [d, e] of engines) if (d !== doc) e.setTrustedCertificates(trusted)
     }
+    if (method === 'compareWith') {
+      const older = engines.get(args[0] as number)
+      if (!older) throw new Error('The other document is no longer open')
+      args[0] = older
+    }
     const fn = (engine as unknown as Record<string, (...a: unknown[]) => unknown>)[method]
     if (typeof fn !== 'function') throw new Error(`Unknown engine method ${method}`)
     const result = await fn.apply(engine, args)

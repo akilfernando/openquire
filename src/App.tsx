@@ -13,7 +13,8 @@ import SanitizeDialog from './components/SanitizeDialog'
 import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsModal, { type Settings } from './components/SettingsModal'
-import Sidebar, { type SideActions, type SideTab } from './components/Sidebar'
+import Sidebar, { type CompareInfo, type SideActions, type SideTab } from './components/Sidebar'
+import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
 import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
@@ -109,6 +110,7 @@ export default function App() {
   const [side, setSide] = useState<{ id: number; state: DocState } | null>(null)
   const [linked, setLinked] = useState(true)
   const sideRef = useRef<HTMLDivElement>(null)
+  const [comparison, setComparison] = useState<CompareInfo['result']>(null)
 
   const mainRef = useRef<HTMLElement>(null)
   const findRef = useRef<HTMLInputElement>(null)
@@ -221,6 +223,8 @@ export default function App() {
   /** Applies a state returned by the engine, dropping selections that no longer exist. */
   const apply = useCallback((s: DocState) => {
     setDoc(s)
+    // Any change to the document makes a comparison out of date.
+    setComparison(null)
     const ids = new Set(s.pages.map((p) => p.id))
     setSelected((sel) => ([...sel].every((id) => ids.has(id)) ? sel : new Set([...sel].filter((id) => ids.has(id)))))
     setSelAnnot((sa) => (sa && s.pages.find((p) => p.id === sa.pageId)?.annots.some((a) => a.id === sa.id) ? sa : null))
@@ -330,8 +334,10 @@ export default function App() {
 
   // Linked scrolling keeps the same page, at the same relative position, at the top of both views.
   const syncIgnore = useRef<{ el: HTMLElement | null; until: number }>({ el: null, until: 0 })
+  // Paused while both views are scrolled to a change, which may sit at different places in each.
+  const syncPaused = useRef(0)
   const syncScroll = (from: HTMLElement | null, to: HTMLElement | null) => {
-    if (!linked || !from || !to) return
+    if (!linked || !from || !to || performance.now() < syncPaused.current) return
     if (syncIgnore.current.el === from && performance.now() < syncIgnore.current.until) return
     const pages = [...from.querySelectorAll<HTMLElement>(':scope > .page')]
     const targets = [...to.querySelectorAll<HTMLElement>(':scope > .page')]
@@ -343,6 +349,65 @@ export default function App() {
     syncIgnore.current = { el: to, until: performance.now() + 80 }
     to.scrollTop = target.offsetTop + fraction * target.offsetHeight
   }
+
+  // ---- compare -------------------------------------------------------------------------------
+
+  const compareWith = (otherId: number) =>
+    run(m.busy.comparing, async () => {
+      const data = await engine.compareWith(otherId)
+      setSide({ id: otherId, state: await engineFor(otherId).state() })
+      setComparison({ otherId, data, active: null })
+    })
+
+  /** Scrolls a view so a rectangle on one of its pages sits a third of the way down. */
+  const reveal = (view: HTMLElement | null, pageEl: Element | null, rect: Rect | undefined) => {
+    if (!view || !(pageEl instanceof HTMLElement)) return
+    view.scrollTo({ top: pageEl.offsetTop + (rect ? rect[1] * zoomRef.current : 0) - view.clientHeight / 3 })
+  }
+
+  const focusChange = (kind: 'text' | 'visual', index: number) => {
+    if (!comparison) return
+    const { data } = comparison
+    let target: { page: number; rect?: Rect }
+    let source: { page: number; rect?: Rect }
+    if (kind === 'text') {
+      const c = data.changes[index]
+      // A removal has no place in the newer document (and an addition none in the older), so
+      // the other view goes to the same page.
+      const n = c.new && { page: c.new.page, rect: c.new.rects[0]?.rect }
+      const o = c.old && { page: c.old.page, rect: c.old.rects[0]?.rect }
+      target = n ?? { page: Math.min(o!.page, data.newIds.length - 1) }
+      source = o ?? { page: Math.min(n!.page, data.oldIds.length - 1) }
+    } else {
+      const v = data.visual[index]
+      target = { page: v.page, rect: v.rect }
+      source = { page: v.oldPage, rect: v.rect }
+    }
+    setComparison({ ...comparison, active: { kind, index } })
+    syncPaused.current = performance.now() + 400
+    reveal(mainRef.current, document.getElementById(`page-${data.newIds[target.page]}`), target.rect)
+    reveal(sideRef.current, sideRef.current?.querySelector(`[data-page="${data.oldIds[source.page]}"]`) ?? null, source.rect)
+  }
+
+  // Highlights for both views, by page id.
+  const marks = useMemo(() => {
+    const main = new Map<number, Mark[]>()
+    const other = new Map<number, Mark[]>()
+    if (!comparison) return { main, other }
+    const { data, active } = comparison
+    const add = (map: Map<number, Mark[]>, id: number | undefined, mark: Mark) => id !== undefined && map.set(id, [...(map.get(id) ?? []), mark])
+    data.changes.forEach((c, i) => {
+      const on = active?.kind === 'text' && active.index === i
+      for (const r of c.new?.rects ?? []) add(main, data.newIds[r.page], { rect: r.rect, kind: c.kind, active: on })
+      for (const r of c.old?.rects ?? []) add(other, data.oldIds[r.page], { rect: r.rect, kind: c.kind === 'insert' ? 'insert' : c.kind === 'change' ? 'delete' : c.kind, active: on })
+    })
+    data.visual.forEach((v, i) => {
+      const on = active?.kind === 'visual' && active.index === i
+      add(main, data.newIds[v.page], { rect: v.rect, kind: 'visual', active: on })
+      add(other, data.oldIds[v.oldPage], { rect: v.rect, kind: 'visual', active: on })
+    })
+    return { main, other }
+  }, [comparison])
 
   const openFiles = (files: File[], append: boolean) =>
     run(m.busy.opening, async () => {
@@ -610,6 +675,8 @@ export default function App() {
         download(bytes, `${state.name}.pdf`)
         setStatus(m.status.timestampAdded)
       }),
+    compare: (otherId) => void compareWith(otherId),
+    focusChange,
     autoTag: (lang) =>
       void run(m.busy.tagging, async () => {
         const { state, notes } = await engine.autoTag(lang)
@@ -755,7 +822,7 @@ export default function App() {
     { id: 'zoom-actual', name: m.actions.actualSize, enabled: has, run: () => setZoom(1) },
     { id: 'left', name: m.actions.toggleLeft, icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
     { id: 'right', name: m.actions.toggleRight, icon: PanelRight, enabled: has, run: () => setRightOpen((o) => !o) },
-    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility'] as SideTab[]).map((t) => ({
+    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility', 'compare'] as SideTab[]).map((t) => ({
       id: `show-${t}`, name: m.actions.showPanel[t], enabled: has, run: () => { setLeftOpen(true); setTab(t) },
     })),
     ...ALL_TOOLS.map((t) => ({ id: `tool-${t.id}`, name: m.actions.tool(t.name), icon: t.Icon, enabled: has, run: () => setTool(t.id) })),
@@ -895,8 +962,9 @@ export default function App() {
 
       {doc && leftOpen && (
         <Sidebar
-          key={active} doc={doc} tab={tab} onTab={setTab} selected={selected} selectedAnnot={selAnnot?.id ?? null}
+          key={`sidebar-${active}`} doc={doc} tab={tab} onTab={setTab} selected={selected} selectedAnnot={selAnnot?.id ?? null}
           commentFocus={commentFocus} actions={sideActions}
+          compare={{ others: tabs.filter((t) => t.id !== active), result: comparison }}
         />
       )}
 
@@ -980,7 +1048,7 @@ export default function App() {
                     key={p.id} page={p} zoom={zoom} tool={tool} color={group ? colors[group] : colors.draw} strokeWidth={strokeWidth}
                     selectedAnnot={selAnnot?.pageId === p.id ? selAnnot.id : null} editingAnnot={editingAnnot}
                     hits={hitsByPage.get(p.id) ?? []} activeHit={hits?.[hitIndex]?.pageId === p.id ? hits[hitIndex].quads : null}
-                    selection={textSel?.pageId === p.id ? textSel.quads : null} actions={pageActions}
+                    selection={textSel?.pageId === p.id ? textSel.quads : null} marks={marks.main.get(p.id)} actions={pageActions}
                   />
                 ))}
               </main>
@@ -1035,6 +1103,7 @@ export default function App() {
                 <SidePane
                   key={side.id} ref={sideRef} doc={side.id} state={side.state} zoom={zoom} linked={linked}
                   onLink={() => setLinked((l) => !l)} onClose={() => setSide(null)} onScroll={() => syncScroll(sideRef.current, mainRef.current)}
+                  marks={comparison?.otherId === side.id ? marks.other : undefined}
                 />
               )}
             </>
@@ -1052,7 +1121,7 @@ export default function App() {
         </div>
       </div>
 
-      {doc && rightOpen && <ToolsPanel key={active} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} />}
+      {doc && rightOpen && <ToolsPanel key={`tools-${active}`} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} />}
       {doc && narrow && (leftOpen || rightOpen) && <div className="drawer-scrim" onClick={() => { setLeftOpen(false); setRightOpen(false) }} />}
 
       <div className="status-bar">

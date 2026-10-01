@@ -61,11 +61,15 @@ export function closeDocument(doc: number) {
   return call(doc, 'closeDocument', [])
 }
 
-type Extra = { setAuthor(name: string): Promise<null> }
+type Extra = {
+  setAuthor(name: string): Promise<null>
+  /** Compares with another open document, by its id (the engine itself stays in the worker). */
+  compareWith(older: number): Promise<ReturnType<Engine['compareWith']>>
+}
 
 /** One document's engine, running in the worker. Every method returns a promise. */
 export function engineFor(doc: number | (() => number)) {
-  return new Proxy({} as Remote & Extra, {
+  return new Proxy({} as Omit<Remote, 'compareWith'> & Extra, {
     get: (_, method: string) => (...args: unknown[]) => call(typeof doc === 'number' ? doc : doc(), method, args),
   })
 }

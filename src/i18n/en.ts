@@ -55,7 +55,7 @@ export const en = {
     actualSize: 'Actual size',
     toggleLeft: 'Toggle left sidebar',
     toggleRight: 'Toggle right sidebar',
-    showPanel: { pages: 'Show pages', bookmarks: 'Show bookmarks', comments: 'Show comments', attachments: 'Show attachments', signatures: 'Show signatures', accessibility: 'Show accessibility and tags' },
+    showPanel: { pages: 'Show pages', bookmarks: 'Show bookmarks', comments: 'Show comments', attachments: 'Show attachments', signatures: 'Show signatures', accessibility: 'Show accessibility and tags', compare: 'Compare with another document' },
     tool: (name: string) => `Tool: ${name}`,
     signImage: 'Add signature image',
     digitalSign: 'Sign with a digital ID',
@@ -92,6 +92,7 @@ export const en = {
   },
 
   busy: {
+    comparing: 'Comparing',
     tagging: 'Updating tags',
     opening: 'Opening', saving: 'Saving', searching: 'Searching', placingImage: 'Placing image', adding: 'Adding', moving: 'Moving',
     resizing: 'Resizing', savingText: 'Saving text', fillingForm: 'Filling form', editingText: 'Editing text', cropping: 'Cropping',
@@ -162,8 +163,28 @@ export const en = {
 
   sidebar: {
     label: 'Sidebar',
-    tabs: { pages: 'Pages', bookmarks: 'Bookmarks', comments: 'Comments', attachments: 'Attachments', signatures: 'Signatures', accessibility: 'Accessibility' },
+    tabs: { pages: 'Pages', bookmarks: 'Bookmarks', comments: 'Comments', attachments: 'Attachments', signatures: 'Signatures', accessibility: 'Accessibility', compare: 'Compare' },
     tabWithCount: (label: string, count: number) => `${label}, ${count}`,
+    cmp: {
+      needTwo: 'Open the other version in another tab to compare it with this one.',
+      olderVersion: 'Compare with (older version)',
+      run: 'Compare',
+      hint: 'Shows what changed from the other document to this one. The older version opens beside this one; click a change to show it in both.',
+      summary: (n: number) => (n ? plural(n, 'difference', 'differences') : 'No differences'),
+      counts: {
+        change: (n: number) => `${n} changed`,
+        insert: (n: number) => `${n} added`,
+        delete: (n: number) => `${n} removed`,
+        move: (n: number) => `${n} moved`,
+        visual: (n: number) => `${n} visual`,
+      },
+      addedPages: (n: number) => `${plural(n, 'page', 'pages')} added`,
+      removedPages: (n: number) => `${plural(n, 'page', 'pages')} removed`,
+      identical: 'The text and graphics are the same.',
+      kinds: { change: 'Changed', insert: 'Added', delete: 'Removed', move: 'Moved', visual: 'Graphics changed' },
+      movedFrom: (page: number) => `Moved from page ${page}`,
+      visualNote: 'Images, lines or shapes differ here.',
+    },
     a11y: {
       language: 'Document language',
       tag: 'Tag document',

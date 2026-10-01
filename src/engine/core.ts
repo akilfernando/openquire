@@ -5,6 +5,7 @@ import { certFromDer, certsFromPem, nameOf, binary, type Fetcher } from './pki'
 import roots from './roots.json'
 import forge from 'node-forge'
 import { checkPdfA, convertToPdfA, type PdfAPart } from './pdfa'
+import { compare, type ComparisonResult } from './compare'
 import { autoTag, checkAccessibility, moveTag, structure, updateTag, type TagType } from './tagging'
 import { addValidationData, checkRevocationOnline, createDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
 import {
@@ -1386,6 +1387,13 @@ export class Engine {
   /** A quick check of the current document against common PDF/A requirements. */
   checkPdfA() {
     return checkPdfA(this.save({ compress: 'none', security: { mode: 'keep' } }))
+  }
+
+  // ---- compare ----
+
+  /** Compares this document, as the newer revision, with another open document (the older one). */
+  compareWith(older: Engine): ComparisonResult {
+    return { ...compare(older.d, this.d), oldIds: older.pageIds(), newIds: this.pageIds() }
   }
 
   // ---- accessibility ----

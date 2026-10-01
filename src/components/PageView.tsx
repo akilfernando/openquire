@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { ImageUp, Trash2 } from 'lucide-react'
 import { engine, requestRender } from '../engine/client'
+import type { Mark } from '../engine/compare'
 import { rgbOf, type AnnotInfo, type AnnotSpec, type PageInfo, type Point, type Quad, type Rect, type TextBlock, type WidgetInfo, type LinkInfo, type PageImage, hexOf } from '../engine/types'
 import { isResizable, normRect, quadPoints } from '../util'
 import { m } from '../i18n'
@@ -48,6 +49,8 @@ interface Props {
   hits: Quad[][]
   activeHit: Quad[] | null
   selection: Quad[] | null
+  /** Compare highlights. */
+  marks?: Mark[]
   actions: PageActions
 }
 
@@ -60,7 +63,21 @@ type Draft =
   | { kind: 'image'; rect: Rect }
   | { kind: 'field'; rect: Rect }
 
-function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editingAnnot, hits, activeHit, selection, actions }: Props) {
+/** Compare highlights, drawn in page space. */
+export function Marks({ marks }: { marks?: Mark[] }) {
+  return (
+    <>
+      {marks?.map((k, i) => (
+        <rect
+          key={i} className={`diff diff-${k.kind}${k.active ? ' active' : ''}`}
+          x={k.rect[0] - 1} y={k.rect[1] - 1} width={k.rect[2] - k.rect[0] + 2} height={k.rect[3] - k.rect[1] + 2} rx={1.5}
+        />
+      ))}
+    </>
+  )
+}
+
+function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editingAnnot, hits, activeHit, selection, marks, actions }: Props) {
   const outer = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const svg = useRef<SVGSVGElement>(null)
@@ -368,6 +385,7 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
           </g>
         ))}
         {selection?.map((q, i) => <polygon key={i} className="text-sel" points={quadPoints(q)} />)}
+        <Marks marks={marks} />
         {blocks?.map((l, i) => (
           <rect key={i} className="text-line" x={l.bbox[0]} y={l.bbox[1]} width={l.bbox[2] - l.bbox[0]} height={l.bbox[3] - l.bbox[1]} />
         ))}

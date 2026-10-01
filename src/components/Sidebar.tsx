@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Accessibility as AccessibilityIcon, ArrowDown, ArrowUp, BadgeCheck, CircleAlert, CircleCheck, TriangleAlert, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
+  Accessibility as AccessibilityIcon, GitCompareArrows, ArrowDown, ArrowUp, BadgeCheck, CircleAlert, CircleCheck, TriangleAlert, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
 } from 'lucide-react'
 import { engine, requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
+import type { ComparisonResult } from '../engine/compare'
 import { TAG_TYPES, type AccessibilityProblem, type TagNode, type TagType } from '../engine/tagging'
 import { arrowNavigate } from '../focus'
 import { kb } from '../util'
 import { m } from '../i18n'
 
-export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures' | 'accessibility'
+export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures' | 'accessibility' | 'compare'
 
 export interface SideActions {
   goTo: (pageId: number) => void
@@ -32,6 +33,15 @@ export interface SideActions {
   autoTag: (lang: string) => void
   updateTag: (id: number, change: { type?: TagType; alt?: string }) => void
   moveTag: (id: number, delta: number) => void
+  compare: (otherId: number) => void
+  /** Shows a text change (index into changes) or a visual change (index into visual). */
+  focusChange: (kind: 'text' | 'visual', index: number) => void
+}
+
+export interface CompareInfo {
+  /** Other open documents that can be compared with this one. */
+  others: { id: number; name: string }[]
+  result: { otherId: number; data: ComparisonResult; active: { kind: 'text' | 'visual'; index: number } | null } | null
 }
 
 interface Props {
@@ -41,6 +51,7 @@ interface Props {
   selected: Set<number>
   selectedAnnot: number | null
   commentFocus: number | null
+  compare: CompareInfo
   actions: SideActions
 }
 
@@ -408,6 +419,69 @@ function Accessibility({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   )
 }
 
+const clip = (s: string, n = 90) => (s.length > n ? `${s.slice(0, n - 1)}...` : s)
+
+function Compare({ compare, actions }: Pick<Props, 'compare' | 'actions'>) {
+  const { others, result } = compare
+  const [other, setOther] = useState(() => result?.otherId ?? others[0]?.id)
+  const chosen = others.some((o) => o.id === other) ? other : others[0]?.id
+  if (!others.length) return <div className="pane"><div className="empty-note">{m.sidebar.cmp.needTwo}</div></div>
+  const data = result?.data
+  const counts = data && {
+    change: data.changes.filter((c) => c.kind === 'change').length,
+    insert: data.changes.filter((c) => c.kind === 'insert').length,
+    delete: data.changes.filter((c) => c.kind === 'delete').length,
+    move: data.changes.filter((c) => c.kind === 'move').length,
+    visual: data.visual.length,
+  }
+  const isActive = (kind: 'text' | 'visual', index: number) => result?.active?.kind === kind && result.active.index === index
+  return (
+    <div className="pane">
+      <label className="field">
+        <span>{m.sidebar.cmp.olderVersion}</span>
+        <select value={chosen} onChange={(e) => setOther(Number(e.target.value))}>
+          {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      </label>
+      <button className="cta" onClick={() => chosen !== undefined && actions.compare(chosen)}><GitCompareArrows size={16} />{m.sidebar.cmp.run}</button>
+      <p className="hint">{m.sidebar.cmp.hint}</p>
+      {data && counts && (
+        <>
+          <div className="pane-heading">{m.sidebar.cmp.summary(data.changes.length + data.visual.length)}</div>
+          <div className="cmp-counts small">
+            {(['change', 'insert', 'delete', 'move', 'visual'] as const).filter((k) => counts[k]).map((k) => (
+              <span key={k} className={`cmp-count diff-${k}`}><i />{m.sidebar.cmp.counts[k](counts[k])}</span>
+            ))}
+            {!!data.addedPages && <span className="cmp-count">{m.sidebar.cmp.addedPages(data.addedPages)}</span>}
+            {!!data.removedPages && <span className="cmp-count">{m.sidebar.cmp.removedPages(data.removedPages)}</span>}
+          </div>
+          {!data.changes.length && !data.visual.length && <div className="empty-note">{m.sidebar.cmp.identical}</div>}
+          <ul className="cmp-list">
+            {data.changes.map((c, i) => (
+              <li key={`t${i}`}>
+                <button className={`cmp-item diff-${c.kind}${isActive('text', i) ? ' active' : ''}`} onClick={() => actions.focusChange('text', i)}>
+                  <span className="cmp-kind">{m.sidebar.cmp.kinds[c.kind]}<span className="muted tnum">{m.sidebar.a11y.page((c.new ?? c.old)!.page + 1)}</span></span>
+                  {c.old && c.kind !== 'move' && <del>{clip(c.old.text)}</del>}
+                  {c.new && <ins>{clip(c.new.text)}</ins>}
+                  {c.kind === 'move' && <span className="muted small">{m.sidebar.cmp.movedFrom(c.old!.page + 1)}</span>}
+                </button>
+              </li>
+            ))}
+            {data.visual.map((v, i) => (
+              <li key={`v${i}`}>
+                <button className={`cmp-item diff-visual${isActive('visual', i) ? ' active' : ''}`} onClick={() => actions.focusChange('visual', i)}>
+                  <span className="cmp-kind">{m.sidebar.cmp.kinds.visual}<span className="muted tnum">{m.sidebar.a11y.page(v.page + 1)}</span></span>
+                  <span className="muted small">{m.sidebar.cmp.visualNote}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Sidebar(props: Props) {
   const { doc, tab, onTab } = props
   const comments = doc.pages.reduce((n, p) => n + p.annots.filter((a) => a.replyTo === null).length, 0)
@@ -418,6 +492,7 @@ export default function Sidebar(props: Props) {
     { id: 'attachments', label: m.sidebar.tabs.attachments, Icon: Paperclip, count: doc.attachments.length },
     { id: 'signatures', label: m.sidebar.tabs.signatures, Icon: BadgeCheck, count: doc.signatures.length },
     { id: 'accessibility', label: m.sidebar.tabs.accessibility, Icon: AccessibilityIcon },
+    { id: 'compare', label: m.sidebar.tabs.compare, Icon: GitCompareArrows, count: props.compare.result ? props.compare.result.data.changes.length + props.compare.result.data.visual.length : 0 },
   ]
   const current = tabs.find((t) => t.id === tab)!
   return (
@@ -441,6 +516,7 @@ export default function Sidebar(props: Props) {
       {tab === 'attachments' && <Attachments {...props} />}
       {tab === 'signatures' && <Signatures {...props} />}
       {tab === 'accessibility' && <Accessibility {...props} />}
+      {tab === 'compare' && <Compare {...props} />}
     </aside>
   )
 }

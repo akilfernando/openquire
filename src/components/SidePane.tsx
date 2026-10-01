@@ -1,11 +1,13 @@
 import { forwardRef, useEffect, useRef, useState } from 'react'
 import { Link2, Link2Off, X } from 'lucide-react'
 import { requestRender } from '../engine/client'
+import type { Mark } from '../engine/compare'
 import type { DocState, PageInfo } from '../engine/types'
+import { Marks } from './PageView'
 import { m } from '../i18n'
 
 /** A page of a document shown beside the active one: rendered when near the viewport, read-only. */
-function Page({ doc, page, zoom }: { doc: number; page: PageInfo; zoom: number }) {
+function Page({ doc, page, zoom, marks }: { doc: number; page: PageInfo; zoom: number; marks?: Mark[] }) {
   const outer = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const [visible, setVisible] = useState(false)
@@ -30,6 +32,11 @@ function Page({ doc, page, zoom }: { doc: number; page: PageInfo; zoom: number }
   return (
     <div ref={outer} className="page" data-page={page.id} style={{ width: page.width * zoom, height: page.height * zoom }}>
       <canvas ref={canvas} className="page-canvas" aria-label={m.workspace.pageLabel(page.label)} role="img" />
+      {!!marks?.length && (
+        <svg viewBox={`0 0 ${page.width} ${page.height}`} className="overlay passive" aria-hidden="true">
+          <Marks marks={marks} />
+        </svg>
+      )}
     </div>
   )
 }
@@ -43,10 +50,12 @@ interface Props {
   onLink: () => void
   onClose: () => void
   onScroll: () => void
+  /** Compare highlights by page id. */
+  marks?: Map<number, Mark[]>
 }
 
 /** A second document beside the active one, for reading or comparing side by side. */
-const SidePane = forwardRef<HTMLDivElement, Props>(function SidePane({ doc, state, zoom, linked, onLink, onClose, onScroll }, ref) {
+const SidePane = forwardRef<HTMLDivElement, Props>(function SidePane({ doc, state, zoom, linked, onLink, onClose, onScroll, marks }, ref) {
   return (
     <section className="side-pane" aria-label={m.workspace.sidePane(state.name)}>
       <div className="side-pane-header">
@@ -62,7 +71,7 @@ const SidePane = forwardRef<HTMLDivElement, Props>(function SidePane({ doc, stat
         <button className="clickable-icon" aria-label={m.workspace.closeSide} title={m.workspace.closeSide} onClick={onClose}><X size={15} /></button>
       </div>
       <div ref={ref} className="desk side-desk" onScroll={onScroll}>
-        {state.pages.map((p) => <Page key={p.id} doc={doc} page={p} zoom={zoom} />)}
+        {state.pages.map((p) => <Page key={p.id} doc={doc} page={p} zoom={zoom} marks={marks?.get(p.id)} />)}
       </div>
     </section>
   )
