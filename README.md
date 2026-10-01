@@ -78,9 +78,9 @@ Requires Node 20+ and a current Chrome, Edge, Firefox or Safari.
 
 ## Roadmap
 
-More OCR languages, trust-chain validation and RFC 3161 timestamps for signatures, paragraph-level
-text editing with embedded fonts, PDF to Word, document compare, accessibility tagging and PDF/A, a
-desktop build (Tauri), a command-line tool for batch processing, and an optional AI assistant.
+See [ROADMAP.md](ROADMAP.md). In short: reliability and hosting (0.2), paragraph editing and a form
+designer (0.3), long-term signatures and accessibility (0.4), compare and recorded workflows (0.5),
+the command-line tool and desktop app (0.6), and a plugin API (1.0).
 
 ## License
 
