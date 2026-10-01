@@ -23,7 +23,7 @@ test('command palette runs commands', async ({ page }) => {
 
 test('edits a line of existing text', async ({ page }) => {
   await openReport(page)
-  await page.getByRole('button', { name: 'Edit text', exact: true }).click()
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
   const p = await pagePoint(page, 0, 120, 842 - 716)
   await page.mouse.click(p.x, p.y)
   const editor = page.locator('.line-edit')
@@ -187,7 +187,7 @@ test('edits a whole paragraph that reflows', async ({ page }) => {
   await page.goto('/')
   await openFile(page, 'para.pdf', Buffer.from(await doc.save()))
   await expect(page.locator('.page canvas[width]').first()).toBeVisible()
-  await page.getByRole('button', { name: 'Edit text', exact: true }).click()
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
   const p = await pagePoint(page, 0, 120, 842 - 742)
   await page.mouse.click(p.x, p.y)
   const editor = page.locator('.line-edit')
@@ -225,4 +225,37 @@ test('adds an internal link and follows it', async ({ page }) => {
   const doc = mupdf.Document.openDocument(await save(page), 'application/pdf')
   const [link] = doc.loadPage(0).getLinks()
   expect(doc.resolveLink(link)).toBe(1)
+})
+
+test('moves and deletes an image with the Edit tool', async ({ page }) => {
+  const d = new mupdf.PDFDocument()
+  const pix = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 8, 8], false)
+  pix.clear(0)
+  const img = d.addImage(new mupdf.Image(pix))
+  d.insertPage(-1, d.addPage([0, 0, 595, 842], 0, { XObject: { Im: img } }, 'q 100 0 0 100 50 692 cm /Im Do Q'))
+  await page.goto('/')
+  await openFile(page, 'img.pdf', Buffer.from(d.saveToBuffer('').asUint8Array()))
+  await expect(page.locator('.page canvas[width]').first()).toBeVisible()
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.locator('.img-box')).toHaveCount(1)
+
+  const from = await pagePoint(page, 0, 100, 100)
+  const to = await pagePoint(page, 0, 300, 400)
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await page.mouse.move(to.x, to.y, { steps: 6 })
+  await page.mouse.up()
+  await expect(page.locator('.img-bar')).toBeVisible()
+  let saved = mupdf.Document.openDocument(await save(page), 'application/pdf')
+  const pixAt = (doc: mupdf.Document, x: number, y: number) => {
+    const p = doc.loadPage(0).toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false)
+    return p.getPixels()[(y * p.getWidth() + x) * 3]
+  }
+  expect(pixAt(saved, 300, 400)).toBeLessThan(50)
+  expect(pixAt(saved, 100, 100)).toBeGreaterThan(200)
+
+  await page.getByRole('toolbar', { name: 'Image 1' }).getByRole('button', { name: 'Delete' }).click()
+  await expect(page.locator('.img-box')).toHaveCount(0)
+  saved = mupdf.Document.openDocument(await save(page), 'application/pdf')
+  expect(pixAt(saved, 300, 400)).toBeGreaterThan(200)
 })

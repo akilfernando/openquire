@@ -13,7 +13,8 @@ export const en = {
 
   tools: {
     select: { name: 'Select', hint: 'Select text, annotations and form fields' },
-    edittext: { name: 'Edit text', hint: 'Click a paragraph to change it' },
+    edittext: { name: 'Edit', hint: 'Click a paragraph to rewrite it, or an image to move, resize, replace or delete it' },
+    erasegfx: { name: 'Erase graphics', hint: 'Drag over lines and shapes to remove them; text and images stay' },
     link: { name: 'Link', hint: 'Drag to add a link, or click a link to edit it' },
     highlight: { name: 'Highlight', hint: 'Drag across text to highlight it' },
     underline: { name: 'Underline', hint: 'Drag across text to underline it' },
@@ -94,7 +95,7 @@ export const en = {
     splitting: 'Splitting', stamping: 'Stamping', redacting: 'Redacting', flattening: 'Flattening', renderingImages: 'Rendering images',
     extractingText: 'Extracting text', converting: 'Converting', savingProperties: 'Saving properties', startingOcr: 'Starting OCR',
     recoloring: 'Recoloring', undoing: 'Undoing', redoing: 'Redoing', creating: 'Creating', attaching: 'Attaching', resizingText: 'Resizing text',
-    numbering: 'Numbering pages', linking: 'Updating links',
+    numbering: 'Numbering pages', linking: 'Updating links', editingImage: 'Editing image', erasing: 'Erasing graphics',
     recognizing: (page: number, total: number) => `Recognizing text, page ${page} of ${total}`,
   },
 
@@ -253,6 +254,12 @@ export const en = {
     exportHtml: 'HTML',
     properties: 'Properties',
     meta: { title: 'Title', author: 'Author', subject: 'Subject', keywords: 'Keywords' },
+  },
+
+  images: {
+    replace: 'Replace',
+    delete: 'Delete',
+    image: (n: number) => `Image ${n}`,
   },
 
   links: {

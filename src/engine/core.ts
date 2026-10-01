@@ -1,5 +1,6 @@
 import * as mupdf from 'mupdf'
 import { zipSync } from 'fflate'
+import { findImageDraws, fmt, imageWarp, invert, multiply, patch, type Matrix as CMatrix } from './content'
 import { createDigitalId, readDigitalId, signPdf, verifySignatures } from './signing'
 import {
   hexOf,
@@ -12,6 +13,7 @@ import {
   type DocState,
   type Metadata,
   type OcrWord,
+  type PageImage,
   type PageInfo,
   type PageLabelStyle,
   type Permission,
@@ -1278,6 +1280,109 @@ export class Engine {
   deleteBookmark(path: number[]) {
     this.op('Delete bookmark', () => this.outlineAt(path).delete(), [])
     return this.state()
+  }
+
+  // ---- images and graphics ----
+
+  /** The page's own content as one string, and a function to write a new version back. */
+  private pageContent(pageId: number) {
+    const doc = this.d
+    const page = this.page(pageId)
+    const obj = page.getObject()
+    const contents = obj.get('Contents')
+    const parts: string[] = []
+    if (contents.isArray()) contents.forEach((s) => parts.push(s.readStream().asString()))
+    else if (contents.isStream()) parts.push(contents.readStream().asString())
+    const transform = page.getTransform() as CMatrix
+    page.destroy()
+    const xobjects = obj.getInheritable('Resources').get('XObject')
+    const isImage = (name: string) => {
+      const x = xobjects.isDictionary() ? xobjects.get(name) : null
+      return !!x && x.isStream() && x.resolve().get('Subtype').toString() === '/Image'
+    }
+    return {
+      text: parts.join('\n'),
+      // PDF user space -> page space.
+      transform,
+      isImage,
+      write: (text: string) => obj.put('Contents', doc.addStream(text, {})),
+    }
+  }
+
+  /** Images drawn directly on a page, with their bounds in page space. */
+  pageImages(pageId: number): PageImage[] {
+    const c = this.pageContent(pageId)
+    return findImageDraws(c.text, c.isImage).map((d, i) => {
+      const m = multiply(d.ctm, c.transform)
+      const xs = [m[4], m[0] + m[4], m[2] + m[4], m[0] + m[2] + m[4]]
+      const ys = [m[5], m[1] + m[5], m[3] + m[5], m[1] + m[3] + m[5]]
+      return { index: i, rect: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] as Rect }
+    })
+  }
+
+  /** Moves or resizes an image so its bounds become `rect` (page space). */
+  moveImage(pageId: number, index: number, rect: Rect) {
+    this.editImage(pageId, index, (d, c, name) => {
+      const from = this.pageImages(pageId)[index].rect
+      return `q ${fmt(imageWarp(d.ctm, c.transform, from, rect))} cm /${name} Do Q`
+    })
+    return this.state()
+  }
+
+  deleteImage(pageId: number, index: number) {
+    this.editImage(pageId, index, () => '')
+    return this.state()
+  }
+
+  /** Swaps an image for a new one, fitted inside the old one's bounds. */
+  replaceImage(pageId: number, index: number, bytes: Uint8Array) {
+    const doc = this.d
+    const img = new mupdf.Image(bytes)
+    this.editImage(pageId, index, (d, c) => {
+      const ref = doc.addImage(img)
+      const name = this.addXObject(pageId, ref)
+      const from = this.pageImages(pageId)[index].rect
+      const [x0, y0, x1, y1] = from
+      const k = Math.min((x1 - x0) / img.getWidth(), (y1 - y0) / img.getHeight())
+      const w = img.getWidth() * k
+      const h = img.getHeight() * k
+      const to: Rect = [x0 + (x1 - x0 - w) / 2, y0 + (y1 - y0 - h) / 2, x0 + (x1 - x0 + w) / 2, y0 + (y1 - y0 + h) / 2]
+      // The new image is drawn upright in the old image's place, whatever the old transform was.
+      const unitToPage: CMatrix = [w, 0, 0, -h, to[0], to[3]]
+      return `q ${fmt(multiply(multiply(unitToPage, invert(c.transform)), invert(d.ctm)))} cm /${name} Do Q`
+    })
+    return this.state()
+  }
+
+  /** Removes vector graphics (lines, shapes, fills) entirely inside an area, leaving text and images. */
+  eraseGraphics(pageId: number, rect: Rect) {
+    this.op('Erase graphics', () => {
+      const page = this.page(pageId)
+      const r = page.createAnnotation('Redact')
+      r.setRect(rect)
+      r.applyRedaction(0, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_REMOVE_IF_COVERED, mupdf.PDFPage.REDACT_TEXT_NONE)
+      page.destroy()
+    }, [pageId])
+    return this.state()
+  }
+
+  private editImage(pageId: number, index: number, replace: (d: ReturnType<typeof findImageDraws>[number], c: ReturnType<Engine['pageContent']>, name: string) => string) {
+    this.op('Edit image', () => {
+      const c = this.pageContent(pageId)
+      const draw = findImageDraws(c.text, c.isImage)[index]
+      if (!draw) throw new Error('Image not found')
+      // Work on page-space coordinates relative to the content's own coordinate system.
+      c.write(patch(c.text, [{ start: draw.start, end: draw.end, text: replace(draw, c, draw.name) }]))
+    }, [pageId])
+  }
+
+  private addXObject(pageId: number, ref: mupdf.PDFObject) {
+    let name = ''
+    this.appendContent(pageId, (names) => {
+      name = names.xobject(ref)
+      return ''
+    })
+    return name
   }
 
   // ---- links ----

@@ -1,11 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react'
+import { ImageUp, Trash2 } from 'lucide-react'
 import { engine, requestRender } from '../engine/client'
-import { rgbOf, type AnnotInfo, type AnnotSpec, type PageInfo, type Point, type Quad, type Rect, type TextBlock, type WidgetInfo, type LinkInfo, hexOf } from '../engine/types'
+import { rgbOf, type AnnotInfo, type AnnotSpec, type PageInfo, type Point, type Quad, type Rect, type TextBlock, type WidgetInfo, type LinkInfo, type PageImage, hexOf } from '../engine/types'
 import { isResizable, normRect, quadPoints } from '../util'
 import { m } from '../i18n'
 
 export type Tool =
-  | 'select' | 'edittext' | 'link' | 'highlight' | 'underline' | 'strike' | 'note' | 'text'
+  | 'select' | 'edittext' | 'erasegfx' | 'link' | 'highlight' | 'underline' | 'strike' | 'note' | 'text'
   | 'ink' | 'rect' | 'ellipse' | 'arrow' | 'whiteout' | 'redact' | 'crop'
 
 const MARKUP: Partial<Record<Tool, 'Highlight' | 'Underline' | 'StrikeOut'>> = { highlight: 'Highlight', underline: 'Underline', strike: 'StrikeOut' }
@@ -23,6 +24,10 @@ export interface PageActions {
   /** Opens the link editor for a new link area, or an existing link by index. */
   editLink: (pageId: number, rect: Rect | null, index: number | null) => void
   followLink: (link: LinkInfo) => void
+  moveImage: (pageId: number, index: number, rect: Rect) => void
+  deleteImage: (pageId: number, index: number) => void
+  replaceImage: (pageId: number, index: number) => void
+  eraseGraphics: (pageId: number, rect: Rect) => void
   setSelection: (sel: { pageId: number; quads: Quad[]; text: string } | null) => void
   toolDone: () => void
 }
@@ -47,6 +52,7 @@ type Draft =
   | { kind: 'line'; a: Point; b: Point }
   | { kind: 'move'; annot: AnnotInfo; d: Point }
   | { kind: 'resize'; annot: AnnotInfo; rect: Rect }
+  | { kind: 'image'; rect: Rect }
 
 function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editingAnnot, hits, activeHit, selection, actions }: Props) {
   const outer = useRef<HTMLDivElement>(null)
@@ -54,9 +60,11 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
   const svg = useRef<SVGSVGElement>(null)
   const [visible, setVisible] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
-  const drag = useRef<{ start: Point; mode: 'draw' | 'move' | 'resize' | 'select'; annot?: AnnotInfo } | null>(null)
+  const drag = useRef<{ start: Point; mode: 'draw' | 'move' | 'resize' | 'select' | 'imgmove' | 'imgresize'; annot?: AnnotInfo; image?: PageImage } | null>(null)
   const [blocks, setBlocks] = useState<TextBlock[] | null>(null)
   const [editLine, setEditLine] = useState<{ block: TextBlock; value: string } | null>(null)
+  const [images, setImages] = useState<PageImage[] | null>(null)
+  const [imageSel, setImageSel] = useState<number | null>(null)
   const selecting = useRef<{ busy: boolean; next: [Point, Point] | null }>({ busy: false, next: null })
 
   useEffect(() => {
@@ -80,13 +88,37 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
   }, [visible, zoom, page.id, page.rev])
 
   useEffect(() => {
-    if (tool !== 'edittext' || !visible) return setBlocks(null)
+    if (tool !== 'edittext' || !visible) {
+      setBlocks(null)
+      setImages(null)
+      setImageSel(null)
+      return
+    }
     let live = true
     void engine.textBlocks(page.id).then((b) => live && setBlocks(b))
+    void engine.pageImages(page.id).then((im) => {
+      if (!live) return
+      setImages(im)
+      setImageSel((s) => (s !== null && s < im.length ? s : null))
+    })
     return () => {
       live = false
     }
   }, [tool, visible, page.id, page.rev])
+
+  useEffect(() => {
+    if (imageSel === null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target as Element).tagName)) return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        actions.deleteImage(page.id, imageSel)
+        setImageSel(null)
+      } else if (e.key === 'Escape') setImageSel(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [imageSel, actions, page.id])
 
   const W = page.width * zoom
   const H = page.height * zoom
@@ -148,6 +180,22 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
       actions.toolDone()
       return
     } else if (tool === 'edittext') {
+      // Text wins over images, so paragraphs on a background image or scan stay editable.
+      const hitBlock = !target.hasAttribute('data-handle') && blocks?.find((b) => p[0] >= b.bbox[0] && p[0] <= b.bbox[2] && p[1] >= b.bbox[1] && p[1] <= b.bbox[3])
+      if (hitBlock) {
+        setImageSel(null)
+        setEditLine({ block: hitBlock, value: hitBlock.text })
+        return
+      }
+      const imgIndex = target.closest('[data-img]')?.getAttribute('data-img')
+      const image = images?.[Number(imgIndex)]
+      if (imgIndex != null && image) {
+        setImageSel(image.index)
+        drag.current = { start: p, mode: target.hasAttribute('data-handle') ? 'imgresize' : 'imgmove', image }
+        svg.current!.setPointerCapture(e.pointerId)
+        return
+      }
+      setImageSel(null)
       const block = blocks?.find((b) => p[0] >= b.bbox[0] && p[0] <= b.bbox[2] && p[1] >= b.bbox[1] && p[1] <= b.bbox[3])
       if (block) setEditLine({ block, value: block.text })
       return
@@ -166,7 +214,15 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
     if (!d) return
     const p = pt(e)
     const [dx, dy] = [p[0] - d.start[0], p[1] - d.start[1]]
-    if (d.mode === 'move') setDraft({ kind: 'move', annot: d.annot!, d: [dx, dy] })
+    if (d.mode === 'imgmove') {
+      const r = d.image!.rect
+      setDraft({ kind: 'image', rect: [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy] })
+    } else if (d.mode === 'imgresize') {
+      // Images keep their proportions while resizing.
+      const r = d.image!.rect
+      const w = Math.max(8, r[2] - r[0] + dx)
+      setDraft({ kind: 'image', rect: [r[0], r[1], r[0] + w, r[1] + (w * (r[3] - r[1])) / (r[2] - r[0])] })
+    } else if (d.mode === 'move') setDraft({ kind: 'move', annot: d.annot!, d: [dx, dy] })
     else if (d.mode === 'resize') {
       const r = d.annot!.rect
       setDraft({ kind: 'resize', annot: d.annot!, rect: [r[0], r[1], Math.max(r[0] + 8, r[2] + dx), Math.max(r[1] + 8, r[3] + dy)] })
@@ -187,6 +243,10 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
     const cur = draft
     setDraft(null)
     const c = rgbOf(color)
+    if (d.mode === 'imgmove' || d.mode === 'imgresize') {
+      if (cur?.kind === 'image') actions.moveImage(page.id, d.image!.index, cur.rect)
+      return
+    }
     if (d.mode === 'move') {
       if (cur?.kind === 'move' && Math.hypot(...cur.d) > 1) actions.moveAnnot(page.id, d.annot!.id, cur.d)
       return
@@ -225,6 +285,7 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
     else if (tool === 'whiteout') await actions.addAnnot(page.id, { type: 'Square', rect: r, color: null, fill: [1, 1, 1], width: 0 })
     else if (tool === 'redact') await actions.addAnnot(page.id, { type: 'Redact', rect: r })
     else if (tool === 'link') actions.editLink(page.id, r, null)
+    else if (tool === 'erasegfx') actions.eraseGraphics(page.id, r)
     else if (tool === 'crop') {
       actions.crop(page.id, r)
       actions.toolDone()
@@ -261,6 +322,20 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
         {blocks?.map((l, i) => (
           <rect key={i} className="text-line" x={l.bbox[0]} y={l.bbox[1]} width={l.bbox[2] - l.bbox[0]} height={l.bbox[3] - l.bbox[1]} />
         ))}
+        {images?.map((im) => {
+          const [x0, y0, x1, y1] = im.rect
+          const sel = im.index === imageSel
+          return (
+            <g key={`img-${im.index}`} data-img={im.index} className={sel ? 'img-box sel' : 'img-box'}>
+              <title>{m.images.image(im.index + 1)}</title>
+              <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} />
+              {sel && <rect data-handle x={x1 - 4} y={y1 - 4} width={8} height={8} className="handle" />}
+            </g>
+          )
+        })}
+        {draft?.kind === 'image' && (
+          <rect className="ghost" x={draft.rect[0]} y={draft.rect[1]} width={draft.rect[2] - draft.rect[0]} height={draft.rect[3] - draft.rect[1]} />
+        )}
         {(tool === 'select' || tool === 'link') && page.links.map((l) => (
           <rect
             key={`link-${l.index}`} data-link={l.index} className={`link-area${tool === 'link' ? ' editing' : ''}`}
@@ -307,6 +382,16 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
           />
         )}
       </div>
+
+      {imageSel !== null && images?.[imageSel] && !draft && (
+        <div
+          className="img-bar" role="toolbar" aria-label={m.images.image(imageSel + 1)}
+          style={{ left: images[imageSel].rect[0] * zoom, top: Math.max(0, images[imageSel].rect[1] * zoom - 38) }}
+        >
+          <button type="button" onClick={() => actions.replaceImage(page.id, imageSel)}><ImageUp size={15} />{m.images.replace}</button>
+          <button type="button" onClick={() => { actions.deleteImage(page.id, imageSel); setImageSel(null) }}><Trash2 size={15} />{m.images.delete}</button>
+        </div>
+      )}
 
       {editLine && (
         <BlockEditor

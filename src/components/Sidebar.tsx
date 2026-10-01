@@ -71,6 +71,15 @@ function Thumb({ page }: { page: PageInfo }) {
 
 function Pages({ doc, selected, actions }: Pick<Props, 'doc' | 'selected' | 'actions'>) {
   const dragIds = useRef<number[] | null>(null)
+  const list = useRef<HTMLDivElement>(null)
+  // Keyboard reordering is asynchronous; focus the moved page once the new order arrives.
+  const focusAfterMove = useRef<number | null>(null)
+  useEffect(() => {
+    const id = focusAfterMove.current
+    if (id === null) return
+    focusAfterMove.current = null
+    list.current?.querySelector<HTMLElement>(`[data-page="${id}"]`)?.focus()
+  }, [doc.pages])
   const [over, setOver] = useState<number | 'end' | null>(null)
   const drop = (e: React.DragEvent, before: number | null) => {
     if (!dragIds.current) return
@@ -97,7 +106,7 @@ function Pages({ doc, selected, actions }: Pick<Props, 'doc' | 'selected' | 'act
       const target = i + step
       if (target < 0 || target >= doc.pages.length) return
       actions.movePages([id], step > 0 ? (doc.pages[target + 1]?.id ?? null) : doc.pages[target].id)
-      requestAnimationFrame(() => (e.currentTarget?.querySelectorAll<HTMLElement>('.thumb')[target] ?? items[target])?.focus())
+      focusAfterMove.current = id
     } else if (step) {
       e.preventDefault()
       const to = items[Math.min(items.length - 1, Math.max(0, i + step))]
@@ -113,10 +122,10 @@ function Pages({ doc, selected, actions }: Pick<Props, 'doc' | 'selected' | 'act
   }
 
   return (
-    <div className="thumbs" role="listbox" aria-label={m.sidebar.pagesList} aria-multiselectable="true" onKeyDown={onKeyDown}>
+    <div ref={list} className="thumbs" role="listbox" aria-label={m.sidebar.pagesList} aria-multiselectable="true" onKeyDown={onKeyDown}>
       {doc.pages.map((p, i) => (
         <div
-          key={p.id} draggable role="option" tabIndex={0} aria-selected={selected.has(p.id)}
+          key={p.id} data-page={p.id} draggable role="option" tabIndex={0} aria-selected={selected.has(p.id)}
           aria-label={m.sidebar.pageOption(p.label, i === 0)}
           className={`thumb${selected.has(p.id) ? ' selected' : ''}${over === p.id ? ' over' : ''}`}
           onClick={(e) => actions.selectPage(p.id, e)}

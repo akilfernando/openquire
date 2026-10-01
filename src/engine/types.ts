@@ -217,3 +217,9 @@ export const rgbOf = (hex: string): RGB => {
 
 /** Page numbering styles: decimal, lower/upper Roman, lower/upper letters, or prefix only. */
 export type PageLabelStyle = 'D' | 'r' | 'R' | 'a' | 'A' | 'none'
+
+/** An image drawn on a page, identified by its order among the page's image draws. */
+export interface PageImage {
+  index: number
+  rect: Rect
+}

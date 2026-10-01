@@ -319,6 +319,16 @@ main.desk {
 .link-area:hover { fill: hsla(212, 90%, 55%, 0.1); stroke: hsla(212, 90%, 50%, 0.6); stroke-width: 0.75; }
 .link-area.editing { fill: hsla(212, 90%, 55%, 0.08); stroke: hsl(212, 90%, 50%); stroke-width: 0.75; stroke-dasharray: 3 2; }
 .overlay:not(.tool-select) .link-area.editing { pointer-events: all; }
+.img-box rect:first-of-type { fill: transparent; stroke: hsla(var(--accent-h), 90%, 48%, 0.45); stroke-width: 0.75; stroke-dasharray: 3 2; cursor: move; }
+.img-box:hover rect:first-of-type { fill: hsla(var(--accent-h), 90%, 55%, 0.08); stroke: hsl(var(--accent-h), 90%, 48%); }
+.img-box.sel rect:first-of-type { stroke: hsl(var(--accent-h), var(--accent-s), 48%); stroke-width: 1.2; stroke-dasharray: none; }
+.draft-erasegfx { fill: rgba(233, 49, 71, 0.08); stroke: #e93147; stroke-dasharray: 3 2; }
+.img-bar {
+  position: absolute; z-index: 3; display: flex; gap: 2px; padding: 3px; background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--radius-m); box-shadow: var(--shadow);
+}
+.img-bar button { height: 28px; padding: 0 10px; background: none; box-shadow: none; color: var(--text-muted); }
+.img-bar button:hover { background: var(--hover) !important; color: var(--text-normal); }
 .ghost { fill: hsla(var(--accent-h), 90%, 55%, 0.08); stroke: hsl(var(--accent-h), 90%, 48%); stroke-dasharray: 4 3; }
 
 .page-html { position: absolute; inset: 0; pointer-events: none; }

@@ -3,7 +3,7 @@ import {
   BadgeCheck, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
   ImagePlus, Loader2, Lock, MousePointer2, MoveUpRight, PanelLeft, PanelRight, Pencil, Redo2, ScanText, Search, Settings as SettingsIcon,
   ShieldAlert, ShieldCheck, Signature, Square, SquareTerminal, StickyNote, Strikethrough, TextCursorInput, Trash2, Type, Underline, Undo2,
-  X, ZoomIn, ZoomOut, Link2, type LucideProps,
+  X, ZoomIn, ZoomOut, Link2, SquareX, type LucideProps,
 } from 'lucide-react'
 import CommandPalette, { type Command } from './components/CommandPalette'
 import DigitalSignDialog from './components/DigitalSignDialog'
@@ -24,7 +24,7 @@ import { download, imageToPng, kb } from './util'
 type Icon = ComponentType<LucideProps>
 
 const TOOL_ICONS: [Tool, Icon][][] = [
-  [['select', MousePointer2], ['edittext', TextCursorInput], ['link', Link2]],
+  [['select', MousePointer2], ['edittext', TextCursorInput], ['link', Link2], ['erasegfx', SquareX]],
   [['highlight', Highlighter], ['underline', Underline], ['strike', Strikethrough], ['note', StickyNote], ['text', Type]],
   [['ink', Pencil], ['rect', Square], ['ellipse', Circle], ['arrow', MoveUpRight]],
   [['whiteout', Eraser], ['redact', EyeOff], ['crop', Crop]],
@@ -102,6 +102,8 @@ export default function App() {
   const addRef = useRef<HTMLInputElement>(null)
   const imageRef = useRef<HTMLInputElement>(null)
   const attachRef = useRef<HTMLInputElement>(null)
+  const replaceRef = useRef<HTMLInputElement>(null)
+  const replacing = useRef<{ pageId: number; index: number } | null>(null)
 
   // ---- settings and theme -------------------------------------------------------------
 
@@ -386,6 +388,13 @@ export default function App() {
       setSelection: setTextSel,
       toolDone: () => setTool('select'),
       editLink: (pageId, rect, index) => setLinkEdit({ pageId, rect, index }),
+      moveImage: (pageId, index, rect) => void run(m.busy.editingImage, async () => apply(await engine.moveImage(pageId, index, rect))),
+      deleteImage: (pageId, index) => void run(m.busy.editingImage, async () => apply(await engine.deleteImage(pageId, index))),
+      replaceImage: (pageId, index) => {
+        replacing.current = { pageId, index }
+        replaceRef.current!.click()
+      },
+      eraseGraphics: (pageId, rect) => void run(m.busy.erasing, async () => apply(await engine.eraseGraphics(pageId, rect))),
       followLink: (link: LinkInfo) => {
         if (link.page >= 0) {
           const target = docRef.current?.pages[link.page]
@@ -671,6 +680,16 @@ export default function App() {
       <input ref={addRef} type="file" hidden multiple accept={accept} onChange={picked((f) => void openFiles(f, true))} />
       <input ref={imageRef} type="file" hidden accept="image/*"
         onChange={picked(async ([f]) => { if (f) { const { png, aspect } = await imageToPng(f); placeImage(png, aspect) } })} />
+      <input ref={replaceRef} type="file" hidden accept="image/*"
+        onChange={picked(([f]) => {
+          const target = replacing.current
+          if (!f || !target) return
+          void run(m.busy.editingImage, async () => {
+            // JPEG and PNG go in as they are; anything else is converted to PNG first.
+            const bytes = /^image\/(jpeg|png)$/.test(f.type) ? new Uint8Array(await f.arrayBuffer()) : (await imageToPng(f, 4096)).png
+            apply(await engine.replaceImage(target.pageId, target.index, bytes))
+          })
+        })} />
       <input ref={attachRef} type="file" hidden
         onChange={picked(([f]) => f && void run(m.busy.attaching, async () => apply(await engine.attach(f.name, new Uint8Array(await f.arrayBuffer()), f.type || 'application/octet-stream'))))} />
 
