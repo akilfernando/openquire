@@ -4,6 +4,7 @@ import { useFocusTrap } from '../focus'
 import { m } from '../i18n'
 import { OCR_LANGUAGES } from '../ocr-languages'
 import { isDesktop, nativeTools, type NativeTools } from '../native'
+import HotkeySettings from './HotkeySettings'
 import { DEFAULT_BASE_URL, DEFAULT_MODELS, type AiProvider } from '../ai'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
@@ -24,6 +25,8 @@ export interface Settings {
   ocrStraighten: boolean
   /** Desktop app: use installed LibreOffice and Tesseract when present. */
   nativeTools: boolean
+  /** Shortcut changes by command id, on top of the defaults. */
+  hotkeys: Record<string, string[]>
   /** The optional AI assistant: off unless turned on. */
   aiEnabled: boolean
   aiProvider: AiProvider
@@ -44,12 +47,14 @@ export const ACCENTS: { key: string; hue: number }[] = [
   { key: 'rose', hue: 340 },
 ]
 
-type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'ai' | 'about'
+type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'ai' | 'hotkeys' | 'about'
 
 interface Props {
   settings: Settings
   onChange: (s: Settings) => void
   onClose: () => void
+  /** Commands that can have shortcuts. */
+  commands: { id: string; name: string }[]
   /** Reads certificate files into displayable entries. */
   readCertificates: (data: Uint8Array) => Promise<Settings['trusted']>
 }
@@ -66,7 +71,7 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, onChange, onClose, readCertificates }: Props) {
+export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands }: Props) {
   const [certError, setCertError] = useState('')
   const [tab, setTab] = useState<Tab>('appearance')
   const [installed, setInstalled] = useState<NativeTools | null>(null)
@@ -226,6 +231,7 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
               )}
             </>
           )}
+          {tab === 'hotkeys' && <HotkeySettings commands={commands} overrides={settings.hotkeys} onChange={(hotkeys) => set({ hotkeys })} />}
           {tab === 'about' && (
             <>
               <h2>{m.settings.about}</h2>

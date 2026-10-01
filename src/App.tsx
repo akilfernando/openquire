@@ -23,6 +23,7 @@ import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
 import WorkflowsDialog from './components/WorkflowsDialog'
 import { OUTPUT_ACTIONS, newWorkflow, pageSetOf, type Workflow, type WorkflowStep } from './engine/workflow'
+import { WHILE_TYPING, commandFor, comboOf, displayCombo, effectiveHotkeys } from './hotkeys'
 import { OFFICE_EXTENSIONS, addRecent, fileName, isDesktop, nativeConvert, nativeTools, pickFiles, readPath, recentFiles, removeRecent, saveAs, tokenSign, watchOpenedFiles, writePath, type TokenKey } from './native'
 import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
 import SignatureDialog from './components/SignatureDialog'
@@ -58,7 +59,7 @@ const STAMP_PRESETS: [string, Omit<StampSpec, 'pageIds'>][] = [
 const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
   const fallback: Settings = {
-    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true,
+    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true, hotkeys: {},
     aiEnabled: false, aiProvider: 'anthropic', aiKey: '', aiModel: '', aiBaseUrl: '', aiProfile: '',
   }
   try {
@@ -69,8 +70,6 @@ function loadSettings(): Settings {
   }
 }
 
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
-const mod = (k: string) => (isMac ? `Cmd+${k}` : `Ctrl+${k}`)
 
 export default function App() {
   const [doc, setDoc] = useState<DocState | null>(null)
@@ -1165,17 +1164,22 @@ export default function App() {
   // ---- commands ------------------------------------------------------------------------------
 
   const has = !!doc
+  const hotkeys = effectiveHotkeys(settings.hotkeys)
+  /** A command's first shortcut, as shown in tooltips and the palette. */
+  const hk = (id: string) => (hotkeys[id]?.[0] ? displayCombo(hotkeys[id][0]) : undefined)
+
   const commands: Command[] = [
-    { id: 'open', name: m.actions.openFile, icon: FolderOpen, hotkey: mod('O'), run: () => openDialog() },
+    { id: 'palette', name: m.actions.commandPalette, icon: SquareTerminal, hotkey: hk('palette'), run: () => setPalette(true) },
+    { id: 'open', name: m.actions.openFile, icon: FolderOpen, hotkey: hk('open'), run: () => openDialog() },
     { id: 'new', name: m.actions.newBlank, icon: FilePlus2, run: () => void newBlank() },
     { id: 'merge', name: m.actions.merge, icon: Combine, enabled: has, run: () => addRef.current!.click() },
-    { id: 'save', name: m.actions.saveCopy, icon: Download, hotkey: mod('S'), enabled: has, run: () => void save() },
+    { id: 'save', name: m.actions.saveCopy, icon: Download, hotkey: hk('save'), enabled: has, run: () => void save() },
     { id: 'close', name: m.actions.closeDocument, icon: X, enabled: has, run: closeDoc },
-    { id: 'undo', name: m.actions.undo, icon: Undo2, hotkey: mod('Z'), enabled: !!doc?.canUndo, run: undo },
-    { id: 'redo', name: m.actions.redo, icon: Redo2, hotkey: mod('Y'), enabled: !!doc?.canRedo, run: redo },
-    { id: 'find', name: m.actions.findInDocument, icon: Search, hotkey: mod('F'), enabled: has, run: openFind },
-    { id: 'zoom-in', name: m.actions.zoomIn, icon: ZoomIn, hotkey: mod('='), enabled: has, run: () => zoomBy(0.25) },
-    { id: 'zoom-out', name: m.actions.zoomOut, icon: ZoomOut, hotkey: mod('-'), enabled: has, run: () => zoomBy(-0.25) },
+    { id: 'undo', name: m.actions.undo, icon: Undo2, hotkey: hk('undo'), enabled: !!doc?.canUndo, run: undo },
+    { id: 'redo', name: m.actions.redo, icon: Redo2, hotkey: hk('redo'), enabled: !!doc?.canRedo, run: redo },
+    { id: 'find', name: m.actions.findInDocument, icon: Search, hotkey: hk('find'), enabled: has, run: openFind },
+    { id: 'zoom-in', name: m.actions.zoomIn, icon: ZoomIn, hotkey: hk('zoom-in'), enabled: has, run: () => zoomBy(0.25) },
+    { id: 'zoom-out', name: m.actions.zoomOut, icon: ZoomOut, hotkey: hk('zoom-out'), enabled: has, run: () => zoomBy(-0.25) },
     { id: 'zoom-fit', name: m.actions.fitWidth, enabled: has, run: () => fitWidth() },
     { id: 'zoom-actual', name: m.actions.actualSize, enabled: has, run: () => setZoom(1) },
     { id: 'left', name: m.actions.toggleLeft, icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
@@ -1211,7 +1215,7 @@ export default function App() {
     recording
       ? { id: 'stop-recording', name: m.actions.stopRecording, run: stopRecording }
       : { id: 'record-workflow', name: m.actions.recordWorkflow, run: startRecording },
-    { id: 'settings', name: m.actions.openSettings, icon: SettingsIcon, hotkey: mod(','), run: () => setSettingsOpen(true) },
+    { id: 'settings', name: m.actions.openSettings, icon: SettingsIcon, hotkey: hk('settings'), run: () => setSettingsOpen(true) },
     { id: 'theme', name: m.actions.toggleTheme, run: () => setSettings({ ...settings, theme: dark ? 'light' : 'dark' }) },
   ]
 
@@ -1219,41 +1223,24 @@ export default function App() {
 
   const keys = useRef<(e: KeyboardEvent) => void>()
   keys.current = (e) => {
-    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as Element).tagName)
+    // The Hotkeys settings tab records presses itself.
+    if ((e.target as Element).closest?.('[data-recording-hotkey]')) return
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as Element).tagName) || (e.target as HTMLElement).isContentEditable
     const modKey = e.ctrlKey || e.metaKey
     const k = e.key.toLowerCase()
-    if (modKey && k === 'p') {
+    const combo = comboOf(e)
+    const id = combo ? commandFor(combo, hotkeys) : null
+    // While typing, only shortcuts that can't be editing keys run: plain keys and Mod+Z/Y stay with the field.
+    const allowed = id && (!typing || WHILE_TYPING.has(id) || (/^(Mod|Alt)\+/.test(combo!) && id !== 'undo' && id !== 'redo'))
+    const command = allowed ? commands.find((c) => c.id === id) : undefined
+    if (command) {
       e.preventDefault()
-      setPalette(true)
-    } else if (modKey && k === ',') {
-      e.preventDefault()
-      setSettingsOpen(true)
-    } else if (modKey && k === 's') {
-      e.preventDefault()
-      if (doc) void save()
-    } else if (modKey && k === 'o') {
-      e.preventDefault()
-      openDialog()
-    } else if (modKey && k === 'f') {
-      e.preventDefault()
-      if (doc) openFind()
-    } else if (modKey && (k === '=' || k === '+')) {
-      e.preventDefault()
-      zoomBy(0.25)
-    } else if (modKey && k === '-') {
-      e.preventDefault()
-      zoomBy(-0.25)
+      if (command.enabled !== false) command.run()
     } else if (typing) {
       return
     } else if (modKey && k === 'c' && textSel) {
       void navigator.clipboard.writeText(textSel.text)
       setStatus(m.status.copied)
-    } else if (modKey && k === 'z') {
-      e.preventDefault()
-      e.shiftKey ? redo() : undo()
-    } else if (modKey && k === 'y') {
-      e.preventDefault()
-      redo()
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && selAnnot) {
       sideActions.deleteAnnot(selAnnot.pageId, selAnnot.id)
     } else if (e.key === 'Escape') {
@@ -1313,7 +1300,7 @@ export default function App() {
 
       <nav className="ribbon" aria-label={m.workspace.ribbon}>
         <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} onClick={() => setLeftOpen((o) => !o)} />
-        <IconButton Icon={FolderOpen} label={m.actions.openFile} hotkey={mod('O')} onClick={() => openDialog()} />
+        <IconButton Icon={FolderOpen} label={m.actions.openFile} hotkey={hk('open')} onClick={() => openDialog()} />
         <IconButton Icon={FilePlus2} label={m.actions.newBlank} onClick={() => newBlank()} />
         <IconButton Icon={Combine} label={m.actions.merge} disabled={!doc} onClick={() => addRef.current!.click()} />
         <IconButton Icon={ScanText} label={m.actions.ocr} disabled={!doc} onClick={() => panelActions.ocr('notext')} />
@@ -1321,9 +1308,9 @@ export default function App() {
         <IconButton Icon={BadgeCheck} label={m.actions.digitalSign} disabled={!doc} onClick={() => setDigitalSigning(true)} />
         <IconButton Icon={ImagePlus} label={m.actions.placeImage} disabled={!doc} onClick={() => imageRef.current!.click()} />
         <IconButton Icon={WorkflowIcon} label={m.actions.workflows} onClick={() => setWorkflowsOpen({ index: 0 })} />
-        <IconButton Icon={SquareTerminal} label={m.actions.commandPalette} hotkey={mod('P')} onClick={() => setPalette(true)} />
+        <IconButton Icon={SquareTerminal} label={m.actions.commandPalette} hotkey={hk('palette')} onClick={() => setPalette(true)} />
         <span className="spacer" />
-        <IconButton Icon={SettingsIcon} label={m.actions.settings} hotkey={mod(',')} onClick={() => setSettingsOpen(true)} />
+        <IconButton Icon={SettingsIcon} label={m.actions.settings} hotkey={hk('settings')} onClick={() => setSettingsOpen(true)} />
       </nav>
 
       {doc && leftOpen && (
@@ -1370,8 +1357,8 @@ export default function App() {
 
         {doc && (
           <div className="view-header">
-            <IconButton Icon={Undo2} label={m.actions.undo} hotkey={mod('Z')} disabled={!doc.canUndo} onClick={undo} />
-            <IconButton Icon={Redo2} label={m.actions.redo} hotkey={mod('Y')} disabled={!doc.canRedo} onClick={redo} />
+            <IconButton Icon={Undo2} label={m.actions.undo} hotkey={hk('undo')} disabled={!doc.canUndo} onClick={undo} />
+            <IconButton Icon={Redo2} label={m.actions.redo} hotkey={hk('redo')} disabled={!doc.canRedo} onClick={redo} />
             <div className="view-title">
               <b>{doc.name}</b>
               <span className="faint tnum">{'  '}{m.workspace.pageOf(doc.pages[Math.min(pageIndex, doc.pages.length - 1)].label, Math.min(pageIndex + 1, doc.pages.length), doc.pages.length)}</span>
@@ -1396,7 +1383,7 @@ export default function App() {
                   <IconButton Icon={X} label={m.actions.closeFind} onClick={() => { setFindOpen(false); setHits(null) }} />
                 </div>
               ) : (
-                <IconButton Icon={Search} label={m.actions.find} hotkey={mod('F')} onClick={openFind} />
+                <IconButton Icon={Search} label={m.actions.find} hotkey={hk('find')} onClick={openFind} />
               )}
               {tabs.length > 1 && (
                 <IconButton
@@ -1404,10 +1391,10 @@ export default function App() {
                   onClick={() => (side ? setSide(null) : void openSide(tabs.find((t) => t.id !== active)!.id))}
                 />
               )}
-              <IconButton Icon={ZoomOut} label={m.actions.zoomOut} hotkey={mod('-')} onClick={() => zoomBy(-0.25)} />
+              <IconButton Icon={ZoomOut} label={m.actions.zoomOut} hotkey={hk('zoom-out')} onClick={() => zoomBy(-0.25)} />
               <button className="clickable-icon zoom-label tnum" title={m.actions.fitWidth} onClick={() => fitWidth()}>{Math.round(zoom * 100)}%</button>
-              <IconButton Icon={ZoomIn} label={m.actions.zoomIn} hotkey={mod('=')} onClick={() => zoomBy(0.25)} />
-              <button className="cta" style={{ marginLeft: 6, height: 28 }} title={m.actions.withHotkey(m.actions.saveCopy, mod('S'))} onClick={save}>
+              <IconButton Icon={ZoomIn} label={m.actions.zoomIn} hotkey={hk('zoom-in')} onClick={() => zoomBy(0.25)} />
+              <button className="cta" style={{ marginLeft: 6, height: 28 }} title={hk('save') ? m.actions.withHotkey(m.actions.saveCopy, hk('save')!) : m.actions.saveCopy} onClick={save}>
                 <Download size={15} />{m.actions.save}
               </button>
             </div>
@@ -1487,9 +1474,9 @@ export default function App() {
             <div className="empty-state">
               <div className="empty-state-inner">
                 <div className="empty-state-title">{m.workspace.emptyTitle}</div>
-                <button className="empty-state-action" onClick={() => openDialog()}>{m.workspace.emptyOpen}<kbd>{mod('O')}</kbd></button>
+                <button className="empty-state-action" onClick={() => openDialog()}>{m.workspace.emptyOpen}{hk('open') && <kbd>{hk('open')}</kbd>}</button>
                 <button className="empty-state-action" onClick={() => newBlank()}>{m.workspace.emptyBlank}</button>
-                <button className="empty-state-action" onClick={() => setPalette(true)}>{m.actions.commandPalette}<kbd>{mod('P')}</kbd></button>
+                <button className="empty-state-action" onClick={() => setPalette(true)}>{m.actions.commandPalette}{hk('palette') && <kbd>{hk('palette')}</kbd>}</button>
                 {recent.length > 0 && (
                   <div className="recent">
                     <div className="pane-heading">{m.workspace.recent}</div>
@@ -1533,7 +1520,7 @@ export default function App() {
       </div>
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
-      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} />}
+      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))} />}
       {signing && <SignatureDialog onClose={() => setSigning(false)} onPlace={(png, aspect) => { setSigning(false); placeImage(png, aspect) }} />}
       {digitalSigning && doc && (() => {
         const page = currentPage() ?? doc.pages[0]

@@ -593,3 +593,26 @@ test('the AI assistant is off by default and never sends without consent', async
   const sidebar = await new AxeBuilder({ page }).include('.sidebar.left').withTags(['wcag2a', 'wcag2aa']).analyze()
   expect(sidebar.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([])
 })
+
+test('rebinds a command shortcut and keeps it', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByRole('button', { name: 'Hotkeys' }).click()
+  await page.getByPlaceholder('Filter commands').fill('find in')
+  await page.getByRole('button', { name: 'Add a shortcut for Find in document' }).click()
+  await page.keyboard.press('Control+Shift+K')
+  await expect(page.locator('.hotkey-row').first()).toContainText('Ctrl+Shift+K')
+  const axe = await new AxeBuilder({ page }).include('.modal').withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([])
+  await page.keyboard.press('Escape')
+
+  await page.reload()
+  await openReport(page)
+  await page.locator('main.desk').click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('Control+Shift+K')
+  await expect(page.getByPlaceholder('Find...')).toBeVisible()
+  // Undo inside a text field stays with the field.
+  await page.getByPlaceholder('Find...').fill('abc')
+  await page.keyboard.press('Control+Z')
+  await expect(page.locator('.status-bar')).not.toContainText('Error')
+})
