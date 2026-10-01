@@ -95,6 +95,8 @@ export interface SignatureInfo {
   coversWholeFile: boolean
   selfSigned: boolean
   problem: string | null
+  /** For certification signatures, the DocMDP level that limits later changes. */
+  certification?: 1 | 2 | 3
 }
 
 export interface DocState {
@@ -130,6 +132,7 @@ export interface SignRequest {
   image?: Uint8Array
   /** Name of an empty signature field to sign into. */
   field?: string
+  certify?: 1 | 2 | 3
 }
 
 export type AnnotSpec =

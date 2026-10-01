@@ -287,6 +287,7 @@ function Signatures({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
           </span>
           <span>{s.signer}{s.email ? ` <${s.email}>` : ''}</span>
           <span className="muted small">{m.sidebar.signedAt(s.signedAt ? when(s.signedAt) : null, s.reason, s.location)}</span>
+          {s.certification && <span className="small">{m.sidebar.certified(s.certification)}</span>}
           {s.problem && <span className="error small">{s.problem}</span>}
           {s.valid && (
             <span className="faint small">

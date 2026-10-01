@@ -85,6 +85,8 @@ export interface SignOptions {
   image?: Uint8Array
   /** Sign into this existing, empty signature field instead of adding one. */
   field?: string
+  /** Certify the document: 1 allows no changes, 2 form filling and signing, 3 also comments. */
+  certify?: 1 | 2 | 3
 }
 
 const pdfDate = (d: Date) => {
@@ -136,9 +138,18 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
     doc = mupdf.Document.openDocument(doc.saveToBuffer('').asUint8Array().slice(), 'application/pdf').asPDF() as mupdf.PDFDocument
   }
 
+  if (opts.certify) {
+    let signed = false
+    walkFields(doc, (f) => (signed ||= f.getInheritable('FT').toString() === '/Sig' && f.get('V').isDictionary()))
+    if (signed) throw new Error('Only the first signature can certify a document, and this one is already signed.')
+  }
+
   const when = new Date()
   const sig = doc.addObject({
     Type: 'Sig', Filter: 'Adobe.PPKLite', SubFilter: 'adbe.pkcs7.detached',
+    ...(opts.certify
+      ? { Reference: [{ Type: 'SigRef', TransformMethod: 'DocMDP', TransformParams: { Type: 'TransformParams', P: opts.certify, V: '1.2' } }] }
+      : {}),
     ByteRange: BYTE_RANGE_PLACEHOLDER,
     Contents: doc.newByteString(new Uint8Array(SIG_SPACE)),
     M: doc.newString(pdfDate(when)),
@@ -149,6 +160,8 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
   })
 
   const root = doc.getTrailer().get('Root')
+  // A certification signature is referenced from the catalog's permissions.
+  if (opts.certify) root.put('Perms', doc.addObject({ DocMDP: sig }))
 
   // Signing into an existing, empty signature field: use its box and leave the form as it is.
   if (opts.field) {
@@ -336,6 +349,23 @@ export function verifySignatures(bytes: Uint8Array, doc: mupdf.PDFDocument): Sig
       }
       if (!info.valid) info.problem = 'The signature does not match the signer’s certificate.'
       if (!info.signedAt && str('M')) info.signedAt = parsePdfDate(str('M'))
+
+      // A certification signature limits what later revisions may change.
+      const level = certificationLevel(v)
+      if (level) {
+        info.certification = level
+        if (info.valid && !info.coversWholeFile) {
+          const certified = mupdf.Document.openDocument(bytes.slice(0, br[2] + br[3]), 'application/pdf').asPDF() as mupdf.PDFDocument
+          const changes = changesSince(certified, doc)
+          certified.destroy()
+          const allowed = new Set<Change>(level === 1 ? [] : level === 2 ? ['form', 'signatures'] : ['form', 'signatures', 'annotations'])
+          const broken = changes.filter((c) => !allowed.has(c))
+          if (broken.length) {
+            info.valid = false
+            info.problem = `The document was changed in ways its certification doesn't allow (${broken.join(', ')}).`
+          }
+        }
+      }
     } catch (e) {
       info.problem = `The signature could not be read (${(e as Error).message}).`
     }
@@ -344,6 +374,91 @@ export function verifySignatures(bytes: Uint8Array, doc: mupdf.PDFDocument): Sig
   const fields = doc.getTrailer().get('Root', 'AcroForm', 'Fields')
   if (fields.isArray()) fields.forEach(walk)
   return out
+}
+
+function walkFields(doc: mupdf.PDFDocument, fn: (f: mupdf.PDFObject, name: string) => void) {
+  const visit = (f: mupdf.PDFObject, prefix: string) => {
+    const t = f.get('T')
+    const name = t.isString() ? (prefix ? `${prefix}.${t.asString()}` : t.asString()) : prefix
+    fn(f, name)
+    const kids = f.get('Kids')
+    if (kids.isArray()) kids.forEach((k) => visit(k.resolve(), name))
+  }
+  const fields = doc.getTrailer().get('Root', 'AcroForm', 'Fields')
+  if (fields.isArray()) fields.forEach((f) => visit(f.resolve(), ''))
+}
+
+/** The DocMDP permission level of a certification signature: 1, 2 or 3, or 0 if it doesn't certify. */
+function certificationLevel(sig: mupdf.PDFObject): 0 | 1 | 2 | 3 {
+  const refs = sig.get('Reference')
+  let level = 0
+  if (refs.isArray())
+    refs.forEach((r) => {
+      const d = r.resolve()
+      if (d.get('TransformMethod').toString() !== '/DocMDP') return
+      const p = d.get('TransformParams', 'P')
+      level = p.isNumber() ? p.asNumber() : 2
+    })
+  return Math.min(3, Math.max(0, level)) as 0 | 1 | 2 | 3
+}
+
+export type Change = 'pages' | 'form' | 'signatures' | 'annotations' | 'fields added'
+
+/** Classifies what changed between two revisions of a document, for certification checks. */
+export function changesSince(before: mupdf.PDFDocument, after: mupdf.PDFDocument): Change[] {
+  const changes = new Set<Change>()
+  const hash = (s: string) => {
+    let h = 2166136261
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619)
+    return h >>> 0
+  }
+  const pageState = (doc: mupdf.PDFDocument) =>
+    Array.from({ length: doc.countPages() }, (_, i) => {
+      const p = doc.findPage(i)
+      const c = p.get('Contents')
+      const parts: string[] = []
+      if (c.isArray()) c.forEach((s) => parts.push(s.readStream().asString()))
+      else if (c.isStream()) parts.push(c.readStream().asString())
+      const annots = new Map<number, string>()
+      const a = p.get('Annots')
+      if (a.isArray()) a.forEach((r) => r.isIndirect() && annots.set(r.asIndirect(), r.resolve().toString()))
+      return { contents: hash(parts.join('\n')), resources: hash(p.getInheritable('Resources').toString()), annots }
+    })
+  const fieldState = (doc: mupdf.PDFDocument) => {
+    const values = new Map<string, string>()
+    let signed = 0
+    walkFields(doc, (f, name) => {
+      const ft = f.getInheritable('FT').toString()
+      if (ft === '/Sig') {
+        if (f.get('V').isDictionary()) signed++
+      } else if (!f.get('FT').isNull() || !f.get('V').isNull()) values.set(name, f.get('V').toString())
+    })
+    return { values, signed }
+  }
+
+  const [pb, pa] = [pageState(before), pageState(after)]
+  if (pb.length !== pa.length) changes.add('pages')
+  for (let i = 0; i < Math.min(pb.length, pa.length); i++) {
+    if (pb[i].contents !== pa[i].contents) changes.add('pages')
+    for (const [num, dict] of pa[i].annots) {
+      const was = pb[i].annots.get(num)
+      if (was === dict) continue
+      const d = after.newIndirect(num).resolve()
+      const subtype = d.get('Subtype').toString()
+      if (subtype === '/Widget') {
+        if (was === undefined) changes.add(d.getInheritable('FT').toString() === '/Sig' ? 'signatures' : 'fields added')
+        else changes.add('form')
+      } else if (subtype !== '/Popup' || was !== undefined) changes.add('annotations')
+    }
+    for (const num of pb[i].annots.keys()) if (!pa[i].annots.has(num)) changes.add('annotations')
+  }
+  const [fb, fa] = [fieldState(before), fieldState(after)]
+  if (fa.signed > fb.signed) changes.add('signatures')
+  for (const [name, value] of fa.values) {
+    if (!fb.values.has(name)) changes.add('fields added')
+    else if (fb.values.get(name) !== value) changes.add('form')
+  }
+  return [...changes]
 }
 
 function parsePdfDate(s: string) {

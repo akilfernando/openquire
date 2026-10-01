@@ -169,6 +169,7 @@ export const en = {
     signedAt: (when: string | null, reason: string, location: string) =>
       `Signed ${when ?? 'at an unknown time'}${reason ? `. ${reason}` : ''}${location ? `, ${location}` : ''}`,
     unchanged: 'The document has not changed since it was signed.',
+    certified: (level: number) => ['', 'Certified: no changes are allowed.', 'Certified: form filling and signing are allowed.', 'Certified: form filling, signing and comments are allowed.'][level],
     laterRevisions: 'Later revisions were added after this signature, such as comments or more signatures.',
     selfSigned: "Self-signed ID: the signer's identity isn't confirmed by a certificate authority.",
     issuedBy: (issuer: string) => `Issued by ${issuer}. Certificate trust chains and revocation aren't checked yet.`,
@@ -415,6 +416,9 @@ export const en = {
     corners: { br: 'Box at bottom right of this page', bl: 'Box at bottom left', tr: 'Box at top right', tl: 'Box at top left', invisible: 'Invisible' },
     includeImage: 'Include my handwritten signature',
     signIn: 'Sign in',
+    kind: 'Signature type',
+    kinds: { 0: 'Approval signature', 2: 'Certify: allow form filling and signing', 3: 'Certify: also allow comments', 1: 'Certify: allow no changes' } as Record<string, string>,
+    certifyHint: 'Certifying makes you the author of record and limits what others may change afterwards.',
     newBox: 'A new signature box',
     cancel: 'Cancel',
     sign: 'Sign & download',

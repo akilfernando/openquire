@@ -2071,7 +2071,7 @@ export class Engine {
     const bytes = signPdf(base, id, {
       page: req.pageId === null ? undefined : order.indexOf(req.pageId),
       rect: req.pageId === null ? undefined : req.rect,
-      reason: req.reason, location: req.location, image: req.image, field: req.field,
+      reason: req.reason, location: req.location, image: req.image, field: req.field, certify: req.certify,
     })
     const state = this.open(`${this.name}.pdf`, bytes.slice())
     return { bytes, state }

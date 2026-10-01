@@ -38,6 +38,7 @@ export default function DigitalSignDialog({ page, signedBefore, fields, onSign, 
   const [location, setLocation] = useState('')
   const [corner, setCorner] = useState<Corner>('br')
   const [field, setField] = useState(fields[0] ?? '')
+  const [certify, setCertify] = useState<0 | 1 | 2 | 3>(0)
   const savedImage = (() => {
     try {
       return (JSON.parse(localStorage.getItem(SAVED_IMAGE) ?? 'null') as { url: string } | null)?.url ?? null
@@ -77,7 +78,7 @@ export default function DigitalSignDialog({ page, signedBefore, fields, onSign, 
       if (useImage && savedImage) image = new Uint8Array(await (await fetch(savedImage)).arrayBuffer())
       const rect = field ? undefined : boxFor(corner, page.width, page.height)
       await onSign({
-        p12: p12.bytes.slice(), password, pageId: rect ? page.id : null, rect, field: field || undefined,
+        p12: p12.bytes.slice(), password, pageId: rect ? page.id : null, rect, field: field || undefined, certify: certify || undefined,
         reason: reason.trim() || undefined, location: location.trim() || undefined, image,
       })
     } catch (e) {
@@ -127,6 +128,13 @@ export default function DigitalSignDialog({ page, signedBefore, fields, onSign, 
           <label className="field"><span>{m.digitalId.location}</span><input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
         </div>
         <div className="row">
+          {!signedBefore && (
+            <label className="field"><span>{m.digitalId.kind}</span>
+              <select value={certify} onChange={(e) => setCertify(Number(e.target.value) as 0 | 1 | 2 | 3)}>
+                {[0, 2, 3, 1].map((k) => <option key={k} value={k}>{m.digitalId.kinds[k]}</option>)}
+              </select>
+            </label>
+          )}
           {fields.length > 0 && (
             <label className="field"><span>{m.digitalId.signIn}</span>
               <select value={field} onChange={(e) => setField(e.target.value)}>
