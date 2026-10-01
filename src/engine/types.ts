@@ -35,6 +35,8 @@ export interface WidgetInfo {
   options?: string[]
   multiline: boolean
   readOnly: boolean
+  required: boolean
+  tooltip: string
   maxLen: number
 }
 
@@ -126,6 +128,8 @@ export interface SignRequest {
   reason?: string
   location?: string
   image?: Uint8Array
+  /** Name of an empty signature field to sign into. */
+  field?: string
 }
 
 export type AnnotSpec =
@@ -222,4 +226,17 @@ export type PageLabelStyle = 'D' | 'r' | 'R' | 'a' | 'A' | 'none'
 export interface PageImage {
   index: number
   rect: Rect
+}
+
+export type FieldKind = 'text' | 'multiline' | 'checkbox' | 'radio' | 'choice' | 'signature'
+
+export interface FieldProps {
+  name?: string
+  required?: boolean
+  readOnly?: boolean
+  tooltip?: string
+  multiline?: boolean
+  /** 0 removes the limit. */
+  maxLen?: number
+  options?: string[]
 }

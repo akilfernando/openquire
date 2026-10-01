@@ -6,7 +6,7 @@ import { isResizable, normRect, quadPoints } from '../util'
 import { m } from '../i18n'
 
 export type Tool =
-  | 'select' | 'edittext' | 'erasegfx' | 'link' | 'highlight' | 'underline' | 'strike' | 'note' | 'text'
+  | 'select' | 'edittext' | 'field' | 'erasegfx' | 'link' | 'highlight' | 'underline' | 'strike' | 'note' | 'text'
   | 'ink' | 'rect' | 'ellipse' | 'arrow' | 'whiteout' | 'redact' | 'crop'
 
 const MARKUP: Partial<Record<Tool, 'Highlight' | 'Underline' | 'StrikeOut'>> = { highlight: 'Highlight', underline: 'Underline', strike: 'StrikeOut' }
@@ -28,6 +28,11 @@ export interface PageActions {
   deleteImage: (pageId: number, index: number) => void
   replaceImage: (pageId: number, index: number) => void
   eraseGraphics: (pageId: number, rect: Rect) => void
+  /** Form designer: a new field area, or an existing field to edit. */
+  newField: (pageId: number, rect: Rect) => void
+  editField: (pageId: number, widget: WidgetInfo) => void
+  moveField: (pageId: number, widgetId: number, rect: Rect) => void
+  deleteField: (pageId: number, widgetId: number) => void
   setSelection: (sel: { pageId: number; quads: Quad[]; text: string } | null) => void
   toolDone: () => void
 }
@@ -53,6 +58,7 @@ type Draft =
   | { kind: 'move'; annot: AnnotInfo; d: Point }
   | { kind: 'resize'; annot: AnnotInfo; rect: Rect }
   | { kind: 'image'; rect: Rect }
+  | { kind: 'field'; rect: Rect }
 
 function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editingAnnot, hits, activeHit, selection, actions }: Props) {
   const outer = useRef<HTMLDivElement>(null)
@@ -60,7 +66,8 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
   const svg = useRef<SVGSVGElement>(null)
   const [visible, setVisible] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
-  const drag = useRef<{ start: Point; mode: 'draw' | 'move' | 'resize' | 'select' | 'imgmove' | 'imgresize'; annot?: AnnotInfo; image?: PageImage } | null>(null)
+  const drag = useRef<{ start: Point; mode: 'draw' | 'move' | 'resize' | 'select' | 'imgmove' | 'imgresize' | 'fieldmove' | 'fieldresize'; annot?: AnnotInfo; image?: PageImage; widget?: WidgetInfo } | null>(null)
+  const [fieldSel, setFieldSel] = useState<number | null>(null)
   const [blocks, setBlocks] = useState<TextBlock[] | null>(null)
   const [editLine, setEditLine] = useState<{ block: TextBlock; value: string } | null>(null)
   const [images, setImages] = useState<PageImage[] | null>(null)
@@ -120,6 +127,23 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
     return () => window.removeEventListener('keydown', onKey)
   }, [imageSel, actions, page.id])
 
+  useEffect(() => {
+    if (tool !== 'field') setFieldSel(null)
+  }, [tool])
+  useEffect(() => {
+    if (fieldSel === null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target as Element).tagName) || document.querySelector('.modal-container')) return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        actions.deleteField(page.id, fieldSel)
+        setFieldSel(null)
+      } else if (e.key === 'Escape') setFieldSel(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [fieldSel, actions, page.id])
+
   const W = page.width * zoom
   const H = page.height * zoom
 
@@ -159,6 +183,17 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
       if (tool === 'select') actions.followLink(link)
       else actions.editLink(page.id, null, link.index)
       return
+    }
+    if (tool === 'field') {
+      const fid = target.closest('[data-field]')?.getAttribute('data-field')
+      const widget = page.widgets.find((w) => String(w.id) === fid)
+      if (widget) {
+        setFieldSel(widget.id)
+        drag.current = { start: p, mode: target.hasAttribute('data-handle') ? 'fieldresize' : 'fieldmove', widget }
+        svg.current!.setPointerCapture(e.pointerId)
+        return
+      }
+      setFieldSel(null)
     }
     if (tool === 'select') {
       const id = target.closest('[data-annot]')?.getAttribute('data-annot')
@@ -214,7 +249,13 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
     if (!d) return
     const p = pt(e)
     const [dx, dy] = [p[0] - d.start[0], p[1] - d.start[1]]
-    if (d.mode === 'imgmove') {
+    if (d.mode === 'fieldmove') {
+      const r = d.widget!.rect
+      setDraft({ kind: 'field', rect: [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy] })
+    } else if (d.mode === 'fieldresize') {
+      const r = d.widget!.rect
+      setDraft({ kind: 'field', rect: [r[0], r[1], Math.max(r[0] + 8, r[2] + dx), Math.max(r[1] + 8, r[3] + dy)] })
+    } else if (d.mode === 'imgmove') {
       const r = d.image!.rect
       setDraft({ kind: 'image', rect: [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy] })
     } else if (d.mode === 'imgresize') {
@@ -243,6 +284,10 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
     const cur = draft
     setDraft(null)
     const c = rgbOf(color)
+    if (d.mode === 'fieldmove' || d.mode === 'fieldresize') {
+      if (cur?.kind === 'field') actions.moveField(page.id, d.widget!.id, cur.rect)
+      return
+    }
     if (d.mode === 'imgmove' || d.mode === 'imgresize') {
       if (cur?.kind === 'image') actions.moveImage(page.id, d.image!.index, cur.rect)
       return
@@ -286,6 +331,7 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
     else if (tool === 'redact') await actions.addAnnot(page.id, { type: 'Redact', rect: r })
     else if (tool === 'link') actions.editLink(page.id, r, null)
     else if (tool === 'erasegfx') actions.eraseGraphics(page.id, r)
+    else if (tool === 'field') actions.newField(page.id, r)
     else if (tool === 'crop') {
       actions.crop(page.id, r)
       actions.toolDone()
@@ -307,6 +353,9 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
         ref={svg} viewBox={`0 0 ${page.width} ${page.height}`} className={`overlay tool-${tool}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; setDraft(null) }}
         onDoubleClick={(e) => {
+          const fid = (e.target as Element).closest('[data-field]')?.getAttribute('data-field')
+          const widget = page.widgets.find((w) => String(w.id) === fid)
+          if (tool === 'field' && widget) return actions.editField(page.id, widget)
           const id = (e.target as Element).closest('[data-annot]')?.getAttribute('data-annot')
           const a = shown.find((x) => String(x.id) === id)
           if (a?.type === 'FreeText') actions.selectAnnot(page.id, a.id)
@@ -333,6 +382,21 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
             </g>
           )
         })}
+        {tool === 'field' && page.widgets.map((w) => {
+          const [x0, y0, x1, y1] = w.rect
+          const sel = w.id === fieldSel
+          return (
+            <g key={`field-${w.id}`} data-field={w.id} className={sel ? 'field-box sel' : 'field-box'}>
+              <title>{`${w.name} (${m.fields.kinds[w.kind === 'text' && w.multiline ? 'multiline' : w.kind] ?? w.kind})`}</title>
+              <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} />
+              <text x={x0 + 2} y={y0 - 2} className="field-name">{w.name}</text>
+              {sel && <rect data-handle x={x1 - 4} y={y1 - 4} width={8} height={8} className="handle" />}
+            </g>
+          )
+        })}
+        {draft?.kind === 'field' && (
+          <rect className="ghost" x={draft.rect[0]} y={draft.rect[1]} width={draft.rect[2] - draft.rect[0]} height={draft.rect[3] - draft.rect[1]} />
+        )}
         {draft?.kind === 'image' && (
           <rect className="ghost" x={draft.rect[0]} y={draft.rect[1]} width={draft.rect[2] - draft.rect[0]} height={draft.rect[3] - draft.rect[1]} />
         )}

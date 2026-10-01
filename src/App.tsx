@@ -3,11 +3,12 @@ import {
   BadgeCheck, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
   ImagePlus, Loader2, Lock, MousePointer2, MoveUpRight, PanelLeft, PanelRight, Pencil, Redo2, ScanText, Search, Settings as SettingsIcon,
   ShieldAlert, ShieldCheck, Signature, Square, SquareTerminal, StickyNote, Strikethrough, TextCursorInput, Trash2, Type, Underline, Undo2,
-  X, ZoomIn, ZoomOut, Link2, SquareX, type LucideProps,
+  X, ZoomIn, ZoomOut, Link2, SquareX, FormInput, type LucideProps,
 } from 'lucide-react'
 import CommandPalette, { type Command } from './components/CommandPalette'
 import DigitalSignDialog from './components/DigitalSignDialog'
 import LinkDialog from './components/LinkDialog'
+import FieldDialog from './components/FieldDialog'
 import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsModal, { type Settings } from './components/SettingsModal'
@@ -16,7 +17,7 @@ import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
 import { EngineError, engine } from './engine/client'
 import { parseRanges } from './engine/ranges'
-import { rgbOf, type DocState, type LinkInfo, type Quad, type Rect, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
+import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Quad, type Rect, type WidgetInfo, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
 import { arrowNavigate } from './focus'
 import { m } from './i18n'
 import { download, imageToPng, kb } from './util'
@@ -24,7 +25,7 @@ import { download, imageToPng, kb } from './util'
 type Icon = ComponentType<LucideProps>
 
 const TOOL_ICONS: [Tool, Icon][][] = [
-  [['select', MousePointer2], ['edittext', TextCursorInput], ['link', Link2], ['erasegfx', SquareX]],
+  [['select', MousePointer2], ['edittext', TextCursorInput], ['field', FormInput], ['link', Link2], ['erasegfx', SquareX]],
   [['highlight', Highlighter], ['underline', Underline], ['strike', Strikethrough], ['note', StickyNote], ['text', Type]],
   [['ink', Pencil], ['rect', Square], ['ellipse', Circle], ['arrow', MoveUpRight]],
   [['whiteout', Eraser], ['redact', EyeOff], ['crop', Crop]],
@@ -84,6 +85,8 @@ export default function App() {
   const [signing, setSigning] = useState(false)
   const [digitalSigning, setDigitalSigning] = useState(false)
   const [palette, setPalette] = useState(false)
+  const [fieldKind, setFieldKind] = useState<FieldKind>('text')
+  const [fieldEdit, setFieldEdit] = useState<{ pageId: number; rect: Rect | null; widget: WidgetInfo | null } | null>(null)
   const [linkEdit, setLinkEdit] = useState<{ pageId: number; rect: Rect | null; index: number | null } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settings, setSettingsState] = useState(loadSettings)
@@ -394,6 +397,10 @@ export default function App() {
         replacing.current = { pageId, index }
         replaceRef.current!.click()
       },
+      newField: (pageId, rect) => setFieldEdit({ pageId, rect, widget: null }),
+      editField: (pageId, widget) => setFieldEdit({ pageId, rect: null, widget }),
+      moveField: (pageId, widgetId, rect) => void run(m.busy.editingForm, async () => apply(await engine.moveField(pageId, widgetId, rect))),
+      deleteField: (pageId, widgetId) => void run(m.busy.editingForm, async () => apply(await engine.deleteField(pageId, widgetId))),
       eraseGraphics: (pageId, rect) => void run(m.busy.erasing, async () => apply(await engine.eraseGraphics(pageId, rect))),
       followLink: (link: LinkInfo) => {
         if (link.page >= 0) {
@@ -527,6 +534,14 @@ export default function App() {
       }),
     digitalSign: () => setDigitalSigning(true),
     setLabels: (style, prefix, start) => void run(m.busy.numbering, async () => apply(await engine.setPageLabels(labelPageId(), style, prefix, start))),
+    designForm: () => setTool('field'),
+    detectFields: () =>
+      void run(m.busy.detecting, async () => {
+        const { count, state } = await engine.detectFields()
+        apply(state)
+        setStatus(m.panel.detected(count))
+        if (count) setTool('field')
+      }),
     removeLabels: () => void run(m.busy.numbering, async () => apply(await engine.removePageLabels(labelPageId()))),
   }
 
@@ -805,6 +820,11 @@ export default function App() {
                     ))}
                   </span>
                 ))}
+                {tool === 'field' && (
+                  <select value={fieldKind} title={m.fields.kindLabel} aria-label={m.fields.kindLabel} onChange={(e) => setFieldKind(e.target.value as FieldKind)}>
+                    {(['text', 'multiline', 'checkbox', 'radio', 'choice', 'signature'] as FieldKind[]).map((k) => <option key={k} value={k}>{m.fields.kinds[k]}</option>)}
+                  </select>
+                )}
                 <span className="divider" />
                 <input className="color-input" type="color" value={shownColor} title={sel ? m.workspace.selectedColor : m.workspace.newColor} aria-label={sel ? m.workspace.selectedColor : m.workspace.newColor} onChange={(e) => setColor(e.target.value)} />
                 <select value={strokeWidth} title={m.workspace.lineWidth} aria-label={m.workspace.lineWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))}>
@@ -863,6 +883,7 @@ export default function App() {
         return (
           <DigitalSignDialog
             page={page} signedBefore={doc.signatures.length > 0} onClose={() => setDigitalSigning(false)}
+            fields={doc.pages.flatMap((p) => p.widgets).filter((w) => w.kind === 'signature' && !doc.signatures.some((s) => s.field === w.name)).map((w) => w.name)}
             onSign={async (req) => {
               const { bytes, state } = await engine.sign(req)
               download(bytes, `${doc.name}-signed.pdf`)
@@ -871,6 +892,28 @@ export default function App() {
               setLeftOpen(true)
               setTab('signatures')
               setStatus(m.status.signed(`${doc.name}-signed.pdf`))
+            }}
+          />
+        )
+      })()}
+      {fieldEdit && doc && (() => {
+        const groups = [...new Set(doc.pages.flatMap((p) => p.widgets).filter((w) => w.kind === 'radio').map((w) => w.name))]
+        const w = fieldEdit.widget
+        const kind: FieldKind = w ? (w.kind === 'text' && w.multiline ? 'multiline' : w.kind === 'button' ? 'text' : w.kind) : fieldKind
+        return (
+          <FieldDialog
+            field={w} kind={kind} groups={groups} onClose={() => setFieldEdit(null)}
+            onDelete={w ? () => { setFieldEdit(null); void run(m.busy.editingForm, async () => apply(await engine.deleteField(fieldEdit.pageId, w.id))) } : undefined}
+            onSave={({ group, ...props }) => {
+              const { pageId, rect } = fieldEdit
+              setFieldEdit(null)
+              void run(m.busy.editingForm, async () => {
+                if (w) return apply(await engine.updateField(pageId, w.id, props))
+                const { name, state } = await engine.addField(pageId, kind, rect!, { name: props.name, group, options: props.options })
+                apply(state)
+                const added = state.pages.find((p) => p.id === pageId)!.widgets.filter((x) => x.name === name).at(-1)
+                if (added && (props.required || props.readOnly || props.tooltip || props.maxLen)) apply(await engine.updateField(pageId, added.id, { ...props, name: undefined }))
+              })
             }}
           />
         )

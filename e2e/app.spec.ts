@@ -259,3 +259,41 @@ test('moves and deletes an image with the Edit tool', async ({ page }) => {
   saved = mupdf.Document.openDocument(await save(page), 'application/pdf')
   expect(pixAt(saved, 300, 400)).toBeGreaterThan(200)
 })
+
+test('designs a form field and fills it in', async ({ page }) => {
+  const d = new mupdf.PDFDocument()
+  const f = d.addSimpleFont(new mupdf.Font('Helvetica'))
+  d.insertPage(-1, d.addPage([0, 0, 595, 842], 0, { Font: { F1: f } }, [
+    'BT /F1 12 Tf 60 770 Td (Company:) Tj ET',
+    'BT /F1 12 Tf 60 720 Td (Phone ____________________) Tj ET',
+  ].join('\n')))
+  await page.goto('/')
+  await openFile(page, 'flat.pdf', Buffer.from(d.saveToBuffer('').asUint8Array()))
+  await expect(page.locator('.page canvas[width]').first()).toBeVisible()
+
+  await page.getByRole('button', { name: 'Form field', exact: true }).click()
+  const a = await pagePoint(page, 0, 130, 842 - 785)
+  const b = await pagePoint(page, 0, 360, 842 - 765)
+  await page.mouse.move(a.x, a.y)
+  await page.mouse.down()
+  await page.mouse.move(b.x, b.y, { steps: 5 })
+  await page.mouse.up()
+  const dialog = page.getByRole('dialog', { name: 'Add text field' })
+  await dialog.getByLabel('Name').fill('Company')
+  await dialog.getByLabel('Required').check()
+  await dialog.getByRole('button', { name: 'Add field' }).click()
+  await expect(page.locator('.field-box')).toHaveCount(1)
+
+  // Detection adds the underscore blank, named after its label.
+  await openSection(page, 'Forms & flattening')
+  await page.getByRole('button', { name: 'Detect fields' }).click()
+  await expect(page.locator('.status-bar')).toContainText('Added 1 form field')
+  await expect(page.locator('.field-box')).toHaveCount(2)
+
+  await page.getByRole('button', { name: 'Select', exact: true }).click()
+  await page.locator('.widget.text').first().fill('Teams Squared')
+  await page.locator('.widget.text').first().press('Enter')
+  const saved = mupdf.Document.openDocument(await save(page), 'application/pdf').asPDF() as mupdf.PDFDocument
+  const values = Object.fromEntries(saved.loadPage(0).getWidgets().map((w) => [w.getName(), w.getValue()]))
+  expect(values).toEqual({ Company: 'Teams Squared', Phone: '' })
+})

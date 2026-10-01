@@ -83,6 +83,8 @@ export interface SignOptions {
   contact?: string
   /** Optional handwritten signature image shown in the box. */
   image?: Uint8Array
+  /** Sign into this existing, empty signature field instead of adding one. */
+  field?: string
 }
 
 const pdfDate = (d: Date) => {
@@ -146,6 +148,29 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
     ...(opts.contact ? { ContactInfo: doc.newString(opts.contact) } : {}),
   })
 
+  const root = doc.getTrailer().get('Root')
+
+  // Signing into an existing, empty signature field: use its box and leave the form as it is.
+  if (opts.field) {
+    let target: mupdf.PDFObject | null = null
+    const fields = root.get('AcroForm', 'Fields')
+    if (fields.isArray())
+      fields.forEach((f) => {
+        const d = f.resolve()
+        if (!target && d.get('FT').toString() === '/Sig' && d.get('T').isString() && d.get('T').asString() === opts.field) target = f
+      })
+    const field = target as mupdf.PDFObject | null
+    if (!field) throw new Error(`There is no signature field named ${opts.field}.`)
+    if (!field.get('V').isNull()) throw new Error(`${opts.field} is already signed.`)
+    const r = field.get('Rect')
+    const [x0, y0, x1, y1] = [0, 1, 2, 3].map((i) => r.get(i).asNumber())
+    field.put('V', sig)
+    field.put('F', 132)
+    if (x1 - x0 > 1 && y1 - y0 > 1) field.put('AP', doc.addObject({ N: appearance(doc, x1 - x0, y1 - y0, id, when, opts) }))
+    root.get('AcroForm').put('SigFlags', 3)
+    return finishSignature(doc, id, when)
+  }
+
   const pageIndex = opts.page ?? 0
   const page = doc.loadPage(pageIndex)
   const pageObj = page.getObject()
@@ -158,7 +183,6 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
     ap = doc.addStream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 0, 0] })
   }
 
-  const root = doc.getTrailer().get('Root')
   let form = root.get('AcroForm')
   if (form.isNull()) {
     form = doc.addObject(doc.newDictionary())
@@ -186,7 +210,11 @@ export function signPdf(input: Uint8Array, id: DigitalId, opts: SignOptions = {}
     pageObj.put('Annots', annots)
   }
   annots.push(field)
+  return finishSignature(doc, id, when)
+}
 
+/** Saves the update with its placeholder, then fills in the byte range and the CMS signature. */
+function finishSignature(doc: mupdf.PDFDocument, id: DigitalId, when: Date): Uint8Array {
   const out = doc.saveToBuffer('incremental').asUint8Array().slice()
   doc.destroy()
 

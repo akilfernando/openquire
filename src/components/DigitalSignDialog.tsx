@@ -11,6 +11,8 @@ interface Props {
   /** Current page: its id and size in points. */
   page: { id: number; width: number; height: number }
   signedBefore: boolean
+  /** Names of empty signature fields the document asks to be signed. */
+  fields: string[]
   onSign: (req: SignRequest) => Promise<void>
   onClose: () => void
 }
@@ -27,7 +29,7 @@ function boxFor(corner: Corner, w: number, h: number): Rect | undefined {
   return [x, y, x + bw, y + bh]
 }
 
-export default function DigitalSignDialog({ page, signedBefore, onSign, onClose }: Props) {
+export default function DigitalSignDialog({ page, signedBefore, fields, onSign, onClose }: Props) {
   const [source, setSource] = useState<'file' | 'new'>('file')
   const [p12, setP12] = useState<{ name: string; bytes: Uint8Array } | null>(null)
   const [password, setPassword] = useState('')
@@ -35,6 +37,7 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
   const [reason, setReason] = useState(m.digitalId.defaultReason)
   const [location, setLocation] = useState('')
   const [corner, setCorner] = useState<Corner>('br')
+  const [field, setField] = useState(fields[0] ?? '')
   const savedImage = (() => {
     try {
       return (JSON.parse(localStorage.getItem(SAVED_IMAGE) ?? 'null') as { url: string } | null)?.url ?? null
@@ -72,9 +75,9 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
     try {
       let image: Uint8Array | undefined
       if (useImage && savedImage) image = new Uint8Array(await (await fetch(savedImage)).arrayBuffer())
-      const rect = boxFor(corner, page.width, page.height)
+      const rect = field ? undefined : boxFor(corner, page.width, page.height)
       await onSign({
-        p12: p12.bytes.slice(), password, pageId: rect ? page.id : null, rect,
+        p12: p12.bytes.slice(), password, pageId: rect ? page.id : null, rect, field: field || undefined,
         reason: reason.trim() || undefined, location: location.trim() || undefined, image,
       })
     } catch (e) {
@@ -124,12 +127,22 @@ export default function DigitalSignDialog({ page, signedBefore, onSign, onClose 
           <label className="field"><span>{m.digitalId.location}</span><input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
         </div>
         <div className="row">
-          <label className="field"><span>{m.digitalId.appearance}</span>
-            <select value={corner} onChange={(e) => setCorner(e.target.value as Corner)}>
-              {(Object.entries(m.digitalId.corners) as [Corner, string][]).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-            </select>
-          </label>
-          {savedImage && corner !== 'invisible' && (
+          {fields.length > 0 && (
+            <label className="field"><span>{m.digitalId.signIn}</span>
+              <select value={field} onChange={(e) => setField(e.target.value)}>
+                {fields.map((f) => <option key={f} value={f}>{f}</option>)}
+                <option value="">{m.digitalId.newBox}</option>
+              </select>
+            </label>
+          )}
+          {!field && (
+            <label className="field"><span>{m.digitalId.appearance}</span>
+              <select value={corner} onChange={(e) => setCorner(e.target.value as Corner)}>
+                {(Object.entries(m.digitalId.corners) as [Corner, string][]).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+            </label>
+          )}
+          {savedImage && (field || corner !== 'invisible') && (
             <label className="check">
               <input type="checkbox" checked={useImage} onChange={(e) => setUseImage(e.target.checked)} />
               <span>{m.digitalId.includeImage}</span>

@@ -22,6 +22,8 @@ export interface PanelActions {
   pagesWithoutText: () => Promise<number>
   digitalSign: () => void
   setLabels: (style: PageLabelStyle, prefix: string, start: number) => void
+  designForm: () => void
+  detectFields: () => void
   removeLabels: () => void
 }
 
@@ -279,6 +281,11 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
 
         <Section title={m.panel.forms} count={widgets || undefined}>
           <p className="hint">{m.panel.formFields(widgets)}</p>
+          <div className="row">
+            <button onClick={actions.designForm}>{m.panel.designForm}</button>
+            <button onClick={actions.detectFields}>{m.panel.detectFields}</button>
+          </div>
+          <p className="hint">{m.panel.designHint}</p>
           <div className="row">
             <button disabled={!widgets} onClick={() => actions.flatten(false, true)}>{m.panel.flattenForm}</button>
             <button disabled={!annots} onClick={() => actions.flatten(true, false)}>{m.panel.flattenComments}</button>

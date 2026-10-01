@@ -11,6 +11,8 @@ import {
   type Bookmark,
   type CompressLevel,
   type DocState,
+  type FieldKind,
+  type FieldProps,
   type Metadata,
   type OcrWord,
   type PageImage,
@@ -388,6 +390,11 @@ export class Engine {
       value: w.getValue() ?? '',
       multiline: kind === 'text' && w.isMultiline(),
       readOnly: w.isReadOnly(),
+      required: (w.getFieldFlags() & 2) !== 0,
+      tooltip: (() => {
+        const f = this.fieldOf(w.getObject()).get('TU')
+        return f.isString() ? f.asString() : ''
+      })(),
       maxLen: kind === 'text' ? w.getMaxLen() : 0,
     }
     if (kind === 'checkbox' || kind === 'radio') {
@@ -1282,6 +1289,305 @@ export class Engine {
     return this.state()
   }
 
+  // ---- form designer ----
+
+  /** The document's AcroForm dictionary, created with default fonts if there isn't one. */
+  private acroForm() {
+    const doc = this.d
+    const root = doc.getTrailer().get('Root')
+    let form = root.get('AcroForm')
+    if (form.isNull()) {
+      form = doc.addObject(doc.newDictionary())
+      root.put('AcroForm', form)
+    }
+    if (form.get('Fields').isNull()) form.put('Fields', doc.newArray())
+    if (form.get('DA').isNull()) form.put('DA', doc.newString('/Helv 0 Tf 0 g'))
+    let dr = form.get('DR')
+    if (dr.isNull()) {
+      dr = doc.newDictionary()
+      form.put('DR', dr)
+    }
+    let fonts = dr.get('Font')
+    if (fonts.isNull()) {
+      fonts = doc.newDictionary()
+      dr.put('Font', fonts)
+    }
+    if (fonts.get('Helv').isNull()) fonts.put('Helv', doc.addSimpleFont(this.font('Helvetica'), 'Latin'))
+    return form
+  }
+
+  /** Every fully qualified field name in the document. */
+  private fieldNames() {
+    const names = new Set<string>()
+    const walk = (f: mupdf.PDFObject, prefix: string) => {
+      const t = f.get('T')
+      const name = t.isString() ? (prefix ? `${prefix}.${t.asString()}` : t.asString()) : prefix
+      if (name) names.add(name)
+      const kids = f.get('Kids')
+      if (kids.isArray()) kids.forEach((k) => walk(k.resolve(), name))
+    }
+    const fields = this.d.getTrailer().get('Root', 'AcroForm', 'Fields')
+    if (fields.isArray()) fields.forEach((f) => walk(f.resolve(), ''))
+    return names
+  }
+
+  private uniqueName(base: string) {
+    const names = this.fieldNames()
+    const clean = base.replace(/[.\s]+/g, ' ').trim() || 'Field'
+    if (!names.has(clean)) return clean
+    let n = 2
+    while (names.has(`${clean} ${n}`)) n++
+    return `${clean} ${n}`
+  }
+
+  /** Appearance streams for a checkbox or radio button of a given size, off and on. */
+  private toggleAppearance(kind: 'checkbox' | 'radio', w: number, h: number) {
+    const doc = this.d
+    const s = Math.min(w, h)
+    const circle = (cx: number, cy: number, r: number) => {
+      const k = 0.5523 * r
+      return `${cx + r} ${cy} m ${cx + r} ${cy + k} ${cx + k} ${cy + r} ${cx} ${cy + r} c ${cx - k} ${cy + r} ${cx - r} ${cy + k} ${cx - r} ${cy} c ` +
+        `${cx - r} ${cy - k} ${cx - k} ${cy - r} ${cx} ${cy - r} c ${cx + k} ${cy - r} ${cx + r} ${cy - k} ${cx + r} ${cy} c`
+    }
+    const frame = kind === 'checkbox'
+      ? `1 g 0.5 0.5 ${w - 1} ${h - 1} re f 0.35 G 1 w 0.5 0.5 ${w - 1} ${h - 1} re S`
+      : `1 g ${circle(w / 2, h / 2, s / 2 - 0.5)} f 0.35 G 1 w ${circle(w / 2, h / 2, s / 2 - 0.5)} S`
+    const mark = kind === 'checkbox'
+      ? `0 G ${(s * 0.12).toFixed(2)} w 1 J 1 j ${w * 0.22} ${h * 0.52} m ${w * 0.42} ${h * 0.28} l ${w * 0.8} ${h * 0.76} l S`
+      : `0 g ${circle(w / 2, h / 2, s * 0.22)} f`
+    const stream = (ops: string) => doc.addStream(`q ${ops} Q`, { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, w, h] })
+    return { off: stream(frame), on: stream(`${frame} ${mark}`) }
+  }
+
+  /** Converts a page-space rectangle to the page's PDF coordinates. */
+  private pdfRect(pageId: number, rect: Rect): Rect {
+    const page = this.page(pageId)
+    const r = mupdf.Rect.transform(rect, mupdf.Matrix.invert(page.getTransform())) as Rect
+    page.destroy()
+    return r
+  }
+
+  /** Adds a form field. Radio buttons sharing a `group` belong to one field. */
+  addField(pageId: number, kind: FieldKind, rect: Rect, opts: { name?: string; group?: string; options?: string[] } = {}) {
+    let name = ''
+    this.op('Add form field', () => {
+      const doc = this.d
+      const form = this.acroForm()
+      const pageObj = this.d.findPage(this.indexOf(pageId))
+      const r = this.pdfRect(pageId, rect)
+      const [w, h] = [r[2] - r[0], r[3] - r[1]]
+      const base = { Type: 'Annot', Subtype: 'Widget', Rect: r, F: 4, P: pageObj }
+      const size = Math.max(6, Math.min(12, Math.round(h * 0.6)))
+      let widget: mupdf.PDFObject
+      let field: mupdf.PDFObject | null = null
+      const label = opts.name ?? { text: 'Text', multiline: 'Text', checkbox: 'Checkbox', radio: 'Choice', choice: 'Dropdown', signature: 'Signature' }[kind]
+
+      if (kind === 'radio') {
+        const groupName = opts.group ?? label
+        let parent: mupdf.PDFObject | null = null
+        form.get('Fields').forEach((f) => {
+          const d = f.resolve()
+          if (!parent && d.get('T').isString() && d.get('T').asString() === groupName && d.get('FT').toString() === '/Btn') parent = f
+        })
+        if (!parent) {
+          name = this.uniqueName(groupName)
+          parent = doc.addObject({ FT: 'Btn', Ff: 49152, T: doc.newString(name), V: 'Off', Kids: doc.newArray() })
+          form.get('Fields').push(parent)
+        } else {
+          name = groupName
+        }
+        const p = parent as mupdf.PDFObject
+        const state = `Option${p.get('Kids').length + 1}`
+        const ap = this.toggleAppearance('radio', w, h)
+        widget = doc.addObject({ ...base, Parent: p, AS: 'Off', MK: { CA: doc.newString('l') }, AP: { N: { Off: ap.off, [state]: ap.on } } })
+        p.get('Kids').push(widget)
+      } else {
+        name = this.uniqueName(label)
+        const common = { ...base, T: doc.newString(name) }
+        if (kind === 'checkbox') {
+          const ap = this.toggleAppearance('checkbox', w, h)
+          widget = doc.addObject({ ...common, FT: 'Btn', V: 'Off', AS: 'Off', MK: { CA: doc.newString('4') }, AP: { N: { Off: ap.off, Yes: ap.on } } })
+        } else if (kind === 'choice') {
+          const options = (opts.options?.length ? opts.options : ['Option 1', 'Option 2']).map((o) => doc.newString(o))
+          widget = doc.addObject({ ...common, FT: 'Ch', Ff: 131072, Opt: options, V: doc.newString(''), DA: doc.newString(`/Helv ${size} Tf 0 g`) })
+        } else if (kind === 'signature') {
+          widget = doc.addObject({ ...common, FT: 'Sig' })
+        } else {
+          widget = doc.addObject({
+            ...common, FT: 'Tx', V: doc.newString(''), DA: doc.newString(`/Helv ${kind === 'multiline' ? 10 : size} Tf 0 g`),
+            ...(kind === 'multiline' ? { Ff: 4096 } : {}),
+          })
+        }
+        field = widget
+        form.get('Fields').push(field)
+      }
+
+      let annots = pageObj.get('Annots')
+      if (annots.isNull()) {
+        annots = doc.newArray()
+        pageObj.put('Annots', annots)
+      }
+      annots.push(widget)
+      if (kind === 'text' || kind === 'multiline' || kind === 'choice') {
+        const page = this.page(pageId)
+        page.getWidgets().find((x) => x.getObject().asIndirect() === widget.asIndirect())?.update()
+        page.destroy()
+      }
+    }, [pageId])
+    return { name, state: this.state() }
+  }
+
+  /** The field dictionary behind a widget: the widget itself, or its parent for radio buttons. */
+  private fieldOf(widget: mupdf.PDFObject) {
+    return widget.get('T').isString() || widget.get('Parent').isNull() ? widget : widget.get('Parent')
+  }
+
+  updateField(pageId: number, widgetId: number, props: FieldProps) {
+    this.op('Edit form field', () => {
+      const doc = this.d
+      const page = this.page(pageId)
+      const w = this.findWidget(page, widgetId)
+      const field = this.fieldOf(w.getObject())
+      const flags = field.get('Ff').isNumber() ? field.get('Ff').asNumber() : 0
+      const set = (bit: number, on: boolean | undefined) => (on === undefined ? flags : on ? flags | bit : flags & ~bit)
+      let ff = set(1, props.readOnly)
+      ff = props.required === undefined ? ff : props.required ? ff | 2 : ff & ~2
+      if (props.multiline !== undefined && field.get('FT').toString() === '/Tx') ff = props.multiline ? ff | 4096 : ff & ~4096
+      field.put('Ff', ff)
+      if (props.name && props.name !== w.getName()) field.put('T', doc.newString(this.uniqueName(props.name)))
+      if (props.tooltip !== undefined) field.put('TU', doc.newString(props.tooltip))
+      if (props.maxLen !== undefined) props.maxLen > 0 ? field.put('MaxLen', props.maxLen) : field.delete('MaxLen')
+      if (props.options && field.get('FT').toString() === '/Ch') {
+        const arr = doc.newArray()
+        props.options.forEach((o) => arr.push(doc.newString(o)))
+        field.put('Opt', arr)
+      }
+      if (!w.isCheckbox() && !w.isRadioButton()) w.update()
+      page.destroy()
+    }, 'all')
+    return this.state()
+  }
+
+  moveField(pageId: number, widgetId: number, rect: Rect) {
+    this.op('Move form field', () => {
+      const page = this.page(pageId)
+      const w = this.findWidget(page, widgetId)
+      w.setRect(rect)
+      if (w.isCheckbox() || w.isRadioButton()) {
+        // Redraw the on/off appearances at the new size, keeping the state names.
+        const obj = w.getObject()
+        const r = this.pdfRect(pageId, rect)
+        const ap = this.toggleAppearance(w.isCheckbox() ? 'checkbox' : 'radio', r[2] - r[0], r[3] - r[1])
+        const n = obj.get('AP', 'N')
+        n.forEach((_, k) => n.put(k, String(k) === 'Off' ? ap.off : ap.on))
+      } else {
+        w.update()
+      }
+      page.destroy()
+    }, [pageId])
+    return this.state()
+  }
+
+  deleteField(pageId: number, widgetId: number) {
+    this.op('Delete form field', () => {
+      const page = this.page(pageId)
+      const obj = this.findWidget(page, widgetId).getObject()
+      page.destroy()
+      const num = obj.asIndirect()
+      const without = (arr: mupdf.PDFObject, n: number) => {
+        for (let i = arr.length - 1; i >= 0; i--) if (arr.get(i).asIndirect() === n) arr.delete(i)
+      }
+      const annots = this.d.findPage(this.indexOf(pageId)).get('Annots')
+      if (annots.isArray()) without(annots, num)
+      const fields = this.d.getTrailer().get('Root', 'AcroForm', 'Fields')
+      const parent = obj.get('Parent')
+      if (parent.isIndirect() && !obj.get('T').isString()) {
+        without(parent.get('Kids'), num)
+        if (!parent.get('Kids').length && fields.isArray()) without(fields, parent.asIndirect())
+      } else if (fields.isArray()) {
+        without(fields, num)
+      }
+    }, [pageId])
+    return this.state()
+  }
+
+  /**
+   * Finds likely fields on flat forms: boxes, underlines and runs of underscores, named after the
+   * nearest label to their left or above. Returns how many fields were added.
+   */
+  detectFields(pageIds = this.pageIds()) {
+    let added = 0
+    for (const pageId of pageIds) {
+      const lines = this.textLines(pageId)
+      const page = this.page(pageId)
+      const existing = page.getWidgets().map((w) => w.getBounds() as Rect)
+      const st = page.toStructuredText('vectors,preserve-whitespace')
+      page.destroy()
+      const found: { kind: FieldKind; rect: Rect; label?: string }[] = []
+      const runs: { rect: Rect; label: string }[] = []
+      let run: Rect | null = null
+      let lineText = ''
+      let runLabel = ''
+      st.walk({
+        onVector(bbox, flags) {
+          const [x0, y0, x1, y1] = bbox as Rect
+          const [w, h] = [x1 - x0, y1 - y0]
+          if (!flags?.isRectangle && !flags?.isStroked) return
+          if (w >= 7 && w <= 24 && Math.abs(w - h) < 3) found.push({ kind: 'checkbox', rect: [x0, y0, x1, y1] })
+          else if (w >= 40 && h >= 10 && h <= 120) found.push({ kind: h > 40 ? 'multiline' : 'text', rect: [x0 + 1, y0 + 1, x1 - 1, y1 - 1] })
+          else if (w >= 40 && h <= 2.5) found.push({ kind: 'text', rect: [x0, y0 - 16, x1, y0] })
+        },
+        onChar(c, _origin, _font, size, quad) {
+          const q = quad as number[]
+          if (c === '_') {
+            if (run && Math.abs(q[0] - run[2]) < size) run = [run[0], Math.min(run[1], q[1]), q[2], Math.max(run[3], q[7])]
+            else {
+              if (run && run[2] - run[0] > size * 2) runs.push({ rect: run, label: runLabel })
+              run = [q[0], q[1], q[2], q[7]]
+              // Text earlier on the same line, such as "Phone", labels the blank.
+              runLabel = lineText
+            }
+          } else if (run) {
+            if (run[2] - run[0] > size * 2) runs.push({ rect: run, label: runLabel })
+            run = null
+          }
+          lineText += c
+        },
+        endLine() {
+          if (run && run[2] - run[0] > 12) runs.push({ rect: run, label: runLabel })
+          run = null
+          lineText = ''
+        },
+      })
+      for (const r of runs) found.push({ kind: 'text', rect: [r.rect[0], r.rect[3] - 16, r.rect[2], r.rect[3]], label: r.label })
+
+      const overlap = (a: Rect, b: Rect) => {
+        const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]))
+        const iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]))
+        return (ix * iy) / Math.max(1, Math.min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1])))
+      }
+      const hasText = (r: Rect) => lines.some((l) => !/^_+$/.test(l.text.trim()) && overlap(l.bbox, r) > 0.5)
+      const kept: typeof found = []
+      for (const f of found) {
+        // Underscore blanks are text themselves, so only shapes are checked for text inside.
+        if (existing.some((e) => overlap(e, f.rect) > 0.5) || kept.some((k) => overlap(k.rect, f.rect) > 0.5) || (f.label === undefined && hasText(f.rect))) continue
+        kept.push(f)
+      }
+      for (const f of kept) {
+        // Name the field after the closest label on its left (same row) or just above it.
+        const [x0, y0, , y1] = f.rect
+        const mid = (y0 + y1) / 2
+        const label = (f.label?.trim() ? { text: f.label } : null) ??
+          lines.filter((l) => l.bbox[2] <= x0 + 4 && l.bbox[1] <= mid + 4 && l.bbox[3] >= mid - 4).sort((a, b) => b.bbox[2] - a.bbox[2])[0] ??
+          lines.filter((l) => l.bbox[3] <= y0 + 2 && y0 - l.bbox[3] < 24 && l.bbox[0] < f.rect[2] && l.bbox[2] > x0).sort((a, b) => b.bbox[3] - a.bbox[3])[0]
+        const name = label?.text.replace(/_+/g, '').replace(/[:*]+\s*$/, '').trim().slice(0, 40) || undefined
+        this.addField(pageId, f.kind, f.rect, { name })
+        added++
+      }
+    }
+    return { count: added, state: this.state() }
+  }
+
   // ---- images and graphics ----
 
   /** The page's own content as one string, and a function to write a new version back. */
@@ -1517,7 +1823,7 @@ export class Engine {
     const bytes = signPdf(base, id, {
       page: req.pageId === null ? undefined : order.indexOf(req.pageId),
       rect: req.pageId === null ? undefined : req.rect,
-      reason: req.reason, location: req.location, image: req.image,
+      reason: req.reason, location: req.location, image: req.image, field: req.field,
     })
     const state = this.open(`${this.name}.pdf`, bytes.slice())
     return { bytes, state }

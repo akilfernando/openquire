@@ -329,6 +329,9 @@ main.desk {
 }
 .img-bar button { height: 28px; padding: 0 10px; background: none; box-shadow: none; color: var(--text-muted); }
 .img-bar button:hover { background: var(--hover) !important; color: var(--text-normal); }
+.field-box rect:first-of-type { fill: hsla(212, 90%, 55%, 0.08); stroke: hsl(212, 80%, 50%); stroke-width: 0.75; cursor: move; }
+.field-box.sel rect:first-of-type { stroke-width: 1.4; fill: hsla(212, 90%, 55%, 0.16); }
+.field-name { font: 600 6.5px var(--font-interface); fill: hsl(212, 80%, 40%); pointer-events: none; }
 .ghost { fill: hsla(var(--accent-h), 90%, 55%, 0.08); stroke: hsl(var(--accent-h), 90%, 48%); stroke-dasharray: 4 3; }
 
 .page-html { position: absolute; inset: 0; pointer-events: none; }
