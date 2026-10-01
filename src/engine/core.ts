@@ -23,6 +23,7 @@ import {
   type SignRequest,
   type SignatureInfo,
   type StampSpec,
+  type TextBlock,
   type TextLine,
   type WidgetInfo,
   type WidgetKind,
@@ -129,6 +130,56 @@ interface TextRun {
   /** Stretch or squeeze horizontally to this width. */
   width?: number
 }
+
+// ---- text helpers ------------------------------------------------------------
+
+/** Fonts loaded from documents for re-use in new text, by the name MuPDF's layout asks for. */
+const loadedFonts = new Map<string, mupdf.Font>()
+mupdf.installLoadFontFunction((name) => loadedFonts.get(name) ?? null)
+
+const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+
+function styleOf(font: mupdf.Font, size: number, color: mupdf.Color) {
+  const name = font.getName()
+  return {
+    font: name,
+    size,
+    bold: font.isBold() || /bold|black|heavy|semibold/i.test(name),
+    italic: font.isItalic() || /italic|oblique/i.test(name),
+    serif: font.isSerif() || /times|serif|georgia|garamond|cambria|minion|roman/i.test(name),
+    mono: font.isMono() || /courier|mono|consol/i.test(name),
+    color: (rgb(color as mupdf.AnnotColor) ?? [0, 0, 0]) as RGB,
+  }
+}
+
+/** Summarizes a run of lines as a paragraph: bounds, text, alignment and leading. */
+function toBlock(lines: TextLine[]): TextBlock {
+  const x0 = Math.min(...lines.map((l) => l.bbox[0]))
+  const x1 = Math.max(...lines.map((l) => l.bbox[2]))
+  const bbox: Rect = [x0, Math.min(...lines.map((l) => l.bbox[1])), x1, Math.max(...lines.map((l) => l.bbox[3]))]
+  const first = lines[0]
+  const gaps = lines.slice(1).map((l, i) => l.origin[1] - lines[i].origin[1]).sort((a, b) => a - b)
+  const leading = gaps.length ? gaps[Math.floor(gaps.length / 2)] : first.size * LINE_HEIGHT
+  let align: TextBlock['align'] = 'left'
+  if (lines.length > 1) {
+    const tol = first.size * 0.6
+    const lefts = lines.map((l) => l.bbox[0] - x0)
+    const rights = lines.map((l) => x1 - l.bbox[2])
+    const body = lines.slice(0, -1)
+    // Justified lines end within a point or two of each other; ragged text varies far more.
+    if (lefts.every((d) => d < tol) && body.every((l) => x1 - l.bbox[2] < 1.5) && lines.length > 2) align = 'justify'
+    else if (lefts.every((d) => d < tol)) align = 'left'
+    else if (rights.every((d) => d < tol)) align = 'right'
+    else if (lefts.every((d, i) => Math.abs(d - rights[i]) < tol)) align = 'center'
+  }
+  // Join wrapped lines with spaces, rejoining words hyphenated at a line end.
+  const text = lines
+    .map((l) => l.text.replace(/\s+$/, ''))
+    .reduce((acc, l) => (!acc ? l : /\w-$/.test(acc) ? acc.slice(0, -1) + l : `${acc} ${l}`), '')
+  return { bbox, lines, text, align, leading, ...pick(first, ['size', 'font', 'bold', 'italic', 'serif', 'mono', 'color']) }
+}
+
+const pick = <T, K extends keyof T>(o: T, keys: K[]) => Object.fromEntries(keys.map((k) => [k, o[k]])) as Pick<T, K>
 
 // ---- the engine --------------------------------------------------------------
 
@@ -790,9 +841,18 @@ export class Engine {
 
   /** Every horizontal text line on a page with its dominant style. */
   textLines(pageId: number): TextLine[] {
-    const lines: TextLine[] = []
+    return this.textBlocks(pageId).flatMap((b) => b.lines)
+  }
+
+  /** Paragraphs of horizontal text, with the alignment and line spacing of each. */
+  textBlocks(pageId: number): TextBlock[] {
+    const blocks: TextLine[][] = []
+    let block: TextLine[] = []
     let cur: TextLine | null = null
     this.structured(pageId).walk({
+      beginTextBlock() {
+        block = []
+      },
       beginLine(bbox, _wmode, dir) {
         cur = Math.abs(dir[1]) < 0.01 && dir[0] > 0
           ? { bbox: bbox as Rect, origin: [0, 0], text: '', font: '', size: 0, bold: false, italic: false, serif: false, mono: false, color: [0, 0, 0] }
@@ -800,55 +860,213 @@ export class Engine {
       },
       onChar(c, origin, font, size, _quad, color) {
         if (!cur) return
-        if (!cur.text) {
-          const name = font.getName()
-          cur.origin = origin as Point
-          cur.font = name
-          cur.size = size
-          cur.bold = font.isBold() || /bold|black|heavy|semibold/i.test(name)
-          cur.italic = font.isItalic() || /italic|oblique/i.test(name)
-          cur.serif = font.isSerif() || /times|serif|georgia|garamond|cambria|minion|roman/i.test(name)
-          cur.mono = font.isMono() || /courier|mono|consol/i.test(name)
-          cur.color = (rgb(color as mupdf.AnnotColor) ?? [0, 0, 0]) as RGB
-        }
+        if (!cur.text) Object.assign(cur, styleOf(font, size, color), { origin: origin as Point })
         cur.text += c
       },
       endLine() {
-        if (cur && cur.text.trim()) lines.push(cur)
+        if (cur && cur.text.trim()) block.push(cur)
         cur = null
       },
+      endTextBlock() {
+        if (block.length) blocks.push(block)
+      },
     })
-    return lines
+
+    // MuPDF sometimes groups unrelated lines into one block; split where the style or spacing breaks.
+    const paragraphs: TextLine[][] = []
+    for (const lines of blocks) {
+      let para: TextLine[] = []
+      for (const line of lines) {
+        const prev = para.at(-1)
+        const gap = prev ? line.origin[1] - prev.origin[1] : 0
+        const sameStyle = prev && Math.abs(prev.size - line.size) < 0.6 && prev.bold === line.bold && prev.font === line.font
+        if (prev && (!sameStyle || gap <= 0 || gap > prev.size * 1.75)) {
+          paragraphs.push(para)
+          para = []
+        }
+        para.push(line)
+      }
+      if (para.length) paragraphs.push(para)
+    }
+    return paragraphs.map(toBlock)
   }
 
   /**
-   * Replaces a line of existing page text: removes the original glyphs (keeping images and
-   * graphics underneath) and writes the new text in the closest standard font.
+   * Replaces a paragraph of existing page text. The original glyphs are removed (images and
+   * graphics underneath stay), and the new text is laid out to the paragraph's width with its
+   * alignment, spacing and color, reusing the original font when it covers every character.
    */
-  replaceText(pageId: number, line: TextLine, text: string, opts: { size?: number; color?: RGB; font?: BaseFont } = {}) {
+  replaceBlock(pageId: number, block: TextBlock, text: string) {
     this.op(
       'Edit text',
       () => {
+        // Find the original font first: removing the old text can drop it from the page resources.
+        const family = this.cssFamily(pageId, block, text)
         const page = this.page(pageId)
-        const [x0, y0, x1, y1] = line.bbox
-        const inset = (y1 - y0) * 0.2
-        const r = page.createAnnotation('Redact')
-        r.setRect([x0 - 0.5, y0 + inset, x1 + 0.5, y1 - inset])
-        r.applyRedaction(0, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE)
+        for (const line of block.lines) {
+          const [x0, y0, x1, y1] = line.bbox
+          const inset = (y1 - y0) * 0.2
+          const r = page.createAnnotation('Redact')
+          r.setRect([x0 - 0.5, y0 + inset, x1 + 0.5, y1 - inset])
+          r.applyRedaction(0, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE)
+        }
+        const [, , W] = page.getBounds()
         page.destroy()
-        if (text.trim())
-          this.appendText(pageId, [{
-            text, x: line.origin[0], y: line.origin[1], size: opts.size ?? line.size,
-            font: opts.font ?? baseFontFor(line), color: opts.color ?? line.color,
-          }])
+        if (!text.trim()) return
+        const [x0, , x1] = block.bbox
+        // A single line may grow to the page margin; paragraphs keep their width and reflow.
+        const width = block.lines.length > 1 ? x1 - x0 : Math.max(x1 - x0, W - x0 - 18)
+        const css = [
+          `font-family:${family.css}`, `font-size:${block.size}px`, `line-height:${(block.leading / block.size).toFixed(3)}`,
+          `color:${hexOf(block.color)}`, `text-align:${block.lines.length > 1 ? block.align : 'left'}`,
+          `font-weight:${block.bold && !family.original ? 'bold' : 'normal'}`, `font-style:${block.italic && !family.original ? 'italic' : 'normal'}`,
+          block.lines.length > 1 ? 'white-space:pre-wrap' : 'white-space:pre',
+        ].join(';')
+        this.placeHtml(pageId, `<p style="margin:0;${css}">${escapeHtml(text)}</p>`, width, { x: x0, baseline: block.lines[0].origin[1] })
       },
       [pageId],
     )
     return this.state()
   }
 
+  /** Replaces one line of text (a single-line paragraph). */
+  replaceText(pageId: number, line: TextLine, text: string) {
+    return this.replaceBlock(pageId, toBlock([line]), text)
+  }
+
+  /**
+   * The CSS font family for new text in a paragraph: the original embedded font if it has a
+   * glyph for every character, otherwise the closest generic family.
+   */
+  private cssFamily(pageId: number, block: TextBlock, text: string) {
+    const generic = block.mono ? 'monospace' : block.serif ? 'serif' : 'sans-serif'
+    const original = this.embeddedFont(pageId, block.font)
+    if (original && [...text].every((ch) => /\s/.test(ch) || original.font.encodeCharacter(ch.codePointAt(0)!) > 0))
+      return { css: `'${original.key}',${generic}`, original: true }
+    return { css: generic, original: false }
+  }
+
+  /** Loads the font file embedded for a font name used on a page, if there is one. */
+  private embeddedFont(pageId: number, name: string) {
+    const page = this.page(pageId)
+    const fonts = page.getObject().getInheritable('Resources').get('Font')
+    page.destroy()
+    if (!fonts.isDictionary()) return null
+    const wanted = name.replace(/^[A-Z]{6}\+/, '')
+    let found: { key: string; font: mupdf.Font } | null = null
+    fonts.forEach((ref) => {
+      if (found) return
+      const dict = ref.resolve()
+      const base = dict.get('BaseFont').isName() ? dict.get('BaseFont').asName().replace(/^[A-Z]{6}\+/, '') : ''
+      if (base !== wanted && !wanted.startsWith(base) && !base.startsWith(wanted)) return
+      const desc = dict.get('DescendantFonts').isArray() ? dict.get('DescendantFonts').get(0).resolve().get('FontDescriptor') : dict.get('FontDescriptor')
+      if (!desc.isDictionary()) return
+      const file = ['FontFile2', 'FontFile3', 'FontFile'].map((k) => desc.get(k)).find((f) => f.isStream())
+      if (!file) return
+      const key = `OQFont${ref.isIndirect() ? ref.asIndirect() : base}`
+      let font = loadedFonts.get(key)
+      if (!font) {
+        try {
+          // Keep the original name, so the new text names the same font in the PDF.
+          font = new mupdf.Font(base, file.readStream())
+        } catch {
+          return
+        }
+        loadedFonts.set(key, font)
+      }
+      found = { key, font }
+    })
+    return found as { key: string; font: mupdf.Font } | null
+  }
+
+  /**
+   * Lays out HTML with MuPDF's layout engine and draws the result into the page content, so the
+   * text is real, searchable PDF text with proper shaping, wrapping and font fallback.
+   * The first baseline lands on `baseline` (page space) at `x`.
+   */
+  private placeHtml(pageId: number, html: string, width: number, at: { x: number; baseline?: number; top?: number; angle?: number; opacity?: number }) {
+    const page0 = '<style>@page{margin:0}body{margin:0;padding:0}</style>'
+    const src = mupdf.Document.openDocument(new TextEncoder().encode(`<html><head>${page0}</head><body>${html}</body></html>`), 'text/html')
+    src.layout(width, 10_000, 12)
+    const laid = src.loadPage(0)
+    let firstBaseline = 0
+    let bottom = 0
+    laid.toStructuredText('').walk({
+      onChar(_c, origin) {
+        if (!firstBaseline) firstBaseline = origin[1]
+      },
+      beginLine(bbox) {
+        bottom = Math.max(bottom, bbox[3])
+      },
+    })
+    const height = Math.ceil(bottom + 2)
+    const buf = new mupdf.Buffer()
+    const writer = new mupdf.DocumentWriter(buf, 'pdf', '')
+    const dev = writer.beginPage([0, 0, width, height])
+    laid.run(dev, mupdf.Matrix.identity)
+    writer.endPage()
+    writer.close()
+    const frag = mupdf.Document.openDocument(buf.asUint8Array().slice(), 'application/pdf').asPDF() as mupdf.PDFDocument
+    const fp = frag.findPage(0)
+
+    const doc = this.d
+    const map = doc.newGraftMap()
+    const contents = fp.get('Contents')
+    const parts: string[] = []
+    if (contents.isArray()) contents.forEach((s) => parts.push(s.readStream().asString()))
+    else parts.push(contents.readStream().asString())
+    const xobject = doc.addStream(parts.join('\n'), {
+      Type: 'XObject', Subtype: 'Form', BBox: [0, 0, width, height], Resources: map.graftObject(fp.get('Resources')),
+    })
+    frag.destroy()
+    src.destroy()
+
+    const top = at.top ?? (at.baseline ?? 0) - firstBaseline
+    // Fragment PDF space (y up) -> fragment top-left space (y down) -> rotated about its origin -> page space.
+    let m = mupdf.Matrix.concat([1, 0, 0, -1, 0, height], mupdf.Matrix.rotate(-(at.angle ?? 0)))
+    m = mupdf.Matrix.concat(m, mupdf.Matrix.translate(at.x, top))
+    this.appendContent(pageId, (names) => {
+      const x = names.xobject(xobject)
+      const gs = at.opacity !== undefined && at.opacity < 1 ? `/${names.extGState(at.opacity)} gs ` : ''
+      return `q ${gs}${m.map((v) => +v.toFixed(5)).join(' ')} cm /${x} Do Q\n`
+    })
+  }
+
   /** Writes text into the page content stream (not as an annotation). */
   private appendText(pageId: number, runs: TextRun[]) {
+    this.appendContent(pageId, (names) => {
+      let ops = ''
+      for (const run of runs) {
+        const fname = names.font(run.font)
+        const gs = names.extGState(run.opacity ?? 1)
+        const t = ((run.angle ?? 0) * Math.PI) / 180
+        const [c, s] = [Math.cos(t), Math.sin(t)]
+        const lines = run.text.split('\n')
+        const natural = run.width ? this.textWidth(lines[0], run.size, run.font) : 0
+        const tz = natural > 0 ? ` ${((100 * run.width!) / natural).toFixed(2)} Tz` : ''
+        ops += `q /${gs} gs ${run.color.map((v) => v.toFixed(3)).join(' ')} rg BT /${fname} ${run.size.toFixed(2)} Tf${tz}${run.invisible ? ' 3 Tr' : ''}\n`
+        lines.forEach((line, i) => {
+          const down = i * run.size * LINE_HEIGHT
+          // Page space has y pointing down, so the text matrix flips y back up.
+          const x = run.x - s * down
+          const y = run.y + c * down
+          const hex = [...line].map((ch) => winAnsi(ch.codePointAt(0)!).toString(16).padStart(2, '0')).join('')
+          ops += `${c.toFixed(5)} ${(-s).toFixed(5)} ${(-s).toFixed(5)} ${(-c).toFixed(5)} ${x.toFixed(2)} ${y.toFixed(2)} Tm <${hex}> Tj\n`
+        })
+        ops += 'ET Q\n'
+      }
+      return ops
+    })
+  }
+
+  /**
+   * Appends drawing operators to a page, in page space (y down), wrapped so they can't affect
+   * or be affected by the existing content. `build` names the resources it uses.
+   */
+  private appendContent(
+    pageId: number,
+    build: (names: { font(f: BaseFont): string; extGState(alpha: number): string; xobject(ref: mupdf.PDFObject): string }) => string,
+  ) {
     const doc = this.d
     const page = this.page(pageId)
     const obj = page.getObject()
@@ -869,49 +1087,43 @@ export class Engine {
       }
       return d
     }
-    const fontDict = sub('Font')
-    const gsDict = sub('ExtGState')
     const fresh = (dict: mupdf.PDFObject, prefix: string) => {
       let n = 1
       while (!dict.get(`${prefix}${n}`).isNull()) n++
       return `${prefix}${n}`
     }
-
-    const names = new Map<string, string>()
+    const fonts = new Map<string, string>()
     const states = new Map<number, string>()
-    let ops = ''
-    const inv = mupdf.Matrix.invert(page.getTransform())
-    ops += `${inv.map((v) => +v.toFixed(5)).join(' ')} cm\n`
-    for (const run of runs) {
-      let fname = names.get(run.font)
-      if (!fname) {
-        fname = fresh(fontDict, 'OQF')
-        fontDict.put(fname, doc.addSimpleFont(this.font(run.font), 'Latin'))
-        names.set(run.font, fname)
-      }
-      const alpha = run.opacity ?? 1
-      let gs = states.get(alpha)
-      if (!gs) {
-        gs = fresh(gsDict, 'OQG')
-        gsDict.put(gs, doc.addObject({ Type: 'ExtGState', ca: alpha, CA: alpha }))
-        states.set(alpha, gs)
-      }
-      const t = ((run.angle ?? 0) * Math.PI) / 180
-      const [c, s] = [Math.cos(t), Math.sin(t)]
-      const lines = run.text.split('\n')
-      const natural = run.width ? this.textWidth(lines[0], run.size, run.font) : 0
-      const tz = natural > 0 ? ` ${((100 * run.width!) / natural).toFixed(2)} Tz` : ''
-      ops += `q /${gs} gs ${run.color.map((v) => v.toFixed(3)).join(' ')} rg BT /${fname} ${run.size.toFixed(2)} Tf${tz}${run.invisible ? ' 3 Tr' : ''}\n`
-      lines.forEach((line, i) => {
-        const down = i * run.size * LINE_HEIGHT
-        // Page space has y pointing down, so the text matrix flips y back up.
-        const x = run.x - s * down
-        const y = run.y + c * down
-        const hex = [...line].map((ch) => winAnsi(ch.codePointAt(0)!).toString(16).padStart(2, '0')).join('')
-        ops += `${c.toFixed(5)} ${(-s).toFixed(5)} ${(-s).toFixed(5)} ${(-c).toFixed(5)} ${x.toFixed(2)} ${y.toFixed(2)} Tm <${hex}> Tj\n`
-      })
-      ops += 'ET Q\n'
+    const names = {
+      font: (f: BaseFont) => {
+        let n = fonts.get(f)
+        if (!n) {
+          const dict = sub('Font')
+          n = fresh(dict, 'OQF')
+          dict.put(n, doc.addSimpleFont(this.font(f), 'Latin'))
+          fonts.set(f, n)
+        }
+        return n
+      },
+      extGState: (alpha: number) => {
+        let n = states.get(alpha)
+        if (!n) {
+          const dict = sub('ExtGState')
+          n = fresh(dict, 'OQG')
+          dict.put(n, doc.addObject({ Type: 'ExtGState', ca: alpha, CA: alpha }))
+          states.set(alpha, n)
+        }
+        return n
+      },
+      xobject: (ref: mupdf.PDFObject) => {
+        const dict = sub('XObject')
+        const n = fresh(dict, 'OQX')
+        dict.put(n, ref)
+        return n
+      },
     }
+    const inv = mupdf.Matrix.invert(page.getTransform())
+    const ops = `${inv.map((v) => +v.toFixed(5)).join(' ')} cm\n${build(names)}`
 
     const contents = doc.newArray()
     contents.push(doc.addStream('q\n', {}))

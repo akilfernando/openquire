@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { engine, requestRender } from '../engine/client'
-import { rgbOf, type AnnotInfo, type AnnotSpec, type PageInfo, type Point, type Quad, type Rect, type TextLine, type WidgetInfo } from '../engine/types'
+import { rgbOf, type AnnotInfo, type AnnotSpec, type PageInfo, type Point, type Quad, type Rect, type TextBlock, type WidgetInfo, hexOf } from '../engine/types'
 import { isResizable, normRect, quadPoints } from '../util'
 import { m } from '../i18n'
 
@@ -18,7 +18,7 @@ export interface PageActions {
   selectAnnot: (pageId: number, id: number | null) => void
   openComment: (id: number) => void
   setField: (pageId: number, w: WidgetInfo, value: string | boolean) => void
-  replaceText: (pageId: number, line: TextLine, text: string) => void
+  replaceBlock: (pageId: number, block: TextBlock, text: string) => void
   crop: (pageId: number, r: Rect) => void
   setSelection: (sel: { pageId: number; quads: Quad[]; text: string } | null) => void
   toolDone: () => void
@@ -52,8 +52,8 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
   const [visible, setVisible] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const drag = useRef<{ start: Point; mode: 'draw' | 'move' | 'resize' | 'select'; annot?: AnnotInfo } | null>(null)
-  const [lines, setLines] = useState<TextLine[] | null>(null)
-  const [editLine, setEditLine] = useState<{ line: TextLine; value: string } | null>(null)
+  const [blocks, setBlocks] = useState<TextBlock[] | null>(null)
+  const [editLine, setEditLine] = useState<{ block: TextBlock; value: string } | null>(null)
   const selecting = useRef<{ busy: boolean; next: [Point, Point] | null }>({ busy: false, next: null })
 
   useEffect(() => {
@@ -77,9 +77,9 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
   }, [visible, zoom, page.id, page.rev])
 
   useEffect(() => {
-    if (tool !== 'edittext' || !visible) return setLines(null)
+    if (tool !== 'edittext' || !visible) return setBlocks(null)
     let live = true
-    void engine.textLines(page.id).then((l) => live && setLines(l))
+    void engine.textBlocks(page.id).then((b) => live && setBlocks(b))
     return () => {
       live = false
     }
@@ -138,8 +138,8 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
       actions.toolDone()
       return
     } else if (tool === 'edittext') {
-      const line = lines?.find((l) => p[0] >= l.bbox[0] && p[0] <= l.bbox[2] && p[1] >= l.bbox[1] && p[1] <= l.bbox[3])
-      if (line) setEditLine({ line, value: line.text })
+      const block = blocks?.find((b) => p[0] >= b.bbox[0] && p[0] <= b.bbox[2] && p[1] >= b.bbox[1] && p[1] <= b.bbox[3])
+      if (block) setEditLine({ block, value: block.text })
       return
     } else {
       drag.current = { start: p, mode: MARKUP[tool] ? 'select' : 'draw' }
@@ -221,7 +221,7 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
   }
 
   const commitLine = () => {
-    if (editLine && editLine.value !== editLine.line.text) actions.replaceText(page.id, editLine.line, editLine.value)
+    if (editLine && editLine.value !== editLine.block.text) actions.replaceBlock(page.id, editLine.block, editLine.value)
     setEditLine(null)
   }
 
@@ -247,7 +247,7 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
           </g>
         ))}
         {selection?.map((q, i) => <polygon key={i} className="text-sel" points={quadPoints(q)} />)}
-        {lines?.map((l, i) => (
+        {blocks?.map((l, i) => (
           <rect key={i} className="text-line" x={l.bbox[0]} y={l.bbox[1]} width={l.bbox[2] - l.bbox[0]} height={l.bbox[3] - l.bbox[1]} />
         ))}
         {shown.map((a) => {
@@ -290,26 +290,66 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
       </div>
 
       {editLine && (
-        <input
-          className="line-edit" autoFocus value={editLine.value}
-          style={{
-            left: editLine.line.bbox[0] * zoom - 2,
-            top: editLine.line.bbox[1] * zoom - 2,
-            minWidth: (editLine.line.bbox[2] - editLine.line.bbox[0]) * zoom + 24,
-            fontSize: editLine.line.size * zoom,
-            fontFamily: editLine.line.mono ? 'Courier New, monospace' : editLine.line.serif ? 'Times New Roman, serif' : 'Helvetica, Arial, sans-serif',
-            fontWeight: editLine.line.bold ? 700 : 400,
-            fontStyle: editLine.line.italic ? 'italic' : 'normal',
-          }}
-          onChange={(e) => setEditLine({ ...editLine, value: e.target.value })}
-          onBlur={commitLine}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commitLine()
-            if (e.key === 'Escape') setEditLine(null)
-          }}
+        <BlockEditor
+          block={editLine.block} zoom={zoom} value={editLine.value}
+          onChange={(value) => setEditLine({ ...editLine, value })}
+          onCommit={commitLine} onCancel={() => setEditLine(null)}
         />
       )}
     </div>
+  )
+}
+
+/**
+ * Edits a paragraph in place: a text box over the original with the same width, size, spacing,
+ * alignment and style, growing as the text grows. Enter commits a one-line paragraph;
+ * longer paragraphs take Ctrl+Enter, so Enter can start a new line.
+ */
+function BlockEditor({ block, zoom, value, onChange, onCommit, onCancel }: {
+  block: TextBlock; zoom: number; value: string; onChange: (v: string) => void; onCommit: () => void; onCancel: () => void
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const single = block.lines.length === 1
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [value, zoom])
+  useEffect(() => {
+    ref.current?.focus()
+    ref.current?.select()
+  }, [])
+  const [x0, y0, x1] = block.bbox
+  return (
+    <textarea
+      ref={ref} className="line-edit" value={value} rows={1} spellCheck
+      aria-label={m.tools.edittext.name}
+      style={{
+        left: x0 * zoom - 3,
+        top: y0 * zoom - 3,
+        width: single ? undefined : (x1 - x0) * zoom + 6,
+        minWidth: (x1 - x0) * zoom + 24,
+        fontSize: block.size * zoom,
+        lineHeight: block.lines.length > 1 ? `${block.leading * zoom}px` : 1.2,
+        textAlign: single ? 'left' : block.align,
+        color: hexOf(block.color),
+        fontFamily: block.mono ? 'Courier New, monospace' : block.serif ? 'Times New Roman, serif' : 'Helvetica, Arial, sans-serif',
+        fontWeight: block.bold ? 700 : 400,
+        fontStyle: block.italic ? 'italic' : 'normal',
+        whiteSpace: single ? 'pre' : 'pre-wrap',
+      }}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={onCommit}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Escape') onCancel()
+        if (e.key === 'Enter' && (single || e.ctrlKey || e.metaKey)) {
+          e.preventDefault()
+          onCommit()
+        }
+      }}
+    />
   )
 }
 

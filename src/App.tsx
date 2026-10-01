@@ -373,7 +373,7 @@ export default function App() {
         setCommentFocus(id)
       },
       setField: (pageId, w, value) => void run(m.busy.fillingForm, async () => apply(await engine.setField(pageId, w.id, value))),
-      replaceText: (pageId, line, text) => void run(m.busy.editingText, async () => apply(await engine.replaceText(pageId, line, text))),
+      replaceBlock: (pageId, block, text) => void run(m.busy.editingText, async () => apply(await engine.replaceBlock(pageId, block, text))),
       crop: (pageId, rect) =>
         void run(m.busy.cropping, async () => {
           const ids = selected.has(pageId) ? [...selected] : [pageId]

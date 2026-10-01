@@ -149,6 +149,24 @@ export interface TextLine {
   color: RGB
 }
 
+/** A paragraph of page text: consecutive lines from one text block. */
+export interface TextBlock {
+  bbox: Rect
+  lines: TextLine[]
+  /** The paragraph's text, with its lines joined by spaces (or newlines for short lines). */
+  text: string
+  align: 'left' | 'center' | 'right' | 'justify'
+  /** Distance between baselines, in points. */
+  leading: number
+  size: number
+  font: string
+  bold: boolean
+  italic: boolean
+  serif: boolean
+  mono: boolean
+  color: RGB
+}
+
 export interface SearchHit {
   pageId: number
   pageIndex: number
