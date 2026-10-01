@@ -5,6 +5,7 @@ import { m } from '../i18n'
 import { OCR_LANGUAGES } from '../ocr-languages'
 import { isDesktop, nativeTools, type NativeTools } from '../native'
 import HotkeySettings from './HotkeySettings'
+import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
 import { DEFAULT_BASE_URL, DEFAULT_MODELS, type AiProvider } from '../ai'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
@@ -27,6 +28,10 @@ export interface Settings {
   nativeTools: boolean
   /** Shortcut changes by command id, on top of the defaults. */
   hotkeys: Record<string, string[]>
+  /** Imported themes, the one in use ('' for the built-in look), and CSS snippets. */
+  themes: UserCss[]
+  activeTheme: string
+  snippets: Snippet[]
   /** The optional AI assistant: off unless turned on. */
   aiEnabled: boolean
   aiProvider: AiProvider
@@ -117,6 +122,7 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                   ))}
                 </div>
               </Item>
+              <StyleSettings themes={settings.themes} activeTheme={settings.activeTheme} snippets={settings.snippets} onChange={set} />
             </>
           )}
           {tab === 'comments' && (

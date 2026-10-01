@@ -616,3 +616,23 @@ test('rebinds a command shortcut and keeps it', async ({ page }) => {
   await page.keyboard.press('Control+Z')
   await expect(page.locator('.status-bar')).not.toContainText('Error')
 })
+
+test('a CSS snippet restyles the dock and persists', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByRole('button', { name: 'New', exact: true }).click()
+  await page.getByRole('textbox', { name: 'CSS for Snippet 1' }).fill('.dock { background: rgb(10, 120, 60) !important; border-radius: 2px; }')
+  const axe = await new AxeBuilder({ page }).include('.modal').withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([])
+  await page.keyboard.press('Escape')
+  const bg = () => page.locator('.dock').evaluate((el) => getComputedStyle(el).backgroundColor)
+  await expect.poll(bg).toBe('rgb(10, 120, 60)')
+
+  await page.reload()
+  await openReport(page)
+  await expect.poll(bg).toBe('rgb(10, 120, 60)')
+  // Turning the snippet off restores the dock.
+  await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByRole('checkbox', { name: 'Use Snippet 1' }).uncheck()
+  await expect.poll(bg).not.toBe('rgb(10, 120, 60)')
+})

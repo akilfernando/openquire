@@ -59,7 +59,7 @@ const STAMP_PRESETS: [string, Omit<StampSpec, 'pageIds'>][] = [
 const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
   const fallback: Settings = {
-    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true, hotkeys: {},
+    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true, hotkeys: {}, themes: [], activeTheme: '', snippets: [],
     aiEnabled: false, aiProvider: 'anthropic', aiKey: '', aiModel: '', aiBaseUrl: '', aiProfile: '',
   }
   try {
@@ -428,6 +428,24 @@ export default function App() {
       setStatus(m.workflows.batchDone(r.done, r.failed.length, file))
     })
   }
+
+  // ---- themes and snippets -----------------------------------------------------------------
+
+  // User CSS goes last in the document, so it overrides the app's own styles.
+  useEffect(() => {
+    const put = (id: string, css: string) => {
+      let el = document.getElementById(id) as HTMLStyleElement | null
+      if (!css) return el?.remove()
+      if (!el) {
+        el = document.createElement('style')
+        el.id = id
+      }
+      document.head.appendChild(el)
+      if (el.textContent !== css) el.textContent = css
+    }
+    put('oq-theme', settings.themes.find((t) => t.name === settings.activeTheme)?.css ?? '')
+    put('oq-snippets', settings.snippets.filter((s) => s.enabled && s.css.trim()).map((s) => `/* ${s.name.replace(/\*\//g, '')} */\n${s.css}`).join('\n\n'))
+  }, [settings.themes, settings.activeTheme, settings.snippets])
 
   // ---- AI assistant --------------------------------------------------------------------------
 

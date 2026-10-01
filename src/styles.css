@@ -216,6 +216,14 @@ kbd {
 .tree-item.problem > svg { flex: none; margin-top: 2px; }
 .tree-item .label.wrap { white-space: normal; }
 
+/* Themes and snippets settings */
+.setting-control .file-button .button-like, .setting-control button { display: inline-flex; align-items: center; gap: 6px; }
+.snippet-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.snippet { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-m); }
+.snippet-head { display: flex; align-items: center; gap: 6px; }
+.snippet-name { flex: 1; min-width: 0; }
+.snippet-css { width: 100%; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--font-smaller); resize: vertical; }
+
 /* Hotkeys settings */
 .hotkey-filter { width: 100%; margin-bottom: 8px; }
 .hotkey-list { list-style: none; margin: 0; padding: 0; }
