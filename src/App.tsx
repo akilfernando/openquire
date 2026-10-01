@@ -16,6 +16,7 @@ import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
 import { EngineError, engine } from './engine/client'
 import { parseRanges } from './engine/ranges'
 import { rgbOf, type DocState, type Quad, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
+import { arrowNavigate } from './focus'
 import { download, imageToPng, kb } from './util'
 
 type Icon = ComponentType<LucideProps>
@@ -75,6 +76,8 @@ export default function App() {
   const docRef = useRef(doc)
   docRef.current = doc
   const [zoom, setZoom] = useState(1.25)
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
   const [tool, setTool] = useState<Tool>('select')
   const [colors, setColors] = useState({ markup: '#ffd400', draw: '#e11d48', text: '#111111' })
   const [strokeWidth, setStrokeWidth] = useState(2)
@@ -84,8 +87,11 @@ export default function App() {
   const [editingAnnot, setEditingAnnot] = useState<number | null>(null)
   const [textSel, setTextSel] = useState<{ pageId: number; quads: Quad[]; text: string } | null>(null)
   const [tab, setTab] = useState<SideTab>('pages')
-  const [leftOpen, setLeftOpen] = useState(true)
-  const [rightOpen, setRightOpen] = useState(true)
+  // On narrow screens the sidebars are drawers that start closed.
+  const narrowQuery = useMemo(() => matchMedia('(max-width: 900px)'), [])
+  const [narrow, setNarrow] = useState(narrowQuery.matches)
+  const [leftOpen, setLeftOpen] = useState(!narrowQuery.matches)
+  const [rightOpen, setRightOpen] = useState(!narrowQuery.matches)
   const [commentFocus, setCommentFocus] = useState<number | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [status, setStatus] = useState('')
@@ -128,6 +134,56 @@ export default function App() {
   }, [])
   const dark = settings.theme === 'system' ? systemDark : settings.theme === 'dark'
   useEffect(() => void engine.setAuthor(settings.author), [settings.author])
+
+  useEffect(() => {
+    const on = () => {
+      setNarrow(narrowQuery.matches)
+      setLeftOpen(!narrowQuery.matches)
+      setRightOpen(!narrowQuery.matches)
+    }
+    narrowQuery.addEventListener('change', on)
+    return () => narrowQuery.removeEventListener('change', on)
+  }, [narrowQuery])
+
+  // Pinch to zoom: two-finger touch gestures, and Ctrl+wheel (what trackpad pinches send).
+  const hasDoc = !!doc
+  useEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+    let pinch: { dist: number; zoom: number } | null = null
+    let frame = 0
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const setSoon = (z: number) => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => setZoom(Math.min(5, Math.max(0.25, +z.toFixed(2)))))
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      setZoom((z) => Math.min(5, Math.max(0.25, +(z * Math.exp(-e.deltaY * 0.01)).toFixed(2))))
+    }
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinch = { dist: dist(e.touches), zoom: zoomRef.current }
+    }
+    const onMove = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return
+      e.preventDefault()
+      setSoon((pinch.zoom * dist(e.touches)) / pinch.dist)
+    }
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null
+    }
+    main.addEventListener('wheel', onWheel, { passive: false })
+    main.addEventListener('touchstart', onStart, { passive: true })
+    main.addEventListener('touchmove', onMove, { passive: false })
+    main.addEventListener('touchend', onEnd)
+    return () => {
+      main.removeEventListener('wheel', onWheel)
+      main.removeEventListener('touchstart', onStart)
+      main.removeEventListener('touchmove', onMove)
+      main.removeEventListener('touchend', onEnd)
+    }
+  }, [hasDoc])
 
   // Files opened from the operating system when OpenQuire is installed as an app.
   useEffect(() => {
@@ -714,13 +770,13 @@ export default function App() {
                 </div>
               )}
 
-              <div className="dock" role="toolbar" aria-label="Tools">
+              <div className="dock" role="toolbar" aria-label="Tools" onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
                 {TOOLS.map((g, gi) => (
                   <span key={gi} style={{ display: 'contents' }}>
                     {gi > 0 && <span className="divider" />}
                     {g.map((t) => (
                       <button
-                        key={t.id} className={`clickable-icon${tool === t.id ? ' is-active' : ''}`}
+                        key={t.id} type="button" aria-pressed={tool === t.id} className={`clickable-icon${tool === t.id ? ' is-active' : ''}`}
                         aria-label={t.name} title={`${t.name}: ${t.hint}`} onClick={() => setTool(t.id)}
                       >
                         <t.Icon size={18} />
@@ -763,6 +819,7 @@ export default function App() {
       </div>
 
       {doc && rightOpen && <ToolsPanel doc={doc} selectedCount={selected.size} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} />}
+      {doc && narrow && (leftOpen || rightOpen) && <div className="drawer-scrim" onClick={() => { setLeftOpen(false); setRightOpen(false) }} />}
 
       <div className="status-bar">
         {busy && <span className="status-item"><Loader2 size={13} className="spin" />{busy}</span>}

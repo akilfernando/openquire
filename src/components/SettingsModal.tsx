@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
+import { useFocusTrap } from '../focus'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -40,13 +41,15 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
 
 export default function SettingsModal({ settings, onChange, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('appearance')
+  const ref = useRef<HTMLDivElement>(null)
+  useFocusTrap(ref)
   const set = (p: Partial<Settings>) => onChange({ ...settings, ...p })
   const tabs: [Tab, string][] = [['appearance', 'Appearance'], ['comments', 'Comments'], ['about', 'About']]
 
   return (
     <div className="modal-container" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <div className="modal-bg" onPointerDown={onClose} />
-      <div className="modal settings" role="dialog" aria-label="Settings">
+      <div ref={ref} className="modal settings" role="dialog" aria-modal="true" aria-label="Settings">
         <button className="clickable-icon modal-close" aria-label="Close" onClick={onClose}><X size={18} /></button>
         <nav className="settings-nav">
           <div className="pane-heading">Options</div>

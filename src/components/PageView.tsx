@@ -110,6 +110,8 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
 
   const onDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
+    // In Select mode a finger scrolls the page, unless it lands on an annotation.
+    if (e.pointerType === 'touch' && tool === 'select' && !(e.target as Element).closest('[data-annot]')) return
     // Keep focus where it is, so editors opened by this click aren't immediately blurred.
     e.preventDefault()
     ;(document.activeElement as HTMLElement | null)?.blur()

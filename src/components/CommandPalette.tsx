@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
+import { useFocusTrap } from '../focus'
 import { ArrowDown, ArrowUp, CornerDownLeft, type LucideProps } from 'lucide-react'
 
 export interface Command {
@@ -39,6 +40,8 @@ export default function CommandPalette({ commands, onClose }: { commands: Comman
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
   const list = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLDivElement>(null)
+  useFocusTrap(box)
 
   const results = useMemo(
     () =>
@@ -63,7 +66,7 @@ export default function CommandPalette({ commands, onClose }: { commands: Comman
   return (
     <div className="modal-container prompt-container">
       <div className="modal-bg" onPointerDown={onClose} />
-      <div className="prompt" role="dialog" aria-label="Command palette">
+      <div ref={box} className="prompt" role="dialog" aria-modal="true" aria-label="Command palette">
         <input
           className="prompt-input" autoFocus placeholder="Type a command..." value={query}
           onChange={(e) => setQuery(e.target.value)}

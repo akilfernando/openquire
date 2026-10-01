@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
+import { arrowNavigate } from '../focus'
 import { ANNOT_LABELS, kb } from '../util'
 
 export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures'
@@ -83,11 +84,39 @@ function Pages({ doc, selected, actions }: Pick<Props, 'doc' | 'selected' | 'act
     e.preventDefault()
     setOver(key)
   }
+  // Keyboard: arrows move between pages, Ctrl+arrows move the focused page, Space or Enter selects.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>('.thumb')]
+    const i = items.indexOf(document.activeElement as HTMLElement)
+    if (i < 0) return
+    const id = doc.pages[i].id
+    const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+    if (step && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      const target = i + step
+      if (target < 0 || target >= doc.pages.length) return
+      actions.movePages([id], step > 0 ? (doc.pages[target + 1]?.id ?? null) : doc.pages[target].id)
+      requestAnimationFrame(() => (e.currentTarget?.querySelectorAll<HTMLElement>('.thumb')[target] ?? items[target])?.focus())
+    } else if (step) {
+      e.preventDefault()
+      const to = items[Math.min(items.length - 1, Math.max(0, i + step))]
+      to.focus()
+      to.scrollIntoView({ block: 'nearest' })
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault()
+      items[e.key === 'Home' ? 0 : items.length - 1].focus()
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      actions.selectPage(id, e as unknown as React.MouseEvent)
+    }
+  }
+
   return (
-    <div className="thumbs">
-      {doc.pages.map((p) => (
+    <div className="thumbs" role="listbox" aria-label="Pages" aria-multiselectable="true" onKeyDown={onKeyDown}>
+      {doc.pages.map((p, i) => (
         <div
-          key={p.id} draggable
+          key={p.id} draggable role="option" tabIndex={0} aria-selected={selected.has(p.id)}
+          aria-label={`Page ${p.label}${i === 0 ? '. Use arrow keys to move between pages and Ctrl with arrow keys to reorder' : ''}`}
           className={`thumb${selected.has(p.id) ? ' selected' : ''}${over === p.id ? ' over' : ''}`}
           onClick={(e) => actions.selectPage(p.id, e)}
           onDragStart={(e) => {
@@ -281,9 +310,12 @@ export default function Sidebar(props: Props) {
   const current = tabs.find((t) => t.id === tab)!
   return (
     <aside className="sidebar left">
-      <div className="sidebar-header">
+      <div className="sidebar-header" role="tablist" aria-label="Sidebar" onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
         {tabs.map(({ id, label, Icon, count }) => (
-          <button key={id} className={`clickable-icon${tab === id ? ' is-active' : ''}`} aria-label={label} title={label} onClick={() => onTab(id)}>
+          <button
+            key={id} role="tab" aria-selected={tab === id} className={`clickable-icon${tab === id ? ' is-active' : ''}`}
+            aria-label={count ? `${label}, ${count}` : label} title={label} onClick={() => onTab(id)}
+          >
             <Icon size={18} />
             {!!count && tab !== id && <span className="badge tnum">{count > 99 ? '99+' : count}</span>}
           </button>

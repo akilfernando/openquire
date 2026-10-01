@@ -177,6 +177,7 @@ kbd {
 .thumbs { flex: 1; overflow-y: auto; padding: 12px 10px 60px; display: grid; grid-template-columns: 1fr; gap: 6px; }
 .thumb { border-radius: var(--radius-m); padding: 8px 6px 4px; cursor: pointer; text-align: center; color: var(--text-faint); font-size: 11px; }
 .thumb:hover { background: var(--hover); }
+.thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .thumb.selected { background: var(--accent-soft); color: var(--accent); }
 .thumb.selected canvas { outline: 2px solid var(--accent); outline-offset: 2px; }
 .thumb.over, .thumb-end.over { box-shadow: 0 -2px 0 var(--accent); }
@@ -296,6 +297,8 @@ main.desk {
 .page-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 2px; }
 .overlay { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: text; }
 .overlay:not(.tool-select) { cursor: crosshair; }
+/* Fingers scroll in Select mode; drawing tools take the gesture. Pinch is handled by the app. */
+.overlay.tool-select { touch-action: pan-x pan-y; }
 .overlay.tool-edittext { cursor: text; }
 .overlay:not(.tool-select) .annot { pointer-events: none; }
 .annot-hit { fill: transparent; cursor: move; }
@@ -444,3 +447,24 @@ main.desk {
 a { color: var(--accent); }
 
 .busy { position: fixed; inset: 0; cursor: progress; z-index: 20; }
+
+/* ---- narrow screens: sidebars become drawers over the document ------------------------ */
+
+.app { position: relative; }
+.drawer-scrim { display: none; }
+@media (max-width: 900px) {
+  .sidebar { position: absolute; top: 0; bottom: 0; z-index: 9; box-shadow: var(--shadow); max-width: calc(100vw - var(--ribbon-width) - 24px); }
+  .sidebar.left { left: var(--ribbon-width); }
+  .sidebar.right { right: 0; }
+  .drawer-scrim { display: block; position: absolute; inset: 0 0 0 var(--ribbon-width); z-index: 8; background: rgba(0, 0, 0, 0.35); }
+  .view-title { display: none; }
+  .view-header { justify-content: space-between; }
+  main.desk { padding: 16px 12px 120px; }
+  .find-bar input { width: 120px; }
+}
+@media (max-width: 560px) {
+  .ribbon { display: none; }
+  .sidebar.left { left: 0; }
+  .drawer-scrim { left: 0; }
+  .view-actions .zoom-label { display: none; }
+}

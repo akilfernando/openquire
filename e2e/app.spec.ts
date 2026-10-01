@@ -44,7 +44,7 @@ test('highlights text as a real annotation', async ({ page }) => {
   await page.mouse.down()
   await page.mouse.move(b.x, b.y, { steps: 8 })
   await page.mouse.up()
-  await expect(page.getByRole('button', { name: 'Comments' }).locator('.badge')).toHaveText('1')
+  await expect(page.getByRole('tab', { name: 'Comments, 1' })).toBeVisible()
   const doc = mupdf.Document.openDocument(await save(page), 'application/pdf').asPDF() as mupdf.PDFDocument
   expect(doc.loadPage(0).getAnnotations().map((x) => x.getType())).toContain('Highlight')
 })
@@ -144,4 +144,36 @@ test.describe('accessibility', () => {
       })
     }
   }
+})
+
+test.describe('tablet', () => {
+  test.use({ viewport: { width: 768, height: 1024 }, hasTouch: true })
+
+  test('uses drawers and supports keyboard page navigation', async ({ page }) => {
+    await openReport(page)
+    // Sidebars start closed on a narrow screen and open as drawers.
+    await expect(page.locator('.sidebar')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Toggle left sidebar' }).click()
+    await expect(page.locator('.sidebar.left')).toBeVisible()
+    await page.locator('.drawer-scrim').click({ position: { x: 700, y: 500 } })
+    await expect(page.locator('.sidebar')).toHaveCount(0)
+
+    // Ctrl+wheel zooms, as a trackpad pinch does.
+    const before = await page.locator('.zoom-label').textContent()
+    await page.locator('main.desk').hover()
+    await page.keyboard.down('Control')
+    await page.mouse.wheel(0, -200)
+    await page.keyboard.up('Control')
+    await expect(page.locator('.zoom-label')).not.toHaveText(before!)
+  })
+})
+
+test('reorders pages from the keyboard', async ({ page }) => {
+  await openReport(page)
+  const first = page.getByRole('option').first()
+  await first.focus()
+  await page.keyboard.press('Control+ArrowDown')
+  // The form page (originally second) is now first, and focus followed the moved page.
+  await expect(page.getByRole('option').nth(1)).toBeFocused()
+  await expect(page.locator('.page').first().locator('.widget')).toHaveCount(3)
 })
