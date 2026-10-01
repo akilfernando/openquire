@@ -1,23 +1,19 @@
 {
   "name": "openquire",
   "version": "0.1.0",
-  "description": "Open source, local-first PDF suite: view, organize, annotate, sign, fill, redact, compress and convert PDFs in the browser.",
-  "license": "MIT",
+  "description": "Open source, local-first PDF suite: edit text, annotate, sign, redact, fill forms, organize, compress, protect and convert PDFs in the browser.",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "type": "module",
   "scripts": {
-    "assets": "node scripts/copy-pdfjs-assets.mjs",
-    "predev": "npm run assets",
     "dev": "vite",
-    "prebuild": "npm run assets",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run"
   },
   "dependencies": {
     "fflate": "^0.8.2",
-    "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "4.10.38",
+    "mupdf": "^1.28.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -25,6 +21,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "pdf-lib": "^1.17.1",
     "typescript": "~5.6.3",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"
