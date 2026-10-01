@@ -36,6 +36,9 @@ describe('workflows', () => {
   it('round-trips through JSON and rejects bad files', () => {
     const wf = newWorkflow('Prepare for production', STEPS)
     expect(parseWorkflow(JSON.stringify(wf))).toEqual(wf)
+    const withPlugin = newWorkflow('Export', [{ action: 'plugin', plugin: 'dev.openquire.csv-export', command: 'export', name: 'CSV export: Export text to CSV' }])
+    expect(parseWorkflow(JSON.stringify(withPlugin))).toEqual(withPlugin)
+    expect(() => parseWorkflow(JSON.stringify({ ...wf, steps: [{ action: 'plugin', plugin: 'x' }] }))).toThrow(/plugin and its command/)
     expect(() => parseWorkflow('{')).toThrow(/not valid JSON/)
     expect(() => parseWorkflow(JSON.stringify({ ...wf, version: 2 }))).toThrow(/newer version/)
     expect(() => parseWorkflow(JSON.stringify({ ...wf, steps: [{ action: 'format-disk' }] }))).toThrow(/Step 1 has an unknown action/)

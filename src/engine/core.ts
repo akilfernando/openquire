@@ -1495,6 +1495,8 @@ export class Engine {
         break
       case 'ocr':
         throw new Error('OCR steps run in the app')
+      case 'plugin':
+        throw new Error(`This workflow uses the plugin ${step.plugin}, which only runs in the OpenQuire app.`)
       case 'save':
         return { state: this.state(), bytes: this.save(step.options), bates }
       case 'pdfa': {

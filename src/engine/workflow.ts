@@ -23,6 +23,8 @@ export type WorkflowStep =
   | { action: 'tag'; lang: string }
   /** Recognizes text on pages that have none. Runs in the app, where the OCR engine lives. */
   | { action: 'ocr'; lang?: string; straighten?: boolean }
+  /** A command from a plugin, which must be installed in the app that runs the workflow. */
+  | { action: 'plugin'; plugin: string; command: string; name?: string }
   /** Output steps: only the last step may be one of these. */
   | { action: 'save'; options: SaveOptions }
   | { action: 'pdfa'; part: 2 | 3 }
@@ -37,7 +39,7 @@ export interface Workflow {
 }
 
 export const OUTPUT_ACTIONS: StepAction[] = ['save', 'pdfa']
-const ACTIONS: StepAction[] = ['rotate', 'deletePages', 'stamp', 'markTerms', 'markPatterns', 'applyRedactions', 'flatten', 'sanitize', 'setMeta', 'detectFields', 'tag', 'ocr', 'save', 'pdfa']
+const ACTIONS: StepAction[] = ['rotate', 'deletePages', 'stamp', 'markTerms', 'markPatterns', 'applyRedactions', 'flatten', 'sanitize', 'setMeta', 'detectFields', 'tag', 'ocr', 'plugin', 'save', 'pdfa']
 
 /** The 0-based page indexes a page set selects in a document of `count` pages. */
 export function resolvePages(set: PageSet, count: number): number[] {
@@ -117,6 +119,9 @@ function checkStep(step: unknown, i: number): WorkflowStep {
       break
     case 'pdfa':
       if (step.part !== 2 && step.part !== 3) throw new Error(`${where} must be PDF/A-2 or PDF/A-3.`)
+      break
+    case 'plugin':
+      if (typeof step.plugin !== 'string' || typeof step.command !== 'string') throw new Error(`${where} must name a plugin and its command.`)
       break
   }
   return step as WorkflowStep

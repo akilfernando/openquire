@@ -9,6 +9,8 @@ import { m } from '../i18n'
 export type Tool =
   | 'select' | 'edittext' | 'field' | 'erasegfx' | 'link' | 'highlight' | 'underline' | 'strike' | 'note' | 'text'
   | 'ink' | 'rect' | 'ellipse' | 'arrow' | 'whiteout' | 'redact' | 'crop'
+  /** A plugin's dock tool: "plugin:<plugin id>:<tool id>". */
+  | `plugin:${string}`
 
 const MARKUP: Partial<Record<Tool, 'Highlight' | 'Underline' | 'StrikeOut'>> = { highlight: 'Highlight', underline: 'Underline', strike: 'StrikeOut' }
 
@@ -36,6 +38,8 @@ export interface PageActions {
   deleteField: (pageId: number, widgetId: number) => void
   setSelection: (sel: { pageId: number; quads: Quad[]; text: string } | null) => void
   toolDone: () => void
+  /** A click with a plugin's tool, at a point in page space. */
+  pluginClick: (tool: string, pageId: number, point: Point) => void
 }
 
 interface Props {
@@ -201,6 +205,7 @@ function PageView({ page, zoom, tool, color, strokeWidth, selectedAnnot, editing
       else actions.editLink(page.id, null, link.index)
       return
     }
+    if (tool.startsWith('plugin:')) return actions.pluginClick(tool, page.id, p)
     if (tool === 'field') {
       const fid = target.closest('[data-field]')?.getAttribute('data-field')
       const widget = page.widgets.find((w) => String(w.id) === fid)

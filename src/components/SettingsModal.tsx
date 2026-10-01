@@ -5,6 +5,8 @@ import { m } from '../i18n'
 import { OCR_LANGUAGES } from '../ocr-languages'
 import { isDesktop, nativeTools, type NativeTools } from '../native'
 import HotkeySettings from './HotkeySettings'
+import PluginsSettings from './PluginsSettings'
+import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
 import { DEFAULT_BASE_URL, DEFAULT_MODELS, type AiProvider } from '../ai'
 
@@ -52,7 +54,7 @@ export const ACCENTS: { key: string; hue: number }[] = [
   { key: 'rose', hue: 340 },
 ]
 
-type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'ai' | 'hotkeys' | 'about'
+type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'ai' | 'hotkeys' | 'plugins' | 'about'
 
 interface Props {
   settings: Settings
@@ -60,6 +62,9 @@ interface Props {
   onClose: () => void
   /** Commands that can have shortcuts. */
   commands: { id: string; name: string }[]
+  plugins: InstalledPlugin[]
+  pluginErrors: Map<string, string>
+  onPlugins: (list: InstalledPlugin[]) => void
   /** Reads certificate files into displayable entries. */
   readCertificates: (data: Uint8Array) => Promise<Settings['trusted']>
 }
@@ -76,10 +81,21 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands }: Props) {
+export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins }: Props) {
   const [certError, setCertError] = useState('')
   const [tab, setTab] = useState<Tab>('appearance')
   const [installed, setInstalled] = useState<NativeTools | null>(null)
+  // Escape closes Settings wherever focus is, even after the focused control went away.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // While a shortcut is being recorded, Escape cancels the recording instead.
+      if (e.key !== 'Escape' || e.defaultPrevented || (e.target as Element).closest?.('[data-recording-hotkey]')) return
+      e.stopPropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onClose])
   useEffect(() => {
     if (isDesktop) void nativeTools().then(setInstalled)
   }, [])
@@ -89,7 +105,7 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
   const tabs = Object.entries(m.settings.tabs) as [Tab, string][]
 
   return (
-    <div className="modal-container" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+    <div className="modal-container">
       <div className="modal-bg" onPointerDown={onClose} />
       <div ref={ref} className="modal settings" role="dialog" aria-modal="true" aria-label={m.settings.label}>
         <button className="clickable-icon modal-close" aria-label={m.actions.close} onClick={onClose}><X size={18} /></button>
@@ -238,6 +254,7 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
             </>
           )}
           {tab === 'hotkeys' && <HotkeySettings commands={commands} overrides={settings.hotkeys} onChange={(hotkeys) => set({ hotkeys })} />}
+          {tab === 'plugins' && <PluginsSettings plugins={plugins} errors={pluginErrors} onChange={onPlugins} />}
           {tab === 'about' && (
             <>
               <h2>{m.settings.about}</h2>

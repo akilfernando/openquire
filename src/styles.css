@@ -224,6 +224,13 @@ kbd {
 .snippet-name { flex: 1; min-width: 0; }
 .snippet-css { width: 100%; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--font-smaller); resize: vertical; }
 
+/* Plugins */
+.plugin-review { display: flex; flex-direction: column; gap: 6px; padding: 12px; margin: 10px 0; border: 1px solid var(--accent); border-radius: var(--radius-m); }
+.plugin-permissions, .plugin-installed, .plugin-list { margin: 0; padding-left: 18px; }
+.plugin-installed { padding: 0; list-style: none; }
+.plugin-text { margin: 0; color: var(--text-normal); white-space: pre-wrap; }
+.hint a { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); }
+
 /* Hotkeys settings */
 .hotkey-filter { width: 100%; margin-bottom: 8px; }
 .hotkey-list { list-style: none; margin: 0; padding: 0; }

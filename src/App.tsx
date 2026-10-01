@@ -24,6 +24,9 @@ import SidePane from './components/SidePane'
 import WorkflowsDialog from './components/WorkflowsDialog'
 import { OUTPUT_ACTIONS, newWorkflow, pageSetOf, type Workflow, type WorkflowStep } from './engine/workflow'
 import { loadLayout, saveLayout } from './layout'
+import { PluginHost, loadPlugins, savePlugins } from './plugins/host'
+import type { InstalledPlugin } from './plugins/types'
+import { Puzzle } from 'lucide-react'
 import { WHILE_TYPING, commandFor, comboOf, displayCombo, effectiveHotkeys } from './hotkeys'
 import { OFFICE_EXTENSIONS, addRecent, fileName, isDesktop, nativeConvert, nativeTools, pickFiles, readPath, recentFiles, removeRecent, saveAs, tokenSign, watchOpenedFiles, writePath, type TokenKey } from './native'
 import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
@@ -31,14 +34,15 @@ import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
 import { EngineError, setTokenSigner, activeDocument, requestRender, closeDocument, engine, engineFor, newDocument, setActiveDocument } from './engine/client'
 import { parseRanges } from './engine/ranges'
-import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Quad, type Rect, type WidgetInfo, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
+import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Point, type Quad, type Rect, type WidgetInfo, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
 import { arrowNavigate } from './focus'
 import { m } from './i18n'
 import { download, imageToPng, kb } from './util'
 
 type Icon = ComponentType<LucideProps>
 
-const TOOL_ICONS: [Tool, Icon][][] = [
+type BuiltInTool = Exclude<Tool, `plugin:${string}`>
+const TOOL_ICONS: [BuiltInTool, Icon][][] = [
   [['select', MousePointer2], ['edittext', TextCursorInput], ['field', FormInput], ['link', Link2], ['erasegfx', SquareX]],
   [['highlight', Highlighter], ['underline', Underline], ['strike', Strikethrough], ['note', StickyNote], ['text', Type]],
   [['ink', Pencil], ['rect', Square], ['ellipse', Circle], ['arrow', MoveUpRight]],
@@ -133,6 +137,8 @@ export default function App() {
   // Desktop app: where each tab's document lives on disk, and recently opened files.
   const paths = useRef(new Map<number, string>())
   const [recent, setRecent] = useState(() => (isDesktop ? recentFiles() : []))
+  const [plugins, setPluginsState] = useState(loadPlugins)
+  const [, setPluginTick] = useState(0)
   const [aiLog, setAiLog] = useState<AiEntry[]>([])
   const [aiBusy, setAiBusy] = useState(false)
   const [consent, setConsent] = useState<{ host: string; items: string[]; answer: (send: boolean, remember: boolean) => void } | null>(null)
@@ -416,7 +422,7 @@ export default function App() {
   const runWorkflowHere = (wf: Workflow) => {
     setWorkflowsOpen(null)
     void run(m.busy.runningWorkflow, async () => {
-      const r = await runOnDocument(activeDocument(), wf, undefined, { lang: settings.ocrLang, allowDownload: settings.ocrDownload })
+      const r = await runOnDocument(activeDocument(), wf, undefined, { lang: settings.ocrLang, allowDownload: settings.ocrDownload }, (p, c, d) => host.runCommand(p, c, d))
       if (r.state) apply(r.state)
       if (r.bytes) download(r.bytes, `${docRef.current?.name ?? 'document'}.pdf`)
       setStatus([m.workflows.ran(wf.name), ...r.notes].join(' '))
@@ -426,7 +432,7 @@ export default function App() {
   const runWorkflowOnFiles = (wf: Workflow, files: File[]) => {
     setWorkflowsOpen(null)
     void run(m.busy.runningWorkflow, async () => {
-      const r = await runBatch(files, wf, { lang: settings.ocrLang, allowDownload: settings.ocrDownload }, (i, n, name) => setBusy(m.workflows.progress(Math.min(i + 1, n), n, name)))
+      const r = await runBatch(files, wf, { lang: settings.ocrLang, allowDownload: settings.ocrDownload }, (i, n, name) => setBusy(m.workflows.progress(Math.min(i + 1, n), n, name)), (p, c, d) => host.runCommand(p, c, d))
       const file = `${wf.name}.zip`
       download(r.zip, file, 'application/zip')
       setStatus(m.workflows.batchDone(r.done, r.failed.length, file))
@@ -461,6 +467,32 @@ export default function App() {
     })
     // Once, at startup.
   }, [])
+
+  // ---- plugins -----------------------------------------------------------------------------
+
+  const applyRef = useRef<(s: DocState) => void>(() => {})
+  const host = useMemo(() => new PluginHost({
+    doc: () => (docRef.current ? activeDocument() : null),
+    applied: (state, docId) => {
+      if (docId === activeDocument()) applyRef.current(state)
+    },
+    notice: (text) => setStatus(text),
+    download: (name, data, type) => download(data, name, type),
+  }), [])
+  useEffect(() => host.subscribe(() => setPluginTick((n) => n + 1)), [host])
+  useEffect(() => host.sync(plugins), [host, plugins])
+  useEffect(() => () => host.stopAll(), [host])
+
+  const setPlugins = (list: InstalledPlugin[]) => {
+    setPluginsState(list)
+    savePlugins(list)
+  }
+  const pluginName = (id: string) => plugins.find((p) => p.manifest.id === id)?.manifest.name ?? id
+  const runPlugin = (fn: () => Promise<unknown>) =>
+    void fn().catch((e: Error) => {
+      setStatus(m.status.error(e.message))
+      setStatusError(m.status.error(e.message))
+    })
 
   // ---- themes and snippets -----------------------------------------------------------------
 
@@ -871,8 +903,16 @@ export default function App() {
 
   // ---- page view actions -------------------------------------------------------------------
 
+  const pluginClickRef = useRef<(tool: string, pageId: number, point: Point) => void>(() => {})
+  pluginClickRef.current = (tool, pageId, [x, y]) => {
+    const [, plugin, id] = tool.split(':')
+    const page = docRef.current?.pages.findIndex((p) => p.id === pageId) ?? -1
+    runPlugin(() => host.toolClick(plugin, id, page, x, y))
+  }
+  applyRef.current = apply
   const pageActions: PageActions = useMemo(
     () => ({
+      pluginClick: (tool, pageId, point) => pluginClickRef.current(tool, pageId, point),
       addAnnot: (pageId, spec, select) =>
         run(m.busy.adding, async () => {
           const { id, state } = await engine.addAnnot(pageId, spec)
@@ -1016,6 +1056,10 @@ export default function App() {
         setStatus(m.status.timestampAdded)
       }),
     compare: (otherId) => void compareWith(otherId),
+    pluginPaneEvent: (key, element, values) => {
+      const [, plugin, pane] = key.split(':')
+      runPlugin(() => host.paneEvent(plugin, pane, element, values))
+    },
     ai: aiActions,
     focusChange,
     autoTag: (lang) =>
@@ -1235,7 +1279,7 @@ export default function App() {
     { id: 'zoom-actual', name: m.actions.actualSize, enabled: has, run: () => setZoom(1) },
     { id: 'left', name: m.actions.toggleLeft, icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
     { id: 'right', name: m.actions.toggleRight, icon: PanelRight, enabled: has, run: () => setRightOpen((o) => !o) },
-    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility', 'compare', ...(settings.aiEnabled ? ['assistant'] : [])] as SideTab[]).map((t) => ({
+    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility', 'compare', ...(settings.aiEnabled ? ['assistant'] : [])] as (keyof typeof m.actions.showPanel)[]).map((t) => ({
       id: `show-${t}`, name: m.actions.showPanel[t], enabled: has, run: () => { setLeftOpen(true); setTab(t) },
     })),
     ...ALL_TOOLS.map((t) => ({ id: `tool-${t.id}`, name: m.actions.tool(t.name), icon: t.Icon, enabled: has, run: () => setTool(t.id) })),
@@ -1262,6 +1306,13 @@ export default function App() {
     { id: 'export-docx', name: m.actions.exportDocx, enabled: has, run: panelActions.exportDocx },
     { id: 'export-xlsx', name: m.actions.exportXlsx, enabled: has, run: panelActions.exportXlsx },
     { id: 'straighten', name: m.actions.straighten, enabled: has, run: panelActions.straighten },
+    ...host.commands.map((c) => ({
+      id: `plugin:${c.plugin}:${c.id}`, name: `${pluginName(c.plugin)}: ${c.name}`, icon: Puzzle, enabled: has,
+      run: () => runPlugin(async () => {
+        await host.runCommand(c.plugin, c.id, activeDocument())
+        if (c.workflow) record({ action: 'plugin', plugin: c.plugin, command: c.id, name: `${pluginName(c.plugin)}: ${c.name}` })
+      }),
+    })),
     { id: 'workflows', name: m.actions.workflows, icon: WorkflowIcon, run: () => setWorkflowsOpen({ index: 0 }) },
     recording
       ? { id: 'stop-recording', name: m.actions.stopRecording, run: stopRecording }
@@ -1369,6 +1420,7 @@ export default function App() {
           key={`sidebar-${active}`} doc={doc} tab={tab} onTab={setTab} selected={selected} selectedAnnot={selAnnot?.id ?? null}
           commentFocus={commentFocus} actions={sideActions}
           compare={{ others: tabs.filter((t) => t.id !== active), result: comparison }}
+          pluginPanes={host.panes.map((p) => ({ key: `plugin:${p.plugin}:${p.id}` as const, title: p.title, content: p.content }))}
           assistant={settings.aiEnabled ? { log: aiLog, busy: aiBusy, hasFields: doc.pages.some((p) => p.widgets.some((w) => !w.readOnly && w.kind !== 'signature' && w.kind !== 'button')) } : null}
         />
       )}
@@ -1491,6 +1543,18 @@ export default function App() {
                     ))}
                   </span>
                 ))}
+                {host.tools.length > 0 && <span className="divider" />}
+                {host.tools.map((t) => {
+                  const id = `plugin:${t.plugin}:${t.id}` as const
+                  return (
+                    <button
+                      key={id} type="button" aria-pressed={tool === id} className={`clickable-icon${tool === id ? ' is-active' : ''}`}
+                      aria-label={t.name} title={`${t.name} (${pluginName(t.plugin)})`} onClick={() => setTool(id)}
+                    >
+                      <Puzzle size={18} />
+                    </button>
+                  )
+                })}
                 {tool === 'field' && (
                   <select value={fieldKind} title={m.fields.kindLabel} aria-label={m.fields.kindLabel} onChange={(e) => setFieldKind(e.target.value as FieldKind)}>
                     {(['text', 'multiline', 'checkbox', 'radio', 'choice', 'signature'] as FieldKind[]).map((k) => <option key={k} value={k}>{m.fields.kinds[k]}</option>)}
@@ -1571,7 +1635,8 @@ export default function App() {
       </div>
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
-      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))} />}
+      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
+        plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} />}
       {signing && <SignatureDialog onClose={() => setSigning(false)} onPlace={(png, aspect) => { setSigning(false); placeImage(png, aspect) }} />}
       {digitalSigning && doc && (() => {
         const page = currentPage() ?? doc.pages[0]

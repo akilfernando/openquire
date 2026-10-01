@@ -240,6 +240,7 @@ export async function main(argv: string[], log: (s: string) => void = console.lo
           case 'run': {
             let output: Uint8Array | null = null
             for (const step of workflow!.steps) {
+              if (step.action === 'plugin') throw new Error(`The workflow uses the plugin ${step.plugin}, which only runs in the OpenQuire app.`)
               if (step.action === 'ocr') {
                 if (step.straighten) e.straighten(e.pagesWithoutText())
                 await recognize(e, step.lang && step.lang !== 'auto' ? step.lang : 'eng')

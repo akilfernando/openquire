@@ -466,6 +466,7 @@ export const en = {
         case 'ocr': return 'Recognize text on pages without text'
         case 'save': return `Save with ${s.options.compress === 'none' ? 'no' : s.options.compress} compression${s.options.security.mode === 'set' ? ' and a password' : s.options.security.mode === 'none' ? ', removing the password' : ''}`
         case 'pdfa': return `Save as PDF/A-${s.part}b`
+        case 'plugin': return s.name ?? `Plugin command ${s.command} (${s.plugin})`
       }
     },
   },
@@ -528,7 +529,26 @@ export const en = {
   settings: {
     label: 'Settings',
     options: 'Options',
-    tabs: { appearance: 'Appearance', comments: 'Comments', ocr: 'Text recognition', signatures: 'Signatures', ai: 'AI assistant', hotkeys: 'Hotkeys', about: 'About' },
+    tabs: { appearance: 'Appearance', comments: 'Comments', ocr: 'Text recognition', signatures: 'Signatures', ai: 'AI assistant', hotkeys: 'Hotkeys', plugins: 'Plugins', about: 'About' },
+    pluginsIntro: 'Plugins add commands, sidebar panes, tools and workflow steps. Each runs in its own sandbox, with only the access it asks for.',
+    pluginDocs: 'Writing plugins',
+    installPlugin: 'Install from file',
+    pluginInvalid: (message: string) => `This isn't a plugin OpenQuire can install. ${message}`,
+    reviewPlugin: (name: string) => `Install ${name}?`,
+    pluginBy: (author: string) => `By ${author}`,
+    pluginWants: 'It asks to:',
+    permissions: {
+      'document:read': 'Read the open document (its text and pages)',
+      'document:write': 'Change the open document',
+      network: 'Connect to the internet',
+    } as Record<string, string>,
+    noPermissions: 'Nothing beyond adding commands and panes',
+    pluginTrust: 'Install plugins only from people you trust. A plugin with document access can read everything in the documents you open while it is on.',
+    cancelInstall: 'Cancel',
+    confirmInstall: 'Install',
+    noPlugins: 'No plugins installed.',
+    removePlugin: (name: string) => `Remove ${name}`,
+    enablePlugin: (name: string) => `Turn on ${name}`,
     themes: 'Theme',
     themesDesc: 'Import a theme (a CSS file) to change how OpenQuire looks. Themes build on the design tokens, so they work in light and dark.',
     defaultTheme: 'OpenQuire (built in)',

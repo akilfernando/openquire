@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Accessibility as AccessibilityIcon, GitCompareArrows, Sparkles, ArrowDown, ArrowUp, BadgeCheck, CircleAlert, CircleCheck, TriangleAlert, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
+  Accessibility as AccessibilityIcon, GitCompareArrows, Puzzle, Sparkles, ArrowDown, ArrowUp, BadgeCheck, CircleAlert, CircleCheck, TriangleAlert, Bookmark as BookmarkIcon, Download, GalleryVerticalEnd, MessageSquare, Paperclip, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, Trash2, X,
 } from 'lucide-react'
 import { engine, requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
 import type { ComparisonResult } from '../engine/compare'
 import { citations } from '../ai'
+import type { PaneElement } from '../plugins/types'
+import PluginPane from './PluginPane'
 import { TAG_TYPES, type AccessibilityProblem, type TagNode, type TagType } from '../engine/tagging'
 import { arrowNavigate } from '../focus'
 import { kb } from '../util'
 import { m } from '../i18n'
 
-export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures' | 'accessibility' | 'compare' | 'assistant'
+export type SideTab = 'pages' | 'bookmarks' | 'comments' | 'attachments' | 'signatures' | 'accessibility' | 'compare' | 'assistant' | `plugin:${string}`
 
 export interface SideActions {
   goTo: (pageId: number) => void
@@ -37,6 +39,7 @@ export interface SideActions {
   compare: (otherId: number) => void
   /** Shows a text change (index into changes) or a visual change (index into visual). */
   focusChange: (kind: 'text' | 'visual', index: number) => void
+  pluginPaneEvent: (key: string, element: string, values: Record<string, string>) => void
   ai: {
     summarize: () => void
     ask: (question: string) => void
@@ -71,6 +74,8 @@ interface Props {
   commentFocus: number | null
   compare: CompareInfo
   assistant: AssistantInfo
+  /** Panes added by plugins, keyed "plugin:<plugin id>:<pane id>". */
+  pluginPanes: { key: `plugin:${string}`; title: string; content: PaneElement[] }[]
   actions: SideActions
 }
 
@@ -575,31 +580,36 @@ export default function Sidebar(props: Props) {
     { id: 'accessibility', label: m.sidebar.tabs.accessibility, Icon: AccessibilityIcon },
     ...(props.assistant ? [{ id: 'assistant' as const, label: m.sidebar.tabs.assistant, Icon: Sparkles }] : []),
     { id: 'compare', label: m.sidebar.tabs.compare, Icon: GitCompareArrows, count: props.compare.result ? props.compare.result.data.changes.length + props.compare.result.data.visual.length : 0 },
+    ...props.pluginPanes.map((p) => ({ id: p.key, label: p.title, Icon: Puzzle })),
   ]
-  const current = tabs.find((t) => t.id === tab)!
+  // A remembered tab may be gone (a plugin removed, the assistant turned off): show Pages then.
+  const current = tabs.find((t) => t.id === tab) ?? tabs[0]
+  const shown = current.id
+  const pluginPane = props.pluginPanes.find((p) => p.key === shown)
   return (
     <aside className="sidebar left">
       <div className="sidebar-header" role="tablist" aria-label={m.sidebar.label} onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
         {tabs.map(({ id, label, Icon, count }) => (
           <button
-            key={id} role="tab" aria-selected={tab === id} className={`clickable-icon${tab === id ? ' is-active' : ''}`}
+            key={id} role="tab" aria-selected={shown === id} className={`clickable-icon${shown === id ? ' is-active' : ''}`}
             aria-label={count ? m.sidebar.tabWithCount(label, count) : label} title={label} onClick={() => onTab(id)}
           >
             <Icon size={18} />
-            {!!count && tab !== id && <span className="badge tnum">{count > 99 ? '99+' : count}</span>}
+            {!!count && shown !== id && <span className="badge tnum">{count > 99 ? '99+' : count}</span>}
           </button>
         ))}
         <span className="grow" />
         <span className="faint small">{current.label}</span>
       </div>
-      {tab === 'pages' && <Pages {...props} />}
-      {tab === 'bookmarks' && <Bookmarks {...props} />}
-      {tab === 'comments' && <Comments {...props} />}
-      {tab === 'attachments' && <Attachments {...props} />}
-      {tab === 'signatures' && <Signatures {...props} />}
-      {tab === 'accessibility' && <Accessibility {...props} />}
-      {tab === 'compare' && <Compare {...props} />}
-      {tab === 'assistant' && <Assistant {...props} />}
+      {shown === 'pages' && <Pages {...props} />}
+      {shown === 'bookmarks' && <Bookmarks {...props} />}
+      {shown === 'comments' && <Comments {...props} />}
+      {shown === 'attachments' && <Attachments {...props} />}
+      {shown === 'signatures' && <Signatures {...props} />}
+      {shown === 'accessibility' && <Accessibility {...props} />}
+      {shown === 'compare' && <Compare {...props} />}
+      {shown === 'assistant' && <Assistant {...props} />}
+      {pluginPane && <PluginPane key={pluginPane.key} content={pluginPane.content} onEvent={(el, values) => props.actions.pluginPaneEvent(pluginPane.key, el, values)} />}
     </aside>
   )
 }
