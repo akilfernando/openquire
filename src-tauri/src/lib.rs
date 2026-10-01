@@ -5,6 +5,7 @@
 //! the operating system: on the command line, through file associations, or in a second launch.
 
 mod pkcs11;
+mod tools;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -78,6 +79,38 @@ async fn token_sign(module: String, slot: u64, id: String, pin: String, digest_i
     Ok(Response::new(sig))
 }
 
+fn raw_body(request: &Request) -> Result<Vec<u8>, String> {
+    match request.body() {
+        InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+        _ => Err("Expected the file's bytes".into()),
+    }
+}
+
+fn header(request: &Request, name: &str) -> Result<String, String> {
+    request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string).ok_or_else(|| format!("Missing {name}"))
+}
+
+/// Which of LibreOffice and Tesseract are installed.
+#[tauri::command]
+async fn native_tools() -> tools::Tools {
+    tauri::async_runtime::spawn_blocking(tools::detect).await.unwrap_or_default()
+}
+
+/// Converts a document to PDF with LibreOffice. The "ext" header names its type.
+#[tauri::command]
+async fn native_convert(request: Request<'_>) -> Result<Response, String> {
+    let (bytes, ext) = (raw_body(&request)?, header(&request, "ext")?);
+    let pdf = tauri::async_runtime::spawn_blocking(move || tools::convert_to_pdf(&bytes, &ext)).await.map_err(|e| e.to_string())??;
+    Ok(Response::new(pdf))
+}
+
+/// Recognizes text in a PNG with Tesseract, returning its TSV. The "lang" header picks the language.
+#[tauri::command]
+async fn native_ocr(request: Request<'_>) -> Result<String, String> {
+    let (png, lang) = (raw_body(&request)?, header(&request, "lang")?);
+    tauri::async_runtime::spawn_blocking(move || tools::ocr_tsv(&png, &lang)).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial = pdf_args(std::env::args().skip(1));
@@ -96,7 +129,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .manage(Pending(Mutex::new(initial)))
-        .invoke_handler(tauri::generate_handler![read_file, write_file, take_opened_files, token_certificates, token_sign])
+        .invoke_handler(tauri::generate_handler![read_file, write_file, take_opened_files, token_certificates, token_sign, native_tools, native_convert, native_ocr])
         .build(tauri::generate_context!())
         .expect("error while starting OpenQuire")
         .run(|_app, _event| {

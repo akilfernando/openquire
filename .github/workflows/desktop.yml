@@ -42,6 +42,25 @@ jobs:
       - run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
       - run: cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture
 
+  # Installed LibreOffice and Tesseract, used by the desktop app when present.
+  tools:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Libraries, LibreOffice and Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libreoffice-writer-nogui tesseract-ocr tesseract-ocr-eng imagemagick
+          convert -size 1400x220 xc:white -fill black -pointsize 64 -annotate +40+130 'The parties agree to the terms' "$RUNNER_TEMP/line.png"
+          echo "OPENQUIRE_TEST_TOOLS=1" >> "$GITHUB_ENV"
+          echo "OPENQUIRE_TEST_PNG=$RUNNER_TEMP/line.png" >> "$GITHUB_ENV"
+      - run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
+      - run: cargo test --manifest-path src-tauri/Cargo.toml tools -- --nocapture
+
   build:
     strategy:
       fail-fast: false

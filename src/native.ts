@@ -116,3 +116,28 @@ export async function tokenSign(key: TokenKey, digestInfo: Uint8Array) {
   const sig = await invoke<ArrayBuffer>('token_sign', { ...key, digestInfo: Array.from(digestInfo) })
   return new Uint8Array(sig)
 }
+
+// ---- installed LibreOffice and Tesseract ------------------------------------------------------
+
+export interface NativeTools {
+  libreoffice: string | null
+  tesseract: string | null
+  tesseract_langs: string[]
+}
+
+let tools: Promise<NativeTools> | null = null
+/** Which tools are installed (checked once per session). */
+export function nativeTools(): Promise<NativeTools> {
+  if (!isDesktop) return Promise.resolve({ libreoffice: null, tesseract: null, tesseract_langs: [] })
+  tools ??= invoke<NativeTools>('native_tools')
+  return tools
+}
+
+/** Extensions LibreOffice converts better than the built-in engine. */
+export const OFFICE_EXTENSIONS = ['doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'ods', 'csv', 'ppt', 'pptx', 'odp']
+
+export async function nativeConvert(bytes: Uint8Array, ext: string) {
+  return new Uint8Array(await invoke<ArrayBuffer>('native_convert', bytes, { headers: { ext } }))
+}
+
+export const nativeOcr = (png: Uint8Array, lang: string) => invoke<string>('native_ocr', png, { headers: { lang } })

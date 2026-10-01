@@ -549,6 +549,14 @@ export const en = {
     ocrAuto: 'Automatic',
     ocrDownload: 'Download language packs',
     ocrDownloadDesc: 'English is built in. Other languages are downloaded from jsDelivr (about 1 to 3 MB each) the first time they are used, then kept on this device. Your documents are never sent.',
+    nativeTools: 'Use installed LibreOffice and Tesseract',
+    nativeToolsDesc: (t: { libreoffice: string | null; tesseract: string | null; tesseract_langs: string[] } | null) =>
+      !t ? 'Checking what is installed...'
+        : [
+          t.libreoffice ? 'LibreOffice converts Office files.' : 'LibreOffice is not installed.',
+          t.tesseract ? `Tesseract recognizes text (${t.tesseract_langs.join(', ') || 'no languages'}).` : 'Tesseract is not installed.',
+          'Otherwise the built-in engines are used.',
+        ].join(' '),
     ocrStraighten: 'Straighten pages first',
     ocrStraightenDesc: 'Rotates crooked scans so their lines run straight before text is recognized.',
     languages: {

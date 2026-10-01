@@ -3,6 +3,8 @@ import { activeDocument, engineFor, requestRender } from './engine/client'
 import { wordsFromBlocks, type OcrBlock } from './engine/ocr-layout'
 import type { DocState, OcrWord } from './engine/types'
 import { detectLanguage, languagePackUrl } from './ocr-languages'
+import { wordsFromTsv } from './engine/ocr-tsv'
+import { nativeOcr, nativeTools } from './native'
 
 const ASSETS = new URL(import.meta.env.BASE_URL + 'ocr/', location.href).href
 const DPI = 300
@@ -33,6 +35,8 @@ export interface OcrOptions {
   lang: string
   /** Whether language packs other than English may be downloaded. */
   allowDownload: boolean
+  /** Use an installed Tesseract when there is one (desktop app). */
+  native?: boolean
 }
 
 export interface OcrResult {
@@ -43,7 +47,7 @@ export interface OcrResult {
   wanted?: string
 }
 
-async function recognize(doc: number, pageId: number, lang: string): Promise<{ words: OcrWord[]; text: string }> {
+async function recognize(doc: number, pageId: number, lang: string, native: string[] | null): Promise<{ words: OcrWord[]; text: string }> {
   const scale = DPI / 72
   const bmp = await requestRender(pageId, scale, 2, undefined, doc).promise
   if (!bmp) return { words: [], text: '' }
@@ -52,6 +56,14 @@ async function recognize(doc: number, pageId: number, lang: string): Promise<{ w
   canvas.height = bmp.height
   canvas.getContext('2d')!.drawImage(bmp, 0, 0)
   bmp.close()
+  // The installed Tesseract, when it has this language.
+  if (native?.includes(lang)) {
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'))
+    if (blob) {
+      const words = wordsFromTsv(await nativeOcr(new Uint8Array(await blob.arrayBuffer()), lang), scale)
+      return { words, text: words.map((w) => w.text).join(' ') }
+    }
+  }
   const ocr = await getWorker(lang)
   const { data } = await ocr.recognize(canvas, {}, { blocks: true, text: true })
   return { words: wordsFromBlocks(data.blocks as unknown as OcrBlock[], scale), text: data.text }
@@ -68,18 +80,22 @@ export async function recognizePages(
   opts: OcrOptions = { lang: 'eng', allowDownload: false },
 ): Promise<OcrResult> {
   const engine = engineFor(doc)
+  const installed = opts.native ? await nativeTools() : null
+  const native = installed?.tesseract ? installed.tesseract_langs : null
   const result: OcrResult = { state: null, lang: opts.lang === 'auto' ? 'eng' : opts.lang }
-  if (!opts.allowDownload && result.lang !== 'eng') {
+  // Languages installed with Tesseract need no download.
+  const downloadable = (lang: string) => opts.allowDownload || !!native?.includes(lang)
+  if (!downloadable(result.lang) && result.lang !== 'eng') {
     result.wanted = result.lang
     result.lang = 'eng'
   }
   let first: OcrWord[] | null = null
   if (opts.lang === 'auto' && pageIds.length) {
     onProgress(0, pageIds.length)
-    const probe = await recognize(doc, pageIds[0], 'eng')
+    const probe = await recognize(doc, pageIds[0], 'eng', native)
     const detected = detectLanguage(probe.text)
     if (detected && detected !== 'eng') {
-      if (opts.allowDownload) result.lang = detected
+      if (downloadable(detected)) result.lang = detected
       else result.wanted = detected
     }
     // English was right, so the first page is done.
@@ -87,7 +103,7 @@ export async function recognizePages(
   }
   for (const [i, id] of pageIds.entries()) {
     onProgress(i, pageIds.length)
-    const words = i === 0 && first ? first : (await recognize(doc, id, result.lang)).words
+    const words = i === 0 && first ? first : (await recognize(doc, id, result.lang, native)).words
     if (words.length) result.state = await engine.addTextLayer(id, words)
   }
   onProgress(pageIds.length, pageIds.length)

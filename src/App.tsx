@@ -23,7 +23,7 @@ import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
 import WorkflowsDialog from './components/WorkflowsDialog'
 import { OUTPUT_ACTIONS, newWorkflow, pageSetOf, type Workflow, type WorkflowStep } from './engine/workflow'
-import { addRecent, fileName, isDesktop, pickFiles, readPath, recentFiles, removeRecent, saveAs, tokenSign, watchOpenedFiles, writePath, type TokenKey } from './native'
+import { OFFICE_EXTENSIONS, addRecent, fileName, isDesktop, nativeConvert, nativeTools, pickFiles, readPath, recentFiles, removeRecent, saveAs, tokenSign, watchOpenedFiles, writePath, type TokenKey } from './native'
 import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
 import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
@@ -58,7 +58,7 @@ const STAMP_PRESETS: [string, Omit<StampSpec, 'pageIds'>][] = [
 const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
   const fallback: Settings = {
-    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true,
+    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true,
     aiEnabled: false, aiProvider: 'anthropic', aiKey: '', aiModel: '', aiBaseUrl: '', aiProfile: '',
   }
   try {
@@ -645,8 +645,16 @@ export default function App() {
 
   const openFiles = (files: File[], append: boolean, filePaths?: string[]) =>
     run(m.busy.opening, async () => {
-      for (const [i, f] of files.entries()) {
-        const bytes = new Uint8Array(await f.arrayBuffer())
+      for (const [i, file] of files.entries()) {
+        let f = file
+        let bytes = new Uint8Array(await f.arrayBuffer())
+        // In the desktop app, an installed LibreOffice converts Office files more faithfully.
+        const ext = f.name.split('.').pop()!.toLowerCase()
+        if (isDesktop && settings.nativeTools && OFFICE_EXTENSIONS.includes(ext) && (await nativeTools()).libreoffice) {
+          setBusy(m.busy.converting)
+          bytes = await nativeConvert(bytes, ext)
+          f = new File([bytes], f.name.replace(/\.[^.]+$/, '.pdf'))
+        }
         const load = async (open: (password?: string) => Promise<DocState>) => {
           let password: string | undefined
           for (;;) {
@@ -1092,7 +1100,7 @@ export default function App() {
         }
         const { recognizePages } = await import('./ocr')
         const r = await recognizePages(ids, (done, total) => setBusy(m.busy.recognizing(Math.min(done + 1, total), total)), activeDocument(), {
-          lang: settings.ocrLang, allowDownload: settings.ocrDownload,
+          lang: settings.ocrLang, allowDownload: settings.ocrDownload, native: isDesktop && settings.nativeTools,
         })
         if (r.state) apply(r.state)
         const name = (code: string) => m.settings.languages[code] ?? code

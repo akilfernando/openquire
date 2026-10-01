@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
 import { m } from '../i18n'
 import { OCR_LANGUAGES } from '../ocr-languages'
+import { isDesktop, nativeTools, type NativeTools } from '../native'
 import { DEFAULT_BASE_URL, DEFAULT_MODELS, type AiProvider } from '../ai'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
@@ -21,6 +22,8 @@ export interface Settings {
   ocrDownload: boolean
   /** Whether skewed pages are straightened before text is recognized. */
   ocrStraighten: boolean
+  /** Desktop app: use installed LibreOffice and Tesseract when present. */
+  nativeTools: boolean
   /** The optional AI assistant: off unless turned on. */
   aiEnabled: boolean
   aiProvider: AiProvider
@@ -66,6 +69,10 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
 export default function SettingsModal({ settings, onChange, onClose, readCertificates }: Props) {
   const [certError, setCertError] = useState('')
   const [tab, setTab] = useState<Tab>('appearance')
+  const [installed, setInstalled] = useState<NativeTools | null>(null)
+  useEffect(() => {
+    if (isDesktop) void nativeTools().then(setInstalled)
+  }, [])
   const ref = useRef<HTMLDivElement>(null)
   useFocusTrap(ref)
   const set = (p: Partial<Settings>) => onChange({ ...settings, ...p })
@@ -130,6 +137,11 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
               <Item name={m.settings.ocrDownload} desc={m.settings.ocrDownloadDesc}>
                 <input type="checkbox" className="toggle" checked={settings.ocrDownload} aria-label={m.settings.ocrDownload} onChange={(e) => set({ ocrDownload: e.target.checked })} />
               </Item>
+              {isDesktop && (
+                <Item name={m.settings.nativeTools} desc={m.settings.nativeToolsDesc(installed)}>
+                  <input type="checkbox" className="toggle" checked={settings.nativeTools} aria-label={m.settings.nativeTools} onChange={(e) => set({ nativeTools: e.target.checked })} />
+                </Item>
+              )}
               <Item name={m.settings.ocrStraighten} desc={m.settings.ocrStraightenDesc}>
                 <input type="checkbox" className="toggle" checked={settings.ocrStraighten} aria-label={m.settings.ocrStraighten} onChange={(e) => set({ ocrStraighten: e.target.checked })} />
               </Item>
