@@ -4,6 +4,8 @@
 //! writes the files the user opens (so documents save in place), and hands over PDFs opened from
 //! the operating system: on the command line, through file associations, or in a second launch.
 
+mod pkcs11;
+
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -61,6 +63,21 @@ fn take_opened_files(state: tauri::State<Pending>) -> Vec<String> {
     std::mem::take(&mut *state.0.lock().unwrap())
 }
 
+/// Certificates on the smart cards the PKCS#11 library can see.
+#[tauri::command]
+async fn token_certificates(module: String) -> Result<Vec<pkcs11::TokenCert>, String> {
+    tauri::async_runtime::spawn_blocking(move || pkcs11::list(&module)).await.map_err(|e| e.to_string())?
+}
+
+/// Signs a DigestInfo with a key on a smart card.
+#[tauri::command]
+async fn token_sign(module: String, slot: u64, id: String, pin: String, digest_info: Vec<u8>) -> Result<Response, String> {
+    let sig = tauri::async_runtime::spawn_blocking(move || pkcs11::sign(&module, slot, &id, &pin, &digest_info))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(Response::new(sig))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial = pdf_args(std::env::args().skip(1));
@@ -79,7 +96,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .manage(Pending(Mutex::new(initial)))
-        .invoke_handler(tauri::generate_handler![read_file, write_file, take_opened_files])
+        .invoke_handler(tauri::generate_handler![read_file, write_file, take_opened_files, token_certificates, token_sign])
         .build(tauri::generate_context!())
         .expect("error while starting OpenQuire")
         .run(|_app, _event| {

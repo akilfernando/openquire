@@ -7,8 +7,21 @@ const engines = new Map<number, Engine>()
 let author = 'OpenQuire user'
 let trusted: string[] = []
 
+// Smart card signing happens outside the worker (in the desktop shell), so the engine asks the
+// main thread and waits for its answer.
+const waiting = new Map<number, { resolve: (v: Uint8Array) => void; reject: (e: Error) => void }>()
+let nextCallback = 1
+function signOnDevice(key: unknown, digestInfo: Uint8Array) {
+  const id = nextCallback++
+  return new Promise<Uint8Array>((resolve, reject) => {
+    waiting.set(id, { resolve, reject })
+    self.postMessage({ callback: id, kind: 'token-sign', key, digestInfo })
+  })
+}
+
 function create() {
   const e = new Engine()
+  e.externalSigner = signOnDevice
   e.author = author
   if (trusted.length) e.setTrustedCertificates(trusted)
   return e
@@ -22,7 +35,14 @@ export interface Request {
   args: unknown[]
 }
 
-self.onmessage = async ({ data }: MessageEvent<Request>) => {
+self.onmessage = async ({ data }: MessageEvent<Request | { callbackReply: number; result?: Uint8Array; error?: string }>) => {
+  if ('callbackReply' in data) {
+    const w = waiting.get(data.callbackReply)
+    waiting.delete(data.callbackReply)
+    if (data.error !== undefined) w?.reject(new Error(data.error))
+    else w?.resolve(data.result!)
+    return
+  }
   const { id, doc, method, args } = data
   try {
     if (method === 'setAuthor') {

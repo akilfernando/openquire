@@ -17,8 +17,20 @@ let nextId = 1
 let markReady: () => void
 const ready = new Promise<void>((r) => (markReady = r))
 
+/** Signs a DigestInfo with a key on a smart card; set by the desktop app. */
+let tokenSigner: ((key: unknown, digestInfo: Uint8Array) => Promise<Uint8Array>) | null = null
+export function setTokenSigner(fn: typeof tokenSigner) {
+  tokenSigner = fn
+}
+
 worker.onmessage = ({ data }) => {
   if (data.ready) return markReady()
+  if (data.callback) {
+    const reply = (msg: { result?: Uint8Array; error?: string }) => worker.postMessage({ callbackReply: data.callback, ...msg })
+    if (!tokenSigner) return reply({ error: 'Smart card signing is only available in the desktop app.' })
+    tokenSigner(data.key, data.digestInfo).then((result) => reply({ result }), (e: Error) => reply({ error: e.message ?? String(e) }))
+    return
+  }
   const p = pending.get(data.id)
   if (!p) return
   pending.delete(data.id)

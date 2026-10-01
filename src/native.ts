@@ -83,3 +83,36 @@ export function removeRecent(path: string) {
   }
   return list
 }
+
+// ---- smart cards (PKCS#11) -------------------------------------------------------------
+
+export interface TokenCert {
+  slot: number
+  token: string
+  id: string
+  label: string
+  der: number[]
+  pinpad: boolean
+}
+
+/** Where OpenSC, the usual smart card library, installs itself on each system. */
+export function defaultPkcs11Module() {
+  const ua = navigator.userAgent
+  if (/Windows/.test(ua)) return 'C:\\Windows\\System32\\opensc-pkcs11.dll'
+  if (/Mac OS/.test(ua)) return '/Library/OpenSC/lib/opensc-pkcs11.so'
+  return '/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so'
+}
+
+export const tokenCertificates = (module: string) => invoke<TokenCert[]>('token_certificates', { module })
+
+export interface TokenKey {
+  module: string
+  slot: number
+  id: string
+  pin: string
+}
+
+export async function tokenSign(key: TokenKey, digestInfo: Uint8Array) {
+  const sig = await invoke<ArrayBuffer>('token_sign', { ...key, digestInfo: Array.from(digestInfo) })
+  return new Uint8Array(sig)
+}

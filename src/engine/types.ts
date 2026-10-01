@@ -132,8 +132,11 @@ export interface OcrWord {
 }
 
 export interface SignRequest {
-  p12: Uint8Array
-  password: string
+  /** A .p12/.pfx digital ID and its password; or `token` for a key on a smart card. */
+  p12?: Uint8Array
+  password?: string
+  /** A key on a smart card or token: its certificate chain (DER, signer first) and a reference the host understands. */
+  token?: { chain: Uint8Array[]; key: unknown }
   /** Page for a visible signature box; null for an invisible signature. */
   pageId: number | null
   rect?: Rect

@@ -13,6 +13,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Smart card signing, against SoftHSM2 standing in for a real card.
+  pkcs11:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Libraries and a software token
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev softhsm2 opensc
+          mkdir -p "$HOME/softhsm/tokens"
+          printf 'directories.tokendir = %s\n' "$HOME/softhsm/tokens" > "$HOME/softhsm/softhsm2.conf"
+          export SOFTHSM2_CONF="$HOME/softhsm/softhsm2.conf"
+          softhsm2-util --init-token --free --label "Test Card" --so-pin 5678 --pin 1234
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 30 -subj "/CN=Card Holder"
+          openssl rsa -in key.pem -outform DER -out key.der
+          openssl x509 -in cert.pem -outform DER -out cert.der
+          MOD=/usr/lib/softhsm/libsofthsm2.so
+          pkcs11-tool --module $MOD --login --pin 1234 --write-object key.der --type privkey --id 01 --label card
+          pkcs11-tool --module $MOD --login --pin 1234 --write-object cert.der --type cert --id 01 --label card
+          echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
+          echo "OPENQUIRE_TEST_PKCS11=$MOD" >> "$GITHUB_ENV"
+      # The frontend isn't needed to test the Rust side, but tauri's build script expects its folder.
+      - run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
+      - run: cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture
+
   build:
     strategy:
       fail-fast: false

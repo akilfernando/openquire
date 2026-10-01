@@ -13,9 +13,23 @@ const BYTE_RANGE_PLACEHOLDER = [0, 1_000_000_000, 1_000_000_000, 1_000_000_000]
 
 
 export interface DigitalId {
-  key: forge.pki.rsa.PrivateKey
+  /** The private key, when it is in memory (a .p12 file). */
+  key?: forge.pki.rsa.PrivateKey
+  /**
+   * Signs with a key held elsewhere (a smart card or token): given a DER DigestInfo, returns the
+   * RSA PKCS#1 v1.5 signature over it. The key never leaves the device.
+   */
+  signDigestInfo?: (digestInfo: Uint8Array) => Promise<Uint8Array>
   chain: forge.pki.Certificate[]
   name: string
+}
+
+/** A digital ID whose key stays on a device, from its certificate chain (DER, signer first). */
+export function externalDigitalId(chain: Uint8Array[], signDigestInfo: (digestInfo: Uint8Array) => Promise<Uint8Array>): DigitalId {
+  const certs = chain.map((der) => certFromDer(binary(der)))
+  if (!certs.length) throw new Error('The token has no certificate for this key.')
+  if (!(certs[0].publicKey as forge.pki.rsa.PublicKey).n) throw new Error('Only RSA keys can sign PDFs here; this key is a different type.')
+  return { chain: certs, name: nameOf(certs[0]), signDigestInfo }
 }
 
 
@@ -241,22 +255,39 @@ function addSignatureField(doc: mupdf.PDFDocument, pageObj: mupdf.PDFObject, bas
 }
 
 /** The CMS signature over the signed bytes, with a signature timestamp when a server is given. */
+/** DER DigestInfo for a SHA-256 hash, as RSA PKCS#1 v1.5 signs it. */
+const SHA256_DIGEST_INFO_PREFIX = '3031300d060960864801650304020105000420'
+const digestInfoOf = (hash: string) => util.hexToBytes(SHA256_DIGEST_INFO_PREFIX) + hash
+
 async function cmsSignature(signed: string, id: DigitalId, when: Date, ts?: { url: string; fetcher: Fetcher }) {
-  const p7 = forge.pkcs7.createSignedData()
-  p7.content = util.createBuffer(signed)
-  for (const c of id.chain) p7.addCertificate(c)
-  p7.addSigner({
-    key: id.key,
-    certificate: id.chain[0],
-    digestAlgorithm: pki.oids.sha256,
-    authenticatedAttributes: [
-      { type: pki.oids.contentType, value: pki.oids.data },
-      { type: pki.oids.messageDigest },
-      { type: pki.oids.signingTime, value: when as unknown as string },
-    ],
-  })
-  p7.sign({ detached: true })
-  let cms = asn1.toDer(p7.toAsn1()).getBytes()
+  type Signer = { sign(md: forge.md.MessageDigest): string }
+  const build = (key: forge.pki.rsa.PrivateKey | Signer) => {
+    const p7 = forge.pkcs7.createSignedData()
+    p7.content = util.createBuffer(signed)
+    for (const c of id.chain) p7.addCertificate(c)
+    p7.addSigner({
+      key: key as forge.pki.rsa.PrivateKey,
+      certificate: id.chain[0],
+      digestAlgorithm: pki.oids.sha256,
+      authenticatedAttributes: [
+        { type: pki.oids.contentType, value: pki.oids.data },
+        { type: pki.oids.messageDigest },
+        { type: pki.oids.signingTime, value: when as unknown as string },
+      ],
+    })
+    p7.sign({ detached: true })
+    return asn1.toDer(p7.toAsn1()).getBytes()
+  }
+  let cms: string
+  if (id.key) cms = build(id.key)
+  else if (id.signDigestInfo) {
+    // The device signs asynchronously, so build twice: once to learn exactly what to sign, then
+    // with the device's signature. The signing time is fixed, so both builds sign the same bytes.
+    let hash = ''
+    build({ sign: (md: forge.md.MessageDigest) => ((hash = md.digest().getBytes()), '') })
+    const signature = await id.signDigestInfo(fromBinary(digestInfoOf(hash)))
+    cms = build({ sign: () => binary(signature) })
+  } else throw new Error('This digital ID cannot sign.')
   if (ts) {
     // PAdES B-T: a timestamp over the signature value proves when the signature existed.
     const { signatureValue } = checkSigner(parseSignedData(cms), signed)

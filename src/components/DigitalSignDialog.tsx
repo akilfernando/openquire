@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { engine } from '../engine/client'
+import { defaultPkcs11Module, isDesktop, tokenCertificates, type TokenCert } from '../native'
 import type { Rect, SignRequest } from '../engine/types'
 import { download } from '../util'
 import Modal from './Modal'
@@ -20,6 +21,7 @@ interface Props {
 }
 
 const SAVED_IMAGE = 'openquire.signature'
+const PKCS11_MODULE = 'openquire.pkcs11'
 
 function boxFor(corner: Corner, w: number, h: number): Rect | undefined {
   if (corner === 'invisible') return undefined
@@ -33,7 +35,17 @@ function boxFor(corner: Corner, w: number, h: number): Rect | undefined {
 
 export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onSign, onClose }: Props) {
   const [stamp, setStamp] = useState(!!tsa)
-  const [source, setSource] = useState<'file' | 'new'>('file')
+  const [source, setSource] = useState<'file' | 'new' | 'card'>('file')
+  const [module, setModule] = useState(() => {
+    try {
+      return localStorage.getItem(PKCS11_MODULE) || (isDesktop ? defaultPkcs11Module() : '')
+    } catch {
+      return ''
+    }
+  })
+  const [cards, setCards] = useState<TokenCert[] | null>(null)
+  const [card, setCard] = useState(0)
+  const [pin, setPin] = useState('')
   const [p12, setP12] = useState<{ name: string; bytes: Uint8Array } | null>(null)
   const [password, setPassword] = useState('')
   const [newId, setNewId] = useState({ name: '', email: '', organization: '', password: '', confirm: '' })
@@ -72,16 +84,46 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
     }
   }
 
+  const findCards = async () => {
+    setError('')
+    setBusy(m.digitalId.readingCards)
+    try {
+      const found = await tokenCertificates(module.trim())
+      setCards(found)
+      setCard(0)
+      try {
+        localStorage.setItem(PKCS11_MODULE, module.trim())
+      } catch {
+        // Remembered for convenience only.
+      }
+      if (!found.length) setError(m.digitalId.noCards)
+    } catch (e) {
+      setError(String((e as Error).message ?? e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const chosen = cards?.[card]
+  const ready = source === 'card' ? !!chosen && (!!pin || chosen.pinpad) : !!p12 && !!password
+
   const sign = async () => {
-    if (!p12) return
+    if (!ready) return
     setError('')
     setBusy(m.digitalId.signing)
     try {
       let image: Uint8Array | undefined
       if (useImage && savedImage) image = new Uint8Array(await (await fetch(savedImage)).arrayBuffer())
       const rect = field ? undefined : boxFor(corner, page.width, page.height)
+      // A card's own certificates complete the chain, signer first.
+      const token = source === 'card' && chosen
+        ? {
+          chain: [chosen, ...cards!.filter((c) => c !== chosen && c.slot === chosen.slot)].map((c) => Uint8Array.from(c.der)),
+          key: { module: module.trim(), slot: chosen.slot, id: chosen.id, pin },
+        }
+        : undefined
       await onSign({
-        p12: p12.bytes.slice(), password, pageId: rect ? page.id : null, rect, field: field || undefined, certify: certify || undefined, timestampUrl: stamp && tsa ? tsa : undefined,
+        ...(token ? { token } : { p12: p12!.bytes.slice(), password }), pageId: rect ? page.id : null, rect, field: field || undefined, certify: certify || undefined, timestampUrl: stamp && tsa ? tsa : undefined,
         reason: reason.trim() || undefined, location: location.trim() || undefined, image,
       })
     } catch (e) {
@@ -97,9 +139,34 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
         <nav className="tabs">
           <button className={source === 'file' ? 'is-active' : ''} onClick={() => setSource('file')}>{m.digitalId.useMine}</button>
           <button className={source === 'new' ? 'is-active' : ''} onClick={() => setSource('new')}>{m.digitalId.createNew}</button>
+          {isDesktop && <button className={source === 'card' ? 'is-active' : ''} onClick={() => setSource('card')}>{m.digitalId.useCard}</button>}
         </nav>
 
-        {source === 'file' ? (
+        {source === 'card' ? (
+          <>
+            <div className="row">
+              <label className="field grow"><span>{m.digitalId.cardLibrary}</span>
+                <input value={module} spellCheck={false} onChange={(e) => setModule(e.target.value)} />
+              </label>
+              <button style={{ alignSelf: 'flex-end' }} disabled={!module.trim() || !!busy} onClick={findCards}>{m.digitalId.findCards}</button>
+            </div>
+            <p className="hint">{m.digitalId.cardHint}</p>
+            {!!cards?.length && (
+              <>
+                <label className="field"><span>{m.digitalId.certificate}</span>
+                  <select value={card} onChange={(e) => setCard(Number(e.target.value))}>
+                    {cards.map((c, i) => <option key={`${c.slot}-${c.id}-${i}`} value={i}>{c.label || c.id} ({c.token})</option>)}
+                  </select>
+                </label>
+                {chosen?.pinpad ? <p className="hint">{m.digitalId.pinpad}</p> : (
+                  <label className="field"><span>{m.digitalId.pin}</span>
+                    <input type="password" autoComplete="off" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
+                  </label>
+                )}
+              </>
+            )}
+          </>
+        ) : source === 'file' ? (
           <>
             <label className="field"><span>{m.digitalId.file}</span>
               <input type="file" accept=".p12,.pfx,application/x-pkcs12"
@@ -171,7 +238,7 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
         <div className="row end">
           <span className="muted grow">{busy}</span>
           <button disabled={!!busy} onClick={onClose}>{m.digitalId.cancel}</button>
-          <button className="cta" disabled={!p12 || !password || !!busy} onClick={sign}>{m.digitalId.sign}</button>
+          <button className="cta" disabled={!ready || !!busy} onClick={sign}>{m.digitalId.sign}</button>
         </div>
     </Modal>
   )

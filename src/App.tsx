@@ -23,11 +23,11 @@ import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
 import WorkflowsDialog from './components/WorkflowsDialog'
 import { OUTPUT_ACTIONS, newWorkflow, pageSetOf, type Workflow, type WorkflowStep } from './engine/workflow'
-import { addRecent, fileName, isDesktop, pickFiles, readPath, recentFiles, removeRecent, saveAs, watchOpenedFiles, writePath } from './native'
+import { addRecent, fileName, isDesktop, pickFiles, readPath, recentFiles, removeRecent, saveAs, tokenSign, watchOpenedFiles, writePath, type TokenKey } from './native'
 import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
 import SignatureDialog from './components/SignatureDialog'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
-import { EngineError, activeDocument, requestRender, closeDocument, engine, engineFor, newDocument, setActiveDocument } from './engine/client'
+import { EngineError, setTokenSigner, activeDocument, requestRender, closeDocument, engine, engineFor, newDocument, setActiveDocument } from './engine/client'
 import { parseRanges } from './engine/ranges'
 import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Quad, type Rect, type WidgetInfo, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
 import { arrowNavigate } from './focus'
@@ -690,6 +690,10 @@ export default function App() {
       list.filter((_, i) => !files[i]).forEach((p) => setRecent(removeRecent(p)))
       if (ok.length) void openFiles(files.filter((f): f is File => !!f), false, ok)
     })
+
+  useEffect(() => {
+    if (isDesktop) setTokenSigner((key, digestInfo) => tokenSign(key as TokenKey, digestInfo))
+  }, [])
 
   useEffect(() => {
     if (!isDesktop) return

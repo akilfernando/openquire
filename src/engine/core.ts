@@ -11,7 +11,7 @@ import { buildDocx, buildXlsx, type ExportImage, type ExportPage } from './offic
 import { detectTables, pageWords } from './tables'
 import { resolvePages, type WorkflowStep } from './workflow'
 import { autoTag, checkAccessibility, moveTag, structure, updateTag, type TagType } from './tagging'
-import { addValidationData, checkRevocationOnline, createDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
+import { addValidationData, checkRevocationOnline, createDigitalId, externalDigitalId, readDigitalId, signPdf, timestampPdf, verifySignatures } from './signing'
 import {
   hexOf,
   type AnnotInfo,
@@ -2286,9 +2286,17 @@ export class Engine {
   }
 
   /** Signs the current document and reopens the signed result. */
+  /** Signs with keys held outside the engine (smart cards), when the host supports them. */
+  externalSigner: ((key: unknown, digestInfo: Uint8Array) => Promise<Uint8Array>) | null = null
+
   async sign(req: SignRequest) {
     if (this.encrypted) throw new Error('Remove the password protection (Compression & security) and save before signing.')
-    const id = readDigitalId(req.p12, req.password)
+    const id = req.token
+      ? externalDigitalId(req.token.chain, (digestInfo) => {
+        if (!this.externalSigner) throw new Error('Smart card signing is only available in the desktop app.')
+        return this.externalSigner(req.token!.key, digestInfo)
+      })
+      : readDigitalId(req.p12!, req.password ?? '')
     const order = this.pageIds()
     const base = this.save({ compress: this.signatures.length ? 'none' : 'standard', security: { mode: 'keep' } })
     const bytes = await signPdf(base, id, {

@@ -605,6 +605,15 @@ export const en = {
   },
 
   digitalId: {
+    useCard: 'Smart card',
+    cardLibrary: 'Smart card library (PKCS#11)',
+    cardHint: 'Insert your card or token. OpenSC is the usual library; your card\'s maker may provide its own.',
+    findCards: 'Find cards',
+    readingCards: 'Reading cards',
+    noCards: 'No certificates were found. Check that the card is inserted and the library is right.',
+    certificate: 'Certificate',
+    pin: 'PIN',
+    pinpad: 'Enter your PIN on the card reader when asked.',
     title: 'Sign with a digital ID',
     intro: 'A certificate-based signature proves who signed and shows if the document changes afterwards. The signed PDF is downloaded when you sign.',
     signedBefore: ' Existing signatures stay valid: your signature is added as a new revision.',
