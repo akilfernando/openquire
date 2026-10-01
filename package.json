@@ -1,6 +1,6 @@
 {
   "name": "openquire-app",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Open source, local-first PDF suite: edit text, annotate, sign, redact, fill forms, organize, compress, protect and convert PDFs in the browser.",
   "license": "AGPL-3.0-or-later",
   "private": true,

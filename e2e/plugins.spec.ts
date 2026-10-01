@@ -86,3 +86,14 @@ export default function activate(api) {
   await install(page, { name: 'future.js', mimeType: 'text/javascript', buffer: Buffer.from(sneaky.replace('apiVersion: 1', 'apiVersion: 2').replace('sneaky', 'future')) })
   await expect(page.locator('.modal .error')).toContainText('needs plugin API version 2')
 })
+
+test('the plugin documentation is published with the site', async ({ page, request }) => {
+  await page.goto('/docs/plugins.html')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Plugins and themes')
+  for (const href of ['examples/csv-export.js', 'examples/review-notes.js', 'openquire-plugin.d.ts']) {
+    const res = await request.get(`/docs/${href}`)
+    expect(res.ok(), href).toBe(true)
+  }
+  const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([])
+})

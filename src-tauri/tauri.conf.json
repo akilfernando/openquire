@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OpenQuire",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "identifier": "dev.akilfernando.openquire",
   "build": {
     "frontendDist": "../dist",
@@ -21,12 +21,20 @@
         "dragDropEnabled": false
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "category": "Productivity",
     "shortDescription": "Open source PDF suite",
     "longDescription": "Edit, annotate, sign, redact, fill, organize, compare and convert PDFs, entirely on your computer.",
@@ -34,7 +42,14 @@
     "publisher": "OpenQuire",
     "homepage": "https://akilfernando.dev/openquire/",
     "fileAssociations": [
-      { "ext": ["pdf"], "mimeType": "application/pdf", "description": "PDF document", "role": "Editor" }
+      {
+        "ext": [
+          "pdf"
+        ],
+        "mimeType": "application/pdf",
+        "description": "PDF document",
+        "role": "Editor"
+      }
     ]
   }
 }

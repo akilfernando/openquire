@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugins and themes - OpenQuire</title>
+<meta name="description" content="How to write OpenQuire plugins, themes and CSS snippets: the plugin API, permissions, sandbox, design tokens and versioning.">
+<link rel="icon" href="../favicon-32.png">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --bg-2: #f6f6f6; --border: #e4e4e4; --text: #222222; --muted: #545454; --faint: #6b6b6b;
+    --accent: hsl(32, 92%, 34%); --accent-soft: hsla(32, 92%, 34%, 0.12); --code-bg: #f3f3f3;
+    --font: ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1e1e1e; --bg-2: #262626; --border: #363636; --text: #dadada; --muted: #b3b3b3; --faint: #999999;
+      --accent: hsl(32, 92%, 62%); --accent-soft: hsla(32, 92%, 62%, 0.14); --code-bg: #2a2a2a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.65 var(--font); }
+  .layout { display: grid; grid-template-columns: 240px minmax(0, 760px); gap: 48px; max-width: 1100px; margin: 0 auto; padding: 32px 24px 96px; }
+  nav { position: sticky; top: 24px; align-self: start; font-size: 14px; }
+  nav .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); text-decoration: none; margin-bottom: 20px; }
+  nav .brand img { width: 26px; height: 26px; border-radius: 6px; }
+  nav ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--border); }
+  nav li a { display: block; padding: 3px 12px; color: var(--muted); text-decoration: none; }
+  nav li a:hover { color: var(--text); }
+  nav li.sub a { padding-left: 24px; font-size: 13px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 21px; margin: 44px 0 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 26px 0 6px; }
+  p, li { color: var(--text); }
+  .lede { color: var(--muted); font-size: 17px; margin-top: 0; }
+  a { color: var(--accent); }
+  code { font: 13px var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 13px/1.55 var(--mono); }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .note { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; gap: 16px; } nav { position: static; } }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav aria-label="Contents">
+  <a class="brand" href="../"><img src="../icon-192.png" alt="">OpenQuire</a>
+  <ol>
+    <li><a href="#start">Your first plugin</a></li>
+    <li><a href="#manifest">The manifest</a></li>
+    <li><a href="#permissions">Permissions and the sandbox</a></li>
+    <li><a href="#api">API reference</a></li>
+    <li class="sub"><a href="#commands">Commands</a></li>
+    <li class="sub"><a href="#panes">Panes</a></li>
+    <li class="sub"><a href="#tools">Tools</a></li>
+    <li class="sub"><a href="#document">Document</a></li>
+    <li class="sub"><a href="#ui">Notices and downloads</a></li>
+    <li><a href="#workflows">Workflows</a></li>
+    <li><a href="#themes">Themes and snippets</a></li>
+    <li><a href="#versioning">Versioning</a></li>
+  </ol>
+</nav>
+<main>
+<h1>Plugins and themes</h1>
+<p class="lede">OpenQuire can be extended without forking it: plugins add commands, sidebar panes, tools, export formats and workflow steps, and themes and CSS snippets change how it looks.</p>
+
+<h2 id="start">Your first plugin</h2>
+<p>A plugin is one JavaScript module. It exports a <code>manifest</code> describing itself and a default function that receives the API:</p>
+<pre><code>export const manifest = {
+  id: 'dev.example.word-count',
+  name: 'Word count',
+  version: '1.0.0',
+  apiVersion: 1,
+  description: 'Counts the words in the open document.',
+  permissions: ['document:read'],
+}
+
+export default function activate(api) {
+  api.commands.add({
+    id: 'count',
+    name: 'Count words',
+    run: async () =&gt; {
+      const doc = await api.document.info()
+      let words = 0
+      for (let page = 0; page &lt; doc.pageCount; page++)
+        words += (await api.document.pageText(page)).split(/\s+/).filter(Boolean).length
+      await api.ui.notice(`${words} words`)
+    },
+  })
+}</code></pre>
+<p>Save it as <code>word-count.js</code>, then in OpenQuire open <b>Settings, Plugins, Install from file</b>. OpenQuire shows what the plugin asks for before anything is installed. The command then appears in the command palette (<code>Ctrl+P</code>), where it can also be given a hotkey.</p>
+<p>Two complete examples: <a href="examples/csv-export.js">csv-export.js</a> adds an export format and a sidebar pane, and <a href="examples/review-notes.js">review-notes.js</a> adds a dock tool. For editor support, use the type definitions in <a href="openquire-plugin.d.ts">openquire-plugin.d.ts</a>.</p>
+
+<h2 id="manifest">The manifest</h2>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td><code>id</code></td><td>Unique, reverse-domain style, such as <code>dev.example.csv-export</code>. Installing a plugin with the same id replaces the old one.</td></tr>
+  <tr><td><code>name</code></td><td>Shown in Settings and before each command name in the palette.</td></tr>
+  <tr><td><code>version</code></td><td>Your plugin's version. Use semantic versioning.</td></tr>
+  <tr><td><code>apiVersion</code></td><td>The plugin API version the plugin was written for. Currently <code>1</code>.</td></tr>
+  <tr><td><code>permissions</code></td><td>What the plugin needs beyond adding commands and panes. See below.</td></tr>
+  <tr><td><code>description</code>, <code>author</code></td><td>Optional, shown when installing.</td></tr>
+</table>
+<p>The manifest must be a plain object: OpenQuire reads it by loading the module once, with no access to anything, before the user decides whether to install.</p>
+
+<h2 id="permissions">Permissions and the sandbox</h2>
+<table>
+  <tr><th>Permission</th><th>Allows</th></tr>
+  <tr><td><code>document:read</code></td><td>Reading the open document: its pages, text, search and bytes.</td></tr>
+  <tr><td><code>document:write</code></td><td>Changing the open document. Every change is one step the user can undo.</td></tr>
+  <tr><td><code>network</code></td><td>Using <code>fetch</code>, <code>XMLHttpRequest</code>, <code>WebSocket</code> and <code>EventSource</code>.</td></tr>
+</table>
+<p>Each plugin runs in its own Web Worker. It cannot see the page, the user's other files, OpenQuire's storage or other plugins; it can only use the API. Without the <code>network</code> permission the network functions are removed. Calls that touch the document are checked against the permissions the user approved, and fail with an error otherwise.</p>
+<p class="note">Users are told to install plugins only from people they trust. Keep permissions to what the plugin really needs: users see them before installing.</p>
+
+<h2 id="api">API reference</h2>
+<p>Everything on <code>api</code> that talks to OpenQuire returns a promise. Pages are numbered from 0, and positions are in PDF points from the page's top-left corner.</p>
+
+<h3 id="commands">Commands</h3>
+<pre><code>api.commands.add({ id, name, workflow?, run })</code></pre>
+<p>Adds <i>Plugin name: name</i> to the command palette. Users can assign it a hotkey. With <code>workflow: true</code>, running the command while recording a workflow adds it as a step, so it runs on every file when the workflow is replayed, with document calls acting on each file in turn.</p>
+
+<h3 id="panes">Panes</h3>
+<pre><code>api.panes.add({ id, title, content, onEvent? })
+api.panes.update(id, content)</code></pre>
+<p>Adds a tab to the left sidebar. Content is a list of elements that OpenQuire draws in its own style, in light and dark:</p>
+<table>
+  <tr><th>Element</th><th>Fields</th></tr>
+  <tr><td><code>heading</code></td><td><code>text</code></td></tr>
+  <tr><td><code>text</code></td><td><code>text</code>, <code>muted?</code></td></tr>
+  <tr><td><code>list</code></td><td><code>items</code> (strings)</td></tr>
+  <tr><td><code>input</code></td><td><code>id</code>, <code>label</code>, <code>value?</code>, <code>placeholder?</code></td></tr>
+  <tr><td><code>button</code></td><td><code>id</code>, <code>label</code>, <code>primary?</code></td></tr>
+</table>
+<p>When a button is pressed, <code>onEvent</code> receives <code>{ element, values }</code>: the button's id and the current value of every input, by id.</p>
+
+<h3 id="tools">Tools</h3>
+<pre><code>api.tools.add({ id, name, onClick })</code></pre>
+<p>Adds a tool to the dock. While it is selected, clicking a page calls <code>onClick({ page, x, y })</code>.</p>
+
+<h3 id="document">Document</h3>
+<table>
+  <tr><th>Method</th><th>Returns</th><th>Needs</th></tr>
+  <tr><td><code>info()</code></td><td><code>{ name, pageCount, pages: [{ index, width, height, label }], meta }</code></td><td>read</td></tr>
+  <tr><td><code>pageText(page)</code></td><td>The page's text</td><td>read</td></tr>
+  <tr><td><code>search(text)</code></td><td><code>[{ page, snippet }]</code></td><td>read</td></tr>
+  <tr><td><code>bytes()</code></td><td>The document as a PDF (<code>Uint8Array</code>)</td><td>read</td></tr>
+  <tr><td><code>runStep(step)</code></td><td>Runs any <a href="#workflows">workflow step</a></td><td>write</td></tr>
+  <tr><td><code>addNote(page, x, y, text)</code></td><td>Adds a sticky note</td><td>write</td></tr>
+</table>
+
+<h3 id="ui">Notices and downloads</h3>
+<pre><code>api.ui.notice(text)
+api.ui.download(name, data, type?)</code></pre>
+<p><code>notice</code> shows a message in the status bar. <code>download</code> offers a file to the user (a save dialog in the desktop app); this is how a plugin adds an export format.</p>
+
+<h2 id="workflows">Workflows</h2>
+<p><code>document.runStep</code> accepts the steps OpenQuire's workflows use, so a plugin can do anything a workflow can:</p>
+<pre><code>await api.document.runStep({ action: 'rotate', pages: 'even', delta: 90 })
+await api.document.runStep({ action: 'markPatterns', patterns: ['[\\w.+-]+@[\\w-]+(\\.[\\w-]+)+'] })
+await api.document.runStep({ action: 'applyRedactions' })
+await api.document.runStep({ action: 'stamp', pages: 'all', stamp: {
+  template: 'ACME-{bates}', position: 'br', size: 9, color: [0, 0, 0], opacity: 1, angle: 0 } })</code></pre>
+<p>Available steps: <code>rotate</code>, <code>deletePages</code>, <code>stamp</code>, <code>markTerms</code>, <code>markPatterns</code>, <code>applyRedactions</code>, <code>flatten</code>, <code>sanitize</code>, <code>setMeta</code>, <code>detectFields</code> and <code>tag</code>. Their fields are in the type definitions. Page sets are <code>"all"</code>, <code>"odd"</code>, <code>"even"</code> or ranges such as <code>"1-3, 5"</code>.</p>
+<p>Workflow files that use plugin commands contain steps like <code>{ "action": "plugin", "plugin": "dev.example.csv-export", "command": "export" }</code>. They run in the app with the plugin installed; the command-line tool reports that the plugin is needed.</p>
+
+<h2 id="themes">Themes and snippets</h2>
+<p>A theme is a CSS file imported in <b>Settings, Appearance</b>; a snippet is a smaller piece of CSS that can be turned on and off. Both are added after OpenQuire's own styles. Build on the design tokens rather than fixed colors, and both light and dark will work:</p>
+<pre><code>/* A flatter, square dock */
+.dock { border-radius: 4px; box-shadow: none; border-color: var(--border-hover); }
+
+/* A warmer workspace background in the light theme */
+.theme-light { --bg-primary: #fbf8f2; }
+
+/* The accent hue comes from Settings; a theme that insists on its own needs !important */
+.app { --accent-h: 212 !important; }</code></pre>
+<table>
+  <tr><th>Token</th><th>Use</th></tr>
+  <tr><td><code>--accent-h</code>, <code>--accent-s</code>, <code>--accent</code>, <code>--accent-hover</code>, <code>--accent-soft</code></td><td>The accent color, built from its hue and saturation</td></tr>
+  <tr><td><code>--bg-primary</code>, <code>--bg-primary-alt</code>, <code>--bg-secondary</code>, <code>--bg-secondary-alt</code></td><td>Backgrounds of the workspace and sidebars</td></tr>
+  <tr><td><code>--text-normal</code>, <code>--text-muted</code>, <code>--text-faint</code></td><td>Text colors, from strongest to weakest</td></tr>
+  <tr><td><code>--border</code>, <code>--border-hover</code>, <code>--border-focus</code></td><td>Borders</td></tr>
+  <tr><td><code>--hover</code>, <code>--active</code>, <code>--interactive</code>, <code>--interactive-hover</code></td><td>Controls</td></tr>
+  <tr><td><code>--radius-s</code>, <code>--radius-m</code>, <code>--radius-l</code></td><td>Corner radii</td></tr>
+  <tr><td><code>--font-interface</code>, <code>--font-mono</code>, <code>--font-small</code>, <code>--font-smaller</code>, <code>--font-medium</code></td><td>Type</td></tr>
+  <tr><td><code>--header-height</code>, <code>--ribbon-width</code></td><td>Layout</td></tr>
+</table>
+<p>Useful class names: <code>.app</code> (with <code>.theme-light</code> or <code>.theme-dark</code>), <code>.ribbon</code>, <code>.sidebar</code>, <code>.tab-bar</code>, <code>.view-header</code>, <code>.desk</code>, <code>.page</code>, <code>.dock</code>, <code>.status-bar</code>, <code>.modal</code>. Class names are not part of the stable API; tokens are.</p>
+
+<h2 id="versioning">Versioning</h2>
+<p>OpenQuire follows <a href="https://semver.org">semantic versioning</a> from 1.0. The plugin API has its own version, which plugins declare as <code>apiVersion</code>:</p>
+<ul>
+  <li>Within API version 1, changes only add: new methods, new optional fields, new pane elements and new workflow steps. A plugin written for version 1 keeps working in every OpenQuire release that provides version 1.</li>
+  <li>Removing or changing anything a plugin may rely on means a new API version. OpenQuire refuses plugins written for a version it does not provide, with a message saying which version is needed, rather than running them incorrectly.</li>
+  <li>The design tokens above are stable within a major version of OpenQuire. Class names and the DOM structure may change in any release.</li>
+  <li>Workflow files have their own <code>version</code> field, versioned the same way.</li>
+</ul>
+</main>
+</div>
+</body>
+</html>

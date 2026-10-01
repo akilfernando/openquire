@@ -4,6 +4,11 @@ OpenQuire aims to match Adobe Acrobat on everyday PDF work, then do better in th
 local-first privacy, automation, extensibility and price. This roadmap lists the major work in order.
 Each release has a theme, a short list of deliverables, and a test for when it's done.
 
+> **Status (October 2026):** every release below, through 1.0, has been delivered; see
+> [CHANGELOG.md](CHANGELOG.md). One step remains outside the code: publishing the command-line
+> tool to npm, which needs the maintainer's npm account. "Where we are (0.1)" describes the
+> starting point, kept for context.
+
 ## Where we are (0.1)
 
 OpenQuire already covers most of Acrobat's everyday work. It's built on MuPDF (WebAssembly), so edits

@@ -2355,7 +2355,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openquire"
-version = "0.6.0"
+version = "1.0.0"
 dependencies = [
  "cryptoki",
  "percent-encoding",

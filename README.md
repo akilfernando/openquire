@@ -62,6 +62,14 @@ The same engine runs without a browser. `cli/` builds the `openquire` package: a
 `compress`, `pdfa`, `tag`, `export`) and a Node library exporting the `Engine`. Build it with
 `npm run build:cli` and run `node cli/dist/openquire.mjs --help`. See [cli/README.md](cli/README.md).
 
+## Extending
+
+Plugins add commands, sidebar panes, dock tools, export formats and workflow steps. Each runs in its
+own sandboxed worker with only the permissions the user approves. Themes and CSS snippets restyle
+the app on top of its design tokens. See the [plugin and theme documentation](https://akilfernando.dev/openquire/docs/plugins.html)
+(source in `public/docs/`), with example plugins and TypeScript definitions. From 1.0, OpenQuire
+and its plugin API follow semantic versioning.
+
 ## Translating
 
 All interface text lives in `src/i18n/en.ts`. To add a language, copy it (for example to `fr.ts`),

@@ -1,6 +1,6 @@
 [package]
 name = "openquire"
-version = "0.6.0"
+version = "1.0.0"
 description = "OpenQuire, an open source PDF suite"
 license = "AGPL-3.0-or-later"
 edition = "2021"
