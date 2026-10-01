@@ -1325,6 +1325,11 @@ export default function App() {
 
       <div className="workspace">
         <nav className="tab-bar" aria-label={m.workspace.documents}>
+          {/* On phones the ribbon is hidden, so its essentials move here. */}
+          <span className="phone-only">
+            <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} onClick={() => setLeftOpen((o) => !o)} />
+            <IconButton Icon={FolderOpen} label={m.actions.openFile} onClick={openDialog} />
+          </span>
           {tabs.map((t) => {
             const isActive = t.id === active
             const name = isActive && doc ? doc.name : t.name
@@ -1344,6 +1349,10 @@ export default function App() {
             )
           })}
           <span className="spacer" />
+          <span className="phone-only">
+            <IconButton Icon={SquareTerminal} label={m.actions.commandPalette} onClick={() => setPalette(true)} />
+            <IconButton Icon={SettingsIcon} label={m.actions.settings} onClick={() => setSettingsOpen(true)} />
+          </span>
           {doc && <IconButton Icon={PanelRight} label={m.actions.toggleRight} onClick={() => setRightOpen((o) => !o)} />}
         </nav>
 

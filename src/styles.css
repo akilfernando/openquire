@@ -29,6 +29,8 @@
   --mono-rgb: 0, 0, 0;
   --accent-l: 34%;
   --on-accent: #ffffff;
+  /* Hover darkens here, so white text keeps its contrast. */
+  --hover-shift: -6%;
   --shadow: 0 10px 40px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
   --page-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 6px 24px rgba(0, 0, 0, 0.1);
   --desk-dot: rgba(0, 0, 0, 0.09);
@@ -39,7 +41,7 @@
   --accent-h: 32;
   --accent-s: 92%;
   --accent: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-  --accent-hover: hsl(var(--accent-h), var(--accent-s), calc(var(--accent-l) + 6%));
+  --accent-hover: hsl(var(--accent-h), var(--accent-s), calc(var(--accent-l) + var(--hover-shift, 6%)));
   --accent-soft: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.16);
 
   --bg-primary: var(--base-00);
@@ -619,8 +621,13 @@ a { color: var(--accent); }
   .desk { padding: 16px 12px 120px; }
   .find-bar input { width: 120px; }
 }
+.phone-only { display: none; }
 @media (max-width: 560px) {
   .ribbon { display: none; }
+  .phone-only { display: flex; align-self: center; gap: 2px; }
+  .tab-bar { padding: 0 4px; }
+  .tab { max-width: 150px; padding-left: 8px; }
+  .empty-state-inner { padding: 0 20px; }
   .sidebar.left { left: 0; }
   .drawer-scrim { left: 0; }
   .view-actions .zoom-label { display: none; }
