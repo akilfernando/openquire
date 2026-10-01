@@ -38,6 +38,7 @@ export class PasswordError extends Error {
 const A4: Rect = [0, 0, 595.28, 841.89]
 const isPdfName = (name: string) => /\.pdf$/i.test(name)
 const LINE_HEIGHT = 1.2
+const TEXT_CACHE_PAGES = 48
 
 /** Opens a PDF, or converts anything MuPDF can read (images, Office, EPUB, HTML, text…) to one. */
 export function openAsPdf(name: string, bytes: Uint8Array, password?: string): mupdf.PDFDocument {
@@ -138,6 +139,7 @@ export class Engine {
   private password: string | undefined
   private encrypted = false
   private signatures: SignatureInfo[] = []
+  private lastSave: { position: number; bytes: Uint8Array } | null = null
   private tick = 0
   private revs = new Map<number, number>()
   private fonts = new Map<string, mupdf.Font>()
@@ -147,30 +149,30 @@ export class Engine {
 
   open(name: string, bytes: Uint8Array, password?: string) {
     const doc = openAsPdf(name, bytes, password)
-    this.doc?.destroy()
-    this.doc = doc
-    this.name = name.replace(/\.[^.]+$/, '')
+    this.replaceDoc(doc, name.replace(/\.[^.]+$/, ''))
     this.password = password
     this.encrypted = isPdfName(name) && !!password
     this.signatures = isPdfName(name) ? verifySignatures(bytes, doc) : []
-    this.revs.clear()
-    this.stext.clear()
-    doc.enableJournal()
     return this.state()
   }
 
   newBlank() {
     const doc = new mupdf.PDFDocument()
     doc.insertPage(-1, doc.addPage(A4, 0, {}, ''))
+    this.replaceDoc(doc, 'untitled')
+    return this.state()
+  }
+
+  private replaceDoc(doc: mupdf.PDFDocument, name: string) {
+    this.touch('all')
     this.doc?.destroy()
     this.doc = doc
-    this.name = 'untitled'
+    this.name = name
     this.password = undefined
     this.encrypted = false
     this.signatures = []
-    this.revs.clear()
+    this.lastSave = null
     doc.enableJournal()
-    return this.state()
   }
 
   /** Appends every page of another file, along with its annotations and form fields. */
@@ -238,12 +240,12 @@ export class Engine {
   private touch(ids: number[] | 'all') {
     if (ids === 'all') {
       this.revs.clear()
-      this.stext.clear()
+      for (const [k, st] of this.stext) this.dropText(k, st)
       this.tick++
     } else {
       for (const id of ids) {
         this.revs.set(id, ++this.tick)
-        for (const k of this.stext.keys()) if (k.startsWith(`${id}:`)) this.stext.delete(k)
+        for (const [k, st] of this.stext) if (k.startsWith(`${id}:`)) this.dropText(k, st)
       }
     }
   }
@@ -728,13 +730,32 @@ export class Engine {
   private structured(pageId: number) {
     const key = `${pageId}:${this.revs.get(pageId) ?? this.tick}`
     let st = this.stext.get(key)
-    if (!st) {
+    if (st) {
+      // Refresh its position so the cache evicts least recently used pages first.
+      this.stext.delete(key)
+    } else {
       const page = this.page(pageId)
       st = page.toStructuredText('preserve-whitespace,preserve-spans')
       page.destroy()
-      this.stext.set(key, st)
+      // Entries for untouched pages are keyed by the global tick, so drop older keys for this page.
+      for (const [k, old] of this.stext) if (k.startsWith(`${pageId}:`)) this.dropText(k, old)
+      while (this.stext.size >= TEXT_CACHE_PAGES) {
+        const [k, old] = this.stext.entries().next().value!
+        this.dropText(k, old)
+      }
     }
+    this.stext.set(key, st)
     return st
+  }
+
+  private dropText(key: string, st: mupdf.StructuredText) {
+    this.stext.delete(key)
+    st.destroy()
+  }
+
+  /** Number of pages whose extracted text is currently cached (for tests). */
+  get cachedTextPages() {
+    return this.stext.size
   }
 
   selectText(pageId: number, a: Point, b: Point) {
@@ -1122,16 +1143,14 @@ export class Engine {
     if (this.signatures.length) {
       // Rewriting a signed file would break its signatures; append the changes instead.
       if (opts.security.mode !== 'keep') throw new Error("Password changes aren't possible on a signed document without invalidating its signatures.")
+      // MuPDF still reports unsaved changes after an incremental save, and a second save with
+      // nothing new returns a broken file, so reuse the last output until the journal moves.
+      const position = this.d.getJournal().position
+      if (this.lastSave?.position === position) return this.lastSave.bytes.slice()
       const out = this.d.saveToBuffer('incremental').asUint8Array().slice()
-      // MuPDF can't append a second update to the same in-memory document, so continue from
-      // what was just written. Object numbers, and therefore page ids, are unchanged.
-      const doc = openAsPdf(`${this.name}.pdf`, out.slice(), this.password)
-      this.doc!.destroy()
-      this.doc = doc
-      this.signatures = verifySignatures(out, doc)
-      this.touch('all')
-      doc.enableJournal()
-      return out
+      this.lastSave = { position, bytes: out }
+      this.signatures = verifySignatures(out, this.d)
+      return out.slice()
     }
     const doc = this.reopen()
     if (opts.compress === 'medium' || opts.compress === 'strong') {

@@ -11,7 +11,7 @@
   color-scheme: dark;
   --base-00: #1c1c1c; --base-05: #212121; --base-10: #232323; --base-20: #282828;
   --base-25: #2e2e2e; --base-30: #333333; --base-35: #3f3f3f; --base-40: #555555;
-  --base-50: #666666; --base-60: #999999; --base-70: #b3b3b3; --base-100: #dadada;
+  --base-50: #949494; --base-60: #a3a3a3; --base-70: #b3b3b3; --base-100: #dadada;
   --mono-rgb: 255, 255, 255;
   --accent-l: 62%;
   --on-accent: #1c1c1c;
@@ -25,9 +25,9 @@
   color-scheme: light;
   --base-00: #ffffff; --base-05: #fcfcfc; --base-10: #fafafa; --base-20: #f6f6f6;
   --base-25: #efefef; --base-30: #e4e4e4; --base-35: #dadada; --base-40: #bdbdbd;
-  --base-50: #ababab; --base-60: #707070; --base-70: #5c5c5c; --base-100: #222222;
+  --base-50: #6b6b6b; --base-60: #616161; --base-70: #545454; --base-100: #222222;
   --mono-rgb: 0, 0, 0;
-  --accent-l: 44%;
+  --accent-l: 34%;
   --on-accent: #ffffff;
   --shadow: 0 10px 40px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
   --page-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 6px 24px rgba(0, 0, 0, 0.1);

@@ -129,6 +129,15 @@ export default function App() {
   const dark = settings.theme === 'system' ? systemDark : settings.theme === 'dark'
   useEffect(() => void engine.setAuthor(settings.author), [settings.author])
 
+  // Files opened from the operating system when OpenQuire is installed as an app.
+  useEffect(() => {
+    const queue = (window as unknown as { launchQueue?: { setConsumer(fn: (p: { files: FileSystemFileHandle[] }) => void): void } }).launchQueue
+    queue?.setConsumer(async ({ files }) => {
+      if (files.length) void openFiles(await Promise.all(files.map((h) => h.getFile())), false)
+    })
+    // Registered once; openFiles only uses stable setters and refs.
+  }, [])
+
   // ---- engine plumbing ----------------------------------------------------------------
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
@@ -236,8 +245,10 @@ export default function App() {
 
   // ---- search ------------------------------------------------------------------------------
 
+  const [searched, setSearched] = useState('')
   const find = (q: string) =>
     run('Searching', async () => {
+      setSearched(q.trim())
       if (!q.trim()) return setHits(null)
       const found = await engine.search(q.trim())
       setHits(found)
@@ -581,7 +592,7 @@ export default function App() {
   }
   const accept = 'application/pdf,image/*,.docx,.xlsx,.pptx,.epub,.html,.htm,.txt,.cbz,.fb2,.mobi'
   const IconButton = ({ Icon, label, hotkey, onClick, disabled, active }: { Icon: Icon; label: string; hotkey?: string; onClick: () => void; disabled?: boolean; active?: boolean }) => (
-    <button className={`clickable-icon${active ? ' is-active' : ''}`} aria-label={label} title={hotkey ? `${label} (${hotkey})` : label} disabled={disabled} onClick={onClick}>
+    <button type="button" className={`clickable-icon${active ? ' is-active' : ''}`} aria-label={label} title={hotkey ? `${label} (${hotkey})` : label} disabled={disabled} onClick={onClick}>
       <Icon size={18} />
     </button>
   )
@@ -649,20 +660,23 @@ export default function App() {
             </div>
             <div className="view-actions">
               {findOpen ? (
-                <form className="find-bar" onSubmit={(e) => { e.preventDefault(); void find(query) }}>
+                <div className="find-bar" role="search">
                   <input
-                    ref={findRef} placeholder="Find..." value={query} onChange={(e) => setQuery(e.target.value)}
+                    ref={findRef} placeholder="Find..." aria-label="Find in document" value={query} onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') { setFindOpen(false); setHits(null) }
-                      if (e.key === 'Enter' && hits?.length && query.trim() === (findRef.current?.dataset.last ?? '')) { e.preventDefault(); stepHit(e.shiftKey ? -1 : 1) }
-                      else if (e.key === 'Enter' && findRef.current) findRef.current.dataset.last = query.trim()
+                      if (e.key !== 'Enter') return
+                      e.preventDefault()
+                      // Enter searches; pressing it again on the same query steps through matches.
+                      if (hits?.length && query.trim() === searched) stepHit(e.shiftKey ? -1 : 1)
+                      else void find(query)
                     }}
                   />
                   <span className="find-count tnum">{hits ? (hits.length ? `${hitIndex + 1}/${hits.length}` : 'None') : ''}</span>
                   <IconButton Icon={ChevronUp} label="Previous match" disabled={!hits?.length} onClick={() => stepHit(-1)} />
                   <IconButton Icon={ChevronDown} label="Next match" disabled={!hits?.length} onClick={() => stepHit(1)} />
                   <IconButton Icon={X} label="Close find" onClick={() => { setFindOpen(false); setHits(null) }} />
-                </form>
+                </div>
               ) : (
                 <IconButton Icon={Search} label="Find" hotkey={mod('F')} onClick={openFind} />
               )}
