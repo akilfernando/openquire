@@ -2235,13 +2235,70 @@ export class Engine {
 
   /** Adds invisible, searchable text over recognized words (the output of OCR). */
   addTextLayer(pageId: number, words: OcrWord[]) {
-    const runs: TextRun[] = words
-      .filter((w) => w.text.trim() && w.bbox[2] > w.bbox[0])
-      .map((w) => ({
-        text: w.text, x: w.bbox[0], y: w.baseline, size: Math.max(2, w.size), width: w.bbox[2] - w.bbox[0],
-        font: 'Helvetica' as BaseFont, color: [0, 0, 0] as RGB, invisible: true,
-      }))
-    if (runs.length) this.op('Recognize text', () => this.appendText(pageId, runs), [pageId])
+    const valid = words.filter((w) => w.text.trim() && w.bbox[2] > w.bbox[0])
+    if (!valid.length) return this.state()
+
+    // Group words into lines so words on the same line are emitted together with space separators.
+    // This preserves natural line structure and prevents a newline after every word when copying.
+    const lines: OcrWord[][] = []
+    let curLine: OcrWord[] = []
+
+    for (const w of valid) {
+      if (!curLine.length) {
+        curLine.push(w)
+        continue
+      }
+      const prev = curLine[curLine.length - 1]
+      const sameLine =
+        w.lineIndex !== undefined && prev.lineIndex !== undefined
+          ? w.lineIndex === prev.lineIndex
+          : Math.abs(w.baseline - prev.baseline) <= Math.max(w.size, prev.size) * 0.4 &&
+            w.bbox[0] >= prev.bbox[0] - 2
+
+      if (sameLine) {
+        curLine.push(w)
+      } else {
+        lines.push(curLine)
+        curLine = [w]
+      }
+    }
+    if (curLine.length) lines.push(curLine)
+
+    this.op('Recognize text', () => {
+      this.appendContent(pageId, (names) => {
+        const fname = names.font('Helvetica')
+        let ops = 'q 3 Tr\n'
+        for (const line of lines) {
+          const first = line[0]
+          const size = Math.max(2, first.size)
+          const spaceWidth = this.textWidth(' ', size, 'Helvetica')
+          let curX = first.bbox[0]
+          let lineOps = `BT /${fname} ${size.toFixed(2)} Tf 1 0 0 -1 ${first.bbox[0].toFixed(2)} ${first.baseline.toFixed(2)} Tm `
+
+          for (let i = 0; i < line.length; i++) {
+            const w = line[i]
+            if (i > 0) {
+              const gap = w.bbox[0] - curX
+              const rem = gap - spaceWidth
+              const offset = Math.round(-(rem / size) * 1000)
+              lineOps += `0 Tc [<20> ${offset}] TJ `
+              curX = w.bbox[0]
+            }
+            const targetW = w.bbox[2] - w.bbox[0]
+            const natW = this.textWidth(w.text, size, 'Helvetica')
+            const tc = w.text.length > 1 ? (targetW - natW) / w.text.length : 0
+            const hex = [...w.text].map((ch) => winAnsi(ch.codePointAt(0)!).toString(16).padStart(2, '0')).join('')
+            lineOps += `${tc.toFixed(3)} Tc [<${hex}>] TJ `
+            curX = w.bbox[2]
+          }
+
+          ops += `${lineOps}0 Tc ET\n`
+        }
+        ops += 'Q\n'
+        return ops
+      })
+    }, [pageId])
+
     return this.state()
   }
 

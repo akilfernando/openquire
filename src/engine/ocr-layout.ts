@@ -9,9 +9,11 @@ export interface OcrBlock {
 /** Converts Tesseract words (in image pixels) to page-space words for the text layer. */
 export function wordsFromBlocks(blocks: OcrBlock[] | null, scale: number, minConfidence = 30): OcrWord[] {
   const out: OcrWord[] = []
+  let lineIndex = 0
   for (const block of blocks ?? [])
     for (const para of block.paragraphs)
       for (const line of para.lines) {
+        lineIndex++
         const { baseline: b, bbox: lb } = line
         const slope = b.x1 > b.x0 ? (b.y1 - b.y0) / (b.x1 - b.x0) : 0
         // Ascender to baseline is about 0.75 em in the standard fonts.
@@ -24,6 +26,7 @@ export function wordsFromBlocks(blocks: OcrBlock[] | null, scale: number, minCon
             bbox: [w.bbox.x0 / scale, w.bbox.y0 / scale, w.bbox.x1 / scale, w.bbox.y1 / scale],
             baseline,
             size,
+            lineIndex,
           })
         }
       }

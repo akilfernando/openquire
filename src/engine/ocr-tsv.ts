@@ -10,19 +10,20 @@ import type { OcrWord } from './types'
 const BASELINE_SHARE = 0.78
 
 export function wordsFromTsv(tsv: string, scale: number, minConfidence = 30): OcrWord[] {
-  const lines = new Map<string, { top: number; height: number }>()
+  const lines = new Map<string, { top: number; height: number; lineIndex: number }>()
   const words: { key: string; text: string; left: number; top: number; width: number; height: number }[] = []
+  let lineCount = 0
   for (const row of tsv.split(/\r?\n/).slice(1)) {
     const c = row.split('\t')
     if (c.length < 12) continue
     const [level, , block, par, line, , left, top, width, height, conf] = c.slice(0, 11).map(Number)
     const text = c.slice(11).join('\t').trim()
     const key = `${block}.${par}.${line}`
-    if (level === 4) lines.set(key, { top, height })
+    if (level === 4) lines.set(key, { top, height, lineIndex: ++lineCount })
     else if (level === 5 && text && conf >= minConfidence) words.push({ key, text, left, top, width, height })
   }
   return words.map((w) => {
-    const line = lines.get(w.key) ?? { top: w.top, height: w.height }
+    const line = lines.get(w.key) ?? { top: w.top, height: w.height, lineIndex: 0 }
     const baseline = line.top + line.height * BASELINE_SHARE
     return {
       text: w.text,
@@ -30,6 +31,7 @@ export function wordsFromTsv(tsv: string, scale: number, minConfidence = 30): Oc
       baseline: baseline / scale,
       // Ascender to baseline is about 0.75 em in the standard fonts.
       size: Math.max(2, (baseline - line.top) / 0.75 / scale),
+      lineIndex: line.lineIndex,
     }
   })
 }

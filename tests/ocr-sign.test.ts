@@ -50,6 +50,8 @@ describe('OCR', () => {
     e.addTextLayer(page.id, words)
 
     expect(e.pagesWithoutText()).toEqual([])
+    expect(e.pageText(page.id)).toContain('Invoice number 12345')
+    expect(e.pageText(page.id)).not.toContain('Invoice\n')
     const hits = e.search('12345')
     expect(hits.length).toBe(1)
     // The invisible word sits where the printed word is.

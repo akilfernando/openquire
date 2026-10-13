@@ -129,6 +129,7 @@ export interface OcrWord {
   /** Baseline y and font size estimated from the word's line. */
   baseline: number
   size: number
+  lineIndex?: number
 }
 
 export interface SignRequest {
