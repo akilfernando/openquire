@@ -233,7 +233,47 @@ function Labels({ labelPage, actions }: Pick<Props, 'labelPage' | 'actions'>) {
   )
 }
 
+const DEFAULT_RIGHT_WIDTH = 300
+const MIN_RIGHT_WIDTH = 220
+const MAX_RIGHT_WIDTH = 600
+
 export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions }: Props) {
+  const [width, setWidth] = useState(() => {
+    const saved = localStorage.getItem('openquire:sidebar-right-width')
+    const n = saved ? Number(saved) : DEFAULT_RIGHT_WIDTH
+    return Number.isFinite(n) && n >= MIN_RIGHT_WIDTH && n <= MAX_RIGHT_WIDTH ? n : DEFAULT_RIGHT_WIDTH
+  })
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = width
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const delta = startX - ev.clientX
+      const next = Math.min(MAX_RIGHT_WIDTH, Math.max(MIN_RIGHT_WIDTH, startW + delta))
+      setWidth(next)
+    }
+
+    const onPointerUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      document.body.classList.remove('is-col-resizing')
+      const finalDelta = startX - ev.clientX
+      const finalW = Math.min(MAX_RIGHT_WIDTH, Math.max(MIN_RIGHT_WIDTH, startW + finalDelta))
+      localStorage.setItem('openquire:sidebar-right-width', String(finalW))
+    }
+
+    document.body.classList.add('is-col-resizing')
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+  }
+
+  const onDoubleClick = () => {
+    setWidth(DEFAULT_RIGHT_WIDTH)
+    localStorage.setItem('openquire:sidebar-right-width', String(DEFAULT_RIGHT_WIDTH))
+  }
+
   const [ranges, setRanges] = useState('')
   const [pdfaPart, setPdfaPart] = useState<2 | 3>(doc.attachments.length ? 3 : 2)
   const scope = selectedCount ? m.panel.scopeSelected(selectedCount) : m.panel.scopeAll
@@ -242,7 +282,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
   const metaKeys = Object.entries(m.panel.meta) as [keyof Metadata, string][]
 
   return (
-    <aside className="sidebar right">
+    <aside className="sidebar right" style={{ width: `${width}px` }}>
       <div className="sidebar-header">
         <Wrench size={16} className="faint" />
         <span className="sidebar-title">{m.panel.title}</span>
@@ -332,6 +372,12 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
           ))}
         </Section>
       </div>
+      <div
+        className="sidebar-resize-handle"
+        title="Drag to resize panel, double-click to reset"
+        onPointerDown={onPointerDown}
+        onDoubleClick={onDoubleClick}
+      />
     </aside>
   )
 }

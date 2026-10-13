@@ -85,14 +85,36 @@ function Thumb({ page }: { page: PageInfo }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const host = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
+  const [containerWidth, setContainerWidth] = useState(190)
+
   useEffect(() => {
     const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), { rootMargin: '400px 0px' })
-    io.observe(host.current!)
+    if (host.current) io.observe(host.current)
     return () => io.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (!host.current) return
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width
+      if (w > 20) setContainerWidth(Math.floor(w))
+    })
+    ro.observe(host.current)
+    return () => ro.disconnect()
+  }, [])
+
+  // Debounce the render scale so dragging the resize handle is smooth
+  const [renderScale, setRenderScale] = useState(() => (containerWidth / page.width) * (window.devicePixelRatio || 1))
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setRenderScale((containerWidth / page.width) * (window.devicePixelRatio || 1))
+    }, 120)
+    return () => clearTimeout(timer)
+  }, [containerWidth, page.width])
+
   useEffect(() => {
     if (!visible) return
-    const job = requestRender(page.id, (130 / Math.max(page.width, page.height)) * (window.devicePixelRatio || 1), 1)
+    const job = requestRender(page.id, renderScale, 1)
     void job.promise.then((bmp) => {
       const c = ref.current
       if (!bmp || !c) return
@@ -102,11 +124,19 @@ function Thumb({ page }: { page: PageInfo }) {
       bmp.close()
     })
     return job.cancel
-  }, [visible, page.id, page.rev, page.width, page.height])
-  const k = 130 / Math.max(page.width, page.height)
+  }, [visible, page.id, page.rev, renderScale])
+
+  const k = containerWidth / page.width
   return (
     <div ref={host} className="thumb-img">
-      <canvas ref={ref} style={{ width: page.width * k, height: page.height * k }} />
+      <canvas
+        ref={ref}
+        style={{
+          width: `${containerWidth}px`,
+          height: `${Math.round(page.height * k)}px`,
+          maxWidth: '100%',
+        }}
+      />
     </div>
   )
 }
@@ -568,8 +598,48 @@ function Assistant({ doc, assistant, actions }: Pick<Props, 'doc' | 'assistant' 
   )
 }
 
+const DEFAULT_LEFT_WIDTH = 250
+const MIN_LEFT_WIDTH = 180
+const MAX_LEFT_WIDTH = 550
+
 export default function Sidebar(props: Props) {
   const { doc, tab, onTab } = props
+  const [width, setWidth] = useState(() => {
+    const saved = localStorage.getItem('openquire:sidebar-left-width')
+    const n = saved ? Number(saved) : DEFAULT_LEFT_WIDTH
+    return Number.isFinite(n) && n >= MIN_LEFT_WIDTH && n <= MAX_LEFT_WIDTH ? n : DEFAULT_LEFT_WIDTH
+  })
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = width
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const delta = ev.clientX - startX
+      const next = Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, startW + delta))
+      setWidth(next)
+    }
+
+    const onPointerUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      document.body.classList.remove('is-col-resizing')
+      const finalDelta = ev.clientX - startX
+      const finalW = Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, startW + finalDelta))
+      localStorage.setItem('openquire:sidebar-left-width', String(finalW))
+    }
+
+    document.body.classList.add('is-col-resizing')
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+  }
+
+  const onDoubleClick = () => {
+    setWidth(DEFAULT_LEFT_WIDTH)
+    localStorage.setItem('openquire:sidebar-left-width', String(DEFAULT_LEFT_WIDTH))
+  }
+
   const comments = doc.pages.reduce((n, p) => n + p.annots.filter((a) => a.replyTo === null).length, 0)
   const tabs: { id: SideTab; label: string; Icon: typeof BookmarkIcon; count?: number }[] = [
     { id: 'pages', label: m.sidebar.tabs.pages, Icon: GalleryVerticalEnd },
@@ -587,7 +657,7 @@ export default function Sidebar(props: Props) {
   const shown = current.id
   const pluginPane = props.pluginPanes.find((p) => p.key === shown)
   return (
-    <aside className="sidebar left">
+    <aside className="sidebar left" style={{ width: `${width}px` }}>
       <div className="sidebar-header" role="tablist" aria-label={m.sidebar.label} onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
         {tabs.map(({ id, label, Icon, count }) => (
           <button
@@ -610,6 +680,12 @@ export default function Sidebar(props: Props) {
       {shown === 'compare' && <Compare {...props} />}
       {shown === 'assistant' && <Assistant {...props} />}
       {pluginPane && <PluginPane key={pluginPane.key} content={pluginPane.content} onEvent={(el, values) => props.actions.pluginPaneEvent(pluginPane.key, el, values)} />}
+      <div
+        className="sidebar-resize-handle"
+        title="Drag to resize sidebar, double-click to reset"
+        onPointerDown={onPointerDown}
+        onDoubleClick={onDoubleClick}
+      />
     </aside>
   )
 }
