@@ -4,6 +4,9 @@ members = [
     "crates/openquire-core",
     "crates/openquire-cli",
 ]
+exclude = [
+    "src-tauri",
+]
 resolver = "2"
 
 [workspace.package]
