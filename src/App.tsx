@@ -207,7 +207,26 @@ export default function App() {
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return
       e.preventDefault()
-      setZoom((z) => Math.min(5, Math.max(0.25, +(z * Math.exp(-e.deltaY * 0.01)).toFixed(2))))
+      let dy = e.deltaY
+      if (e.deltaMode === 1) dy *= 30
+      else if (e.deltaMode === 2) dy *= 300
+      // Normalize wheel step so a single notch changes zoom by ~8-10% instead of ballooning
+      const clamped = Math.max(-100, Math.min(100, dy))
+      const factor = Math.exp(-clamped * 0.001)
+
+      const prevZoom = zoomRef.current
+      const nextZoom = Math.min(5, Math.max(0.25, +(prevZoom * factor).toFixed(2)))
+      if (nextZoom === prevZoom) return
+
+      // Zoom centered towards mouse position
+      const rect = main.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left + main.scrollLeft
+      const mouseY = e.clientY - rect.top + main.scrollTop
+      const ratio = nextZoom / prevZoom
+
+      setZoom(nextZoom)
+      main.scrollLeft = mouseX * ratio - (e.clientX - rect.left)
+      main.scrollTop = mouseY * ratio - (e.clientY - rect.top)
     }
     const onStart = (e: TouchEvent) => {
       if (e.touches.length === 2) pinch = { dist: dist(e.touches), zoom: zoomRef.current }
