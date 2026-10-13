@@ -42,6 +42,7 @@ interface Props {
   saveOpts: SaveOptions
   onSaveOpts: (o: SaveOptions) => void
   actions: PanelActions
+  open?: boolean
 }
 
 function Section({ title, count, open, onOpen, children }: { title: string; count?: number | string; open?: boolean; onOpen?: () => void; children: ReactNode }) {
@@ -237,7 +238,7 @@ const DEFAULT_RIGHT_WIDTH = 300
 const MIN_RIGHT_WIDTH = 220
 const MAX_RIGHT_WIDTH = 600
 
-export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions }: Props) {
+export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions, open = true }: Props) {
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('openquire:sidebar-right-width')
     const n = saved ? Number(saved) : DEFAULT_RIGHT_WIDTH
@@ -282,7 +283,11 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
   const metaKeys = Object.entries(m.panel.meta) as [keyof Metadata, string][]
 
   return (
-    <aside className="sidebar right" style={{ width: `${width}px` }}>
+    <aside
+      className={`sidebar right ${open ? 'is-open' : 'is-closed'}`}
+      style={{ width: `${width}px`, '--sidebar-right-width': `${width}px` } as React.CSSProperties}
+      aria-hidden={!open}
+    >
       <div className="sidebar-header">
         <Wrench size={18} className="faint" />
         <span className="sidebar-title">{m.panel.title}</span>

@@ -77,6 +77,7 @@ interface Props {
   /** Panes added by plugins, keyed "plugin:<plugin id>:<pane id>". */
   pluginPanes: { key: `plugin:${string}`; title: string; content: PaneElement[] }[]
   actions: SideActions
+  open?: boolean
 }
 
 const when = (d: string | null) => (d ? new Date(d).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '')
@@ -656,8 +657,13 @@ export default function Sidebar(props: Props) {
   const current = tabs.find((t) => t.id === tab) ?? tabs[0]
   const shown = current.id
   const pluginPane = props.pluginPanes.find((p) => p.key === shown)
+  const open = props.open ?? true
   return (
-    <aside className="sidebar left" style={{ width: `${width}px` }}>
+    <aside
+      className={`sidebar left ${open ? 'is-open' : 'is-closed'}`}
+      style={{ width: `${width}px`, '--sidebar-left-width': `${width}px` } as React.CSSProperties}
+      aria-hidden={!open}
+    >
       <div className="sidebar-header" role="tablist" aria-label={m.sidebar.label} onKeyDown={(e) => arrowNavigate(e, 'horizontal')}>
         {tabs.map(({ id, label, Icon, count }) => (
           <button

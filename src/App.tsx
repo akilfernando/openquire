@@ -1401,7 +1401,7 @@ export default function App() {
         onChange={picked(([f]) => f && void run(m.busy.attaching, async () => apply(await engine.attach(f.name, new Uint8Array(await f.arrayBuffer()), f.type || 'application/octet-stream'))))} />
 
       <nav className="ribbon" aria-label={m.workspace.ribbon}>
-        <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} onClick={() => setLeftOpen((o) => !o)} />
+        <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} active={doc ? leftOpen : false} onClick={() => setLeftOpen((o) => !o)} />
         <IconButton Icon={FolderOpen} label={m.actions.openFile} hotkey={hk('open')} onClick={() => openDialog()} />
         <IconButton Icon={FilePlus2} label={m.actions.newBlank} onClick={() => newBlank()} />
         <IconButton Icon={Combine} label={m.actions.merge} disabled={!doc} onClick={() => addRef.current!.click()} />
@@ -1415,13 +1415,14 @@ export default function App() {
         <IconButton Icon={SettingsIcon} label={m.actions.settings} hotkey={hk('settings')} onClick={() => setSettingsOpen(true)} />
       </nav>
 
-      {doc && leftOpen && (
+      {doc && (
         <Sidebar
           key={`sidebar-${active}`} doc={doc} tab={tab} onTab={setTab} selected={selected} selectedAnnot={selAnnot?.id ?? null}
           commentFocus={commentFocus} actions={sideActions}
           compare={{ others: tabs.filter((t) => t.id !== active), result: comparison }}
           pluginPanes={host.panes.map((p) => ({ key: `plugin:${p.plugin}:${p.id}` as const, title: p.title, content: p.content }))}
           assistant={settings.aiEnabled ? { log: aiLog, busy: aiBusy, hasFields: doc.pages.some((p) => p.widgets.some((w) => !w.readOnly && w.kind !== 'signature' && w.kind !== 'button')) } : null}
+          open={leftOpen}
         />
       )}
 
@@ -1429,7 +1430,7 @@ export default function App() {
         <nav className="tab-bar" aria-label={m.workspace.documents}>
           {/* On phones the ribbon is hidden, so its essentials move here. */}
           <span className="phone-only">
-            <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} onClick={() => setLeftOpen((o) => !o)} />
+            <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} active={doc ? leftOpen : false} onClick={() => setLeftOpen((o) => !o)} />
             <IconButton Icon={FolderOpen} label={m.actions.openFile} onClick={openDialog} />
           </span>
           {tabs.map((t) => {
@@ -1455,7 +1456,7 @@ export default function App() {
             <IconButton Icon={SquareTerminal} label={m.actions.commandPalette} onClick={() => setPalette(true)} />
             <IconButton Icon={SettingsIcon} label={m.actions.settings} onClick={() => setSettingsOpen(true)} />
           </span>
-          {doc && <IconButton Icon={PanelRight} label={m.actions.toggleRight} onClick={() => setRightOpen((o) => !o)} />}
+          {doc && <IconButton Icon={PanelRight} label={m.actions.toggleRight} active={rightOpen} onClick={() => setRightOpen((o) => !o)} />}
         </nav>
 
         {doc && (
@@ -1609,7 +1610,7 @@ export default function App() {
         </div>
       </div>
 
-      {doc && rightOpen && <ToolsPanel key={`tools-${active}`} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} />}
+      {doc && <ToolsPanel key={`tools-${active}`} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} open={rightOpen} />}
       {doc && narrow && (leftOpen || rightOpen) && <div className="drawer-scrim" onClick={() => { setLeftOpen(false); setRightOpen(false) }} />}
 
       <div className="status-bar">
