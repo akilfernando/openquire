@@ -20,6 +20,11 @@ export function getClaudeDesktopConfigPath(): string {
     return join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
   }
   if (os === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || join(home, 'AppData', 'Local')
+    const storePath = join(localAppData, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache', 'Roaming', 'Claude', 'claude_desktop_config.json')
+    if (existsSync(storePath)) {
+      return storePath
+    }
     const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming')
     return join(appData, 'Claude', 'claude_desktop_config.json')
   }
