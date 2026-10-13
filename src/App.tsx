@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import {
-  BadgeCheck, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
-  ImagePlus, Loader2, Lock, MousePointer2, MoveUpRight, PanelLeft, PanelRight, Pencil, Redo2, ScanText, Search, Settings as SettingsIcon,
+  BadgeCheck, Check, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
+  ImagePlus, Loader2, Lock, Maximize2, MousePointer2, MoveUpRight, PanelLeft, PanelRight, Pencil, Redo2, ScanText, Search, Settings as SettingsIcon,
   ShieldAlert, ShieldCheck, Signature, Square, SquareTerminal, StickyNote, Strikethrough, TextCursorInput, Trash2, Type, Underline, Undo2,
-  X, ZoomIn, ZoomOut, Link2, SquareX, FormInput, Columns2, Workflow as WorkflowIcon, Square as StopIcon, type LucideProps,
+  UnfoldHorizontal, UnfoldVertical, X, ZoomIn, ZoomOut, Link2, SquareX, FormInput, Columns2, Workflow as WorkflowIcon, Square as StopIcon, type LucideProps,
 } from 'lucide-react'
 import CommandPalette, { type Command } from './components/CommandPalette'
 import DigitalSignDialog from './components/DigitalSignDialog'
@@ -76,6 +76,9 @@ function loadSettings(): Settings {
 }
 
 
+const ZOOM_PRESETS = [50, 75, 100, 125, 150, 200, 300, 400]
+const ZOOM_STEPS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0]
+
 export default function App() {
   // The last session's layout, read once.
   const [saved] = useState(loadLayout)
@@ -85,6 +88,8 @@ export default function App() {
   const [zoom, setZoom] = useState(saved.zoom ?? 1.25)
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
+  const [zoomMenuOpen, setZoomMenuOpen] = useState(false)
+  const zoomMenuRef = useRef<HTMLDivElement>(null)
   const [tool, setTool] = useState<Tool>('select')
   const [colors, setColors] = useState(saved.colors ?? { markup: '#ffd400', draw: '#e11d48', text: '#111111' })
   const [strokeWidth, setStrokeWidth] = useState(saved.strokeWidth ?? 2)
@@ -226,6 +231,25 @@ export default function App() {
       main.removeEventListener('touchend', onEnd)
     }
   }, [hasDoc])
+
+  // Close zoom menu on outside click or Escape key.
+  useEffect(() => {
+    if (!zoomMenuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (zoomMenuRef.current && !zoomMenuRef.current.contains(e.target as Node)) {
+        setZoomMenuOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZoomMenuOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [zoomMenuOpen])
 
   // Files opened from the operating system when OpenQuire is installed as an app.
   useEffect(() => {
@@ -1247,13 +1271,72 @@ export default function App() {
 
   const undo = () => doc?.canUndo && void run(m.busy.undoing, async () => apply(await engine.undo()))
   const redo = () => doc?.canRedo && void run(m.busy.redoing, async () => apply(await engine.redo()))
-  const zoomBy = (d: number) => setZoom((z) => Math.min(5, Math.max(0.25, +(z + d).toFixed(2))))
-  /** Zoom so the widest page fills the view, capped so small pages don't balloon. */
+  const zoomBy = (d: number) => {
+    setZoom((current) => {
+      if (d > 0) {
+        const next = ZOOM_STEPS.find((s) => s > current + 0.01)
+        return next !== undefined ? next : Math.min(5, +(current + 0.25).toFixed(2))
+      } else {
+        const reversed = [...ZOOM_STEPS].reverse()
+        const prev = reversed.find((s) => s < current - 0.01)
+        return prev !== undefined ? prev : Math.max(0.25, +(current - 0.25).toFixed(2))
+      }
+    })
+  }
+
+  /** Zoom so the page fills the view width. */
   const fitWidth = (d = docRef.current) => {
     const main = mainRef.current
     if (!d || !main) return
-    const widest = Math.max(...d.pages.map((p) => p.width))
-    setZoom(Math.max(0.25, Math.min(1.5, +((main.clientWidth - 80) / widest).toFixed(2))))
+    const curr = currentPage() ?? d.pages[0]
+    const w = curr?.width || Math.max(...d.pages.map((p) => p.width))
+    const padding = 56
+    const availW = Math.max(100, main.clientWidth - padding)
+    setZoom(Math.max(0.25, Math.min(5, +(availW / w).toFixed(2))))
+    if (curr) {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`page-${curr.id}`)
+        if (el) el.scrollIntoView({ block: 'nearest', inline: 'center' })
+      })
+    }
+  }
+
+  /** Zoom so the entire page fits within the viewport height. */
+  const fitHeight = (d = docRef.current) => {
+    const main = mainRef.current
+    if (!d || !main) return
+    const curr = currentPage() ?? d.pages[0]
+    const h = curr?.height || Math.max(...d.pages.map((p) => p.height))
+    const padding = 48
+    const availH = Math.max(100, main.clientHeight - padding)
+    setZoom(Math.max(0.25, Math.min(5, +(availH / h).toFixed(2))))
+    if (curr) {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`page-${curr.id}`)
+        if (el) el.scrollIntoView({ block: 'center', inline: 'center' })
+      })
+    }
+  }
+
+  /** Zoom so the entire page fits within both width and height (best fit / full page). */
+  const fitPage = (d = docRef.current) => {
+    const main = mainRef.current
+    if (!d || !main) return
+    const curr = currentPage() ?? d.pages[0]
+    const w = curr?.width || Math.max(...d.pages.map((p) => p.width))
+    const h = curr?.height || Math.max(...d.pages.map((p) => p.height))
+    const paddingW = 56
+    const paddingH = 48
+    const availW = Math.max(100, main.clientWidth - paddingW)
+    const availH = Math.max(100, main.clientHeight - paddingH)
+    const scale = Math.min(availW / w, availH / h)
+    setZoom(Math.max(0.25, Math.min(5, +scale.toFixed(2))))
+    if (curr) {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`page-${curr.id}`)
+        if (el) el.scrollIntoView({ block: 'center', inline: 'center' })
+      })
+    }
   }
 
   // ---- commands ------------------------------------------------------------------------------
@@ -1275,8 +1358,17 @@ export default function App() {
     { id: 'find', name: m.actions.findInDocument, icon: Search, hotkey: hk('find'), enabled: has, run: openFind },
     { id: 'zoom-in', name: m.actions.zoomIn, icon: ZoomIn, hotkey: hk('zoom-in'), enabled: has, run: () => zoomBy(0.25) },
     { id: 'zoom-out', name: m.actions.zoomOut, icon: ZoomOut, hotkey: hk('zoom-out'), enabled: has, run: () => zoomBy(-0.25) },
-    { id: 'zoom-fit', name: m.actions.fitWidth, enabled: has, run: () => fitWidth() },
-    { id: 'zoom-actual', name: m.actions.actualSize, enabled: has, run: () => setZoom(1) },
+    { id: 'zoom-fit-page', name: m.actions.fitPage, icon: Maximize2, hotkey: hk('zoom-fit-page'), enabled: has, run: () => fitPage() },
+    { id: 'zoom-fit-width', name: m.actions.fitWidth, icon: UnfoldHorizontal, hotkey: hk('zoom-fit-width'), enabled: has, run: () => fitWidth() },
+    { id: 'zoom-fit-height', name: m.actions.fitHeight, icon: UnfoldVertical, hotkey: hk('zoom-fit-height'), enabled: has, run: () => fitHeight() },
+    { id: 'zoom-fit', name: m.actions.fitWidth, icon: UnfoldHorizontal, enabled: has, run: () => fitWidth() },
+    { id: 'zoom-actual', name: m.actions.actualSize, icon: ZoomIn, hotkey: hk('zoom-actual'), enabled: has, run: () => setZoom(1) },
+    ...ZOOM_PRESETS.map((p) => ({
+      id: `zoom-${p}`,
+      name: `${p}%`,
+      enabled: has,
+      run: () => setZoom(p / 100),
+    })),
     { id: 'left', name: m.actions.toggleLeft, icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
     { id: 'right', name: m.actions.toggleRight, icon: PanelRight, enabled: has, run: () => setRightOpen((o) => !o) },
     ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility', 'compare', ...(settings.aiEnabled ? ['assistant'] : [])] as (keyof typeof m.actions.showPanel)[]).map((t) => ({
@@ -1496,8 +1588,58 @@ export default function App() {
                 />
               )}
               <IconButton Icon={ZoomOut} label={m.actions.zoomOut} hotkey={hk('zoom-out')} onClick={() => zoomBy(-0.25)} />
-              <button className="clickable-icon zoom-label tnum" title={m.actions.fitWidth} onClick={() => fitWidth()}>{Math.round(zoom * 100)}%</button>
+              <div className="zoom-dropdown-wrap" ref={zoomMenuRef}>
+                <button
+                  type="button"
+                  className={`clickable-icon zoom-label tnum${zoomMenuOpen ? ' is-active' : ''}`}
+                  title={m.actions.zoomMenu}
+                  aria-expanded={zoomMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setZoomMenuOpen((o) => !o)}
+                >
+                  <span>{Math.round(zoom * 100)}%</span>
+                  <ChevronDown size={13} className="zoom-chevron" />
+                </button>
+                {zoomMenuOpen && (
+                  <div className="zoom-menu" role="menu">
+                    <button type="button" className="zoom-menu-item" role="menuitem" onClick={() => { fitPage(); setZoomMenuOpen(false) }}>
+                      <Maximize2 size={16} />
+                      <span className="grow">{m.actions.fitPage}</span>
+                      {hk('zoom-fit-page') && <kbd>{hk('zoom-fit-page')}</kbd>}
+                    </button>
+                    <button type="button" className="zoom-menu-item" role="menuitem" onClick={() => { fitWidth(); setZoomMenuOpen(false) }}>
+                      <UnfoldHorizontal size={16} />
+                      <span className="grow">{m.actions.fitWidth}</span>
+                      {hk('zoom-fit-width') && <kbd>{hk('zoom-fit-width')}</kbd>}
+                    </button>
+                    <button type="button" className="zoom-menu-item" role="menuitem" onClick={() => { fitHeight(); setZoomMenuOpen(false) }}>
+                      <UnfoldVertical size={16} />
+                      <span className="grow">{m.actions.fitHeight}</span>
+                      {hk('zoom-fit-height') && <kbd>{hk('zoom-fit-height')}</kbd>}
+                    </button>
+                    <div className="zoom-menu-divider" />
+                    {ZOOM_PRESETS.map((p) => {
+                      const active = Math.round(zoom * 100) === p
+                      return (
+                        <button
+                          key={p} type="button" className={`zoom-menu-item${active ? ' is-active' : ''}`} role="menuitem"
+                          onClick={() => { setZoom(p / 100); setZoomMenuOpen(false) }}
+                        >
+                          <span className="zoom-menu-check">{active ? <Check size={14} /> : null}</span>
+                          <span className="tnum">{p}%</span>
+                          {p === 100 && <span className="zoom-menu-note">{m.actions.actualSize}</span>}
+                          {p === 100 && hk('zoom-actual') && <kbd>{hk('zoom-actual')}</kbd>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
               <IconButton Icon={ZoomIn} label={m.actions.zoomIn} hotkey={hk('zoom-in')} onClick={() => zoomBy(0.25)} />
+              <span className="zoom-sep divider" style={{ width: 1, height: 18, background: 'var(--border)', margin: '0 3px' }} />
+              <span className="fit-btn"><IconButton Icon={Maximize2} label={m.actions.fitPage} hotkey={hk('zoom-fit-page')} onClick={() => fitPage()} /></span>
+              <span className="fit-btn"><IconButton Icon={UnfoldHorizontal} label={m.actions.fitWidth} hotkey={hk('zoom-fit-width')} onClick={() => fitWidth()} /></span>
+              <span className="fit-btn"><IconButton Icon={UnfoldVertical} label={m.actions.fitHeight} hotkey={hk('zoom-fit-height')} onClick={() => fitHeight()} /></span>
               <button className="cta" style={{ marginLeft: 6, height: 28 }} title={hk('save') ? m.actions.withHotkey(m.actions.saveCopy, hk('save')!) : m.actions.saveCopy} onClick={save}>
                 <Download size={16} />{m.actions.save}
               </button>

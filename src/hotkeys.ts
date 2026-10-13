@@ -17,10 +17,17 @@ export const DEFAULT_HOTKEYS: Record<string, string[]> = {
   redo: ['Mod+Y', 'Mod+Shift+Z'],
   'zoom-in': ['Mod+=', 'Mod++'],
   'zoom-out': ['Mod+-'],
+  'zoom-fit-page': ['Mod+0'],
+  'zoom-actual': ['Mod+1'],
+  'zoom-fit-width': ['Mod+2'],
+  'zoom-fit-height': ['Mod+3'],
 }
 
 /** Commands whose shortcuts also work while typing in a field (they don't conflict with editing). */
-export const WHILE_TYPING = new Set(['palette', 'open', 'save', 'settings', 'find', 'zoom-in', 'zoom-out'])
+export const WHILE_TYPING = new Set([
+  'palette', 'open', 'save', 'settings', 'find',
+  'zoom-in', 'zoom-out', 'zoom-fit-page', 'zoom-actual', 'zoom-fit-width', 'zoom-fit-height',
+])
 
 const NAMED: Record<string, string> = { ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Esc: 'Escape' }
 
