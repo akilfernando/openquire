@@ -668,8 +668,9 @@ export default function Sidebar(props: Props) {
             {!!count && shown !== id && <span className="badge tnum">{count > 99 ? '99+' : count}</span>}
           </button>
         ))}
-        <span className="grow" />
-        <span className="faint small">{current.label}</span>
+      </div>
+      <div className="sidebar-subhead">
+        <span className="sidebar-title">{current.label}</span>
       </div>
       {shown === 'pages' && <Pages {...props} />}
       {shown === 'bookmarks' && <Bookmarks {...props} />}
