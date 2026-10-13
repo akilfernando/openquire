@@ -126,15 +126,15 @@ function Thumb({ page }: { page: PageInfo }) {
     return job.cancel
   }, [visible, page.id, page.rev, renderScale])
 
-  const k = containerWidth / page.width
   return (
     <div ref={host} className="thumb-img">
       <canvas
         ref={ref}
         style={{
-          width: `${containerWidth}px`,
-          height: `${Math.round(page.height * k)}px`,
-          maxWidth: '100%',
+          width: '100%',
+          height: 'auto',
+          aspectRatio: `${page.width} / ${page.height}`,
+          display: 'block',
         }}
       />
     </div>
@@ -599,7 +599,7 @@ function Assistant({ doc, assistant, actions }: Pick<Props, 'doc' | 'assistant' 
 }
 
 const DEFAULT_LEFT_WIDTH = 250
-const MIN_LEFT_WIDTH = 180
+const MIN_LEFT_WIDTH = 130
 const MAX_LEFT_WIDTH = 550
 
 export default function Sidebar(props: Props) {
