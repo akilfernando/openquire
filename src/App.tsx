@@ -38,6 +38,7 @@ import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Point, type Q
 import { arrowNavigate } from './focus'
 import { m } from './i18n'
 import { download, imageToPng, kb } from './util'
+import { encryptSensitive, decryptSensitive } from './privacy'
 
 type Icon = ComponentType<LucideProps>
 
@@ -64,7 +65,7 @@ const STAMP_PRESETS: [string, Omit<StampSpec, 'pageIds'>][] = [
 const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
   const fallback: Settings = {
-    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true, hotkeys: {}, themes: [], activeTheme: '', snippets: [],
+    theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', airGappedSign: false, trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true, hotkeys: {}, themes: [], activeTheme: '', snippets: [],
     aiEnabled: false, aiProvider: 'anthropic', aiKey: '', aiModel: '', aiBaseUrl: '', aiProfile: '',
   }
   try {
@@ -164,11 +165,36 @@ export default function App() {
   const setSettings = (s: Settings) => {
     setSettingsState(s)
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+      void (async () => {
+        const toSave = { ...s }
+        if (toSave.aiKey) toSave.aiKey = await encryptSensitive(toSave.aiKey)
+        if (toSave.aiProfile) toSave.aiProfile = await encryptSensitive(toSave.aiProfile)
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(toSave))
+      })()
     } catch {
       // per-device preference only
     }
   }
+
+  // Decrypt sensitive credentials if previously stored in encrypted vault format
+  useEffect(() => {
+    void (async () => {
+      let changed = false
+      let key = settings.aiKey
+      let profile = settings.aiProfile
+      if (key?.startsWith('enc:v1:')) {
+        key = await decryptSensitive(key)
+        changed = true
+      }
+      if (profile?.startsWith('enc:v1:')) {
+        profile = await decryptSensitive(profile)
+        changed = true
+      }
+      if (changed) {
+        setSettingsState((prev) => ({ ...prev, aiKey: key, aiProfile: profile }))
+      }
+    })()
+  }, [])
   useEffect(() => {
     const mq = matchMedia('(prefers-color-scheme: dark)')
     const on = () => setSystemDark(mq.matches)
@@ -1079,12 +1105,18 @@ export default function App() {
     digitalSign: () => setDigitalSigning(true),
     checkRevocation: () =>
       void run(m.busy.checkingRevocation, async () => {
+        if (settings.airGappedSign) {
+          return setStatus('Network check blocked: Air-Gapped mode is active in Settings > Privacy.')
+        }
         const { state, problems } = await engine.checkRevocation()
         apply(state)
         setStatus(problems.length ? m.status.error(problems[0]) : m.status.revocationChecked)
       }),
     addValidationData: () =>
       void run(m.busy.addingValidation, async () => {
+        if (settings.airGappedSign) {
+          return setStatus('Network request blocked: Air-Gapped mode is active in Settings > Privacy.')
+        }
         const { bytes, state, added, incomplete } = await engine.addValidationData()
         apply(state)
         download(bytes, `${state.name}.pdf`)
@@ -1092,6 +1124,9 @@ export default function App() {
       }),
     addDocumentTimestamp: () =>
       void run(m.busy.timestamping, async () => {
+        if (settings.airGappedSign) {
+          return setStatus('Network request blocked: Air-Gapped mode is active in Settings > Privacy.')
+        }
         if (!settings.tsa) return setSettingsOpen(true)
         const { bytes, state } = await engine.addDocumentTimestamp(settings.tsa)
         apply(state)
@@ -1805,7 +1840,7 @@ export default function App() {
         return (
           <DigitalSignDialog
             page={page} signedBefore={doc.signatures.length > 0} onClose={() => setDigitalSigning(false)}
-            tsa={settings.tsa}
+            tsa={settings.airGappedSign ? '' : settings.tsa}
             fields={doc.pages.flatMap((p) => p.widgets).filter((w) => w.kind === 'signature' && !doc.signatures.some((s) => s.field === w.name)).map((w) => w.name)}
             onSign={async (req) => {
               const { bytes, state } = await engine.sign(req)

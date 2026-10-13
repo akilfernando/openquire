@@ -6,7 +6,7 @@
  * every request, saying exactly what will be sent.
  */
 
-export type AiProvider = 'anthropic' | 'openai'
+export type AiProvider = 'anthropic' | 'openai' | 'ollama'
 
 export interface AiConfig {
   provider: AiProvider
@@ -16,7 +16,7 @@ export interface AiConfig {
   baseUrl: string
 }
 
-export const DEFAULT_MODELS: Record<AiProvider, string> = { anthropic: 'claude-fable-5-1', openai: 'llama3.2' }
+export const DEFAULT_MODELS: Record<AiProvider, string> = { anthropic: 'claude-fable-5-1', openai: 'gpt-4o-mini', ollama: 'llama3.2' }
 export const DEFAULT_BASE_URL = 'http://localhost:11434/v1'
 
 export type Part = { type: 'text'; text: string } | { type: 'image'; png: string /* base64 */ }
@@ -68,7 +68,7 @@ export async function complete(cfg: AiConfig, req: AiRequest, fetcher: typeof fe
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}) },
     body: JSON.stringify({
-      model: cfg.model || DEFAULT_MODELS.openai,
+      model: cfg.model || DEFAULT_MODELS[cfg.provider] || 'llama3.2',
       max_tokens: maxTokens,
       messages: [
         { role: 'system', content: req.system },

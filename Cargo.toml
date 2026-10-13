@@ -28,3 +28,4 @@ x509-parser = "0.16"
 walkdir = "2.5"
 regex = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
+zeroize = { version = "1.8", features = ["derive"] }

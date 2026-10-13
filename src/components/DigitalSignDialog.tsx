@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { engine } from '../engine/client'
 import { defaultPkcs11Module, isDesktop, tokenCertificates, type TokenCert } from '../native'
 import type { Rect, SignRequest } from '../engine/types'
 import { download } from '../util'
 import Modal from './Modal'
 import { m } from '../i18n'
+import { decryptSensitive } from '../privacy'
 
 type Corner = 'br' | 'bl' | 'tr' | 'tl' | 'invisible'
 
@@ -35,6 +36,7 @@ function boxFor(corner: Corner, w: number, h: number): Rect | undefined {
 
 export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onSign, onClose }: Props) {
   const [stamp, setStamp] = useState(!!tsa)
+  const [airGapped, setAirGapped] = useState(!tsa)
   const [source, setSource] = useState<'file' | 'new' | 'card'>('file')
   const [module, setModule] = useState(() => {
     try {
@@ -54,16 +56,32 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
   const [corner, setCorner] = useState<Corner>('br')
   const [field, setField] = useState(fields[0] ?? '')
   const [certify, setCertify] = useState<0 | 1 | 2 | 3>(0)
-  const savedImage = (() => {
-    try {
-      return (JSON.parse(localStorage.getItem(SAVED_IMAGE) ?? 'null') as { url: string } | null)?.url ?? null
-    } catch {
-      return null
-    }
-  })()
-  const [useImage, setUseImage] = useState(!!savedImage)
+  const [savedImage, setSavedImage] = useState<string | null>(null)
+  const [useImage, setUseImage] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SAVED_IMAGE)
+      if (!raw) return
+      void decryptSensitive(raw).then((json) => {
+        try {
+          if (json) {
+            const parsed = JSON.parse(json) as { url: string } | null
+            if (parsed?.url) {
+              setSavedImage(parsed.url)
+              setUseImage(true)
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })
+    } catch {
+      // ignore
+    }
+  }, [])
 
   const createId = async () => {
     setError('')
@@ -123,9 +141,19 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
         }
         : undefined
       await onSign({
-        ...(token ? { token } : { p12: p12!.bytes.slice(), password }), pageId: rect ? page.id : null, rect, field: field || undefined, certify: certify || undefined, timestampUrl: stamp && tsa ? tsa : undefined,
-        reason: reason.trim() || undefined, location: location.trim() || undefined, image,
+        ...(token ? { token } : { p12: p12!.bytes.slice(), password }),
+        pageId: rect ? page.id : null,
+        rect,
+        field: field || undefined,
+        certify: certify || undefined,
+        timestampUrl: !airGapped && stamp && tsa ? tsa : undefined,
+        airGapped,
+        reason: reason.trim() || undefined,
+        location: location.trim() || undefined,
+        image,
       })
+      setPassword('')
+      setPin('')
     } catch (e) {
       setError((e as Error).message)
       setBusy(null)
@@ -228,7 +256,24 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
           )}
         </div>
 
-        {tsa && (
+        <div className="setting-item" style={{ marginTop: 8, padding: '8px 12px', background: 'var(--panel)', borderRadius: 6, border: '1px solid var(--border)' }}>
+          <label className="check" style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={airGapped} onChange={(e) => {
+              setAirGapped(e.target.checked)
+              if (e.target.checked) setStamp(false)
+            }} />
+            <span style={{ fontWeight: 500 }}>Air-gapped signing (zero network requests)</span>
+          </label>
+          <span className="small muted" style={{ display: 'block', marginTop: 4 }}>
+            {airGapped
+              ? 'Guaranteed 100% offline: no document hashes or queries will leave this device.'
+              : tsa
+                ? `Online timestamping: connects to ${(() => { try { return new URL(tsa).host } catch { return tsa } })()} over HTTPS.`
+                : 'Offline signing active.'}
+          </span>
+        </div>
+
+        {!airGapped && tsa && (
           <label className="check" title={m.digitalId.timestampHint}>
             <input type="checkbox" checked={stamp} onChange={(e) => setStamp(e.target.checked)} />
             <span>{m.digitalId.timestamp((() => { try { return new URL(tsa).host } catch { return tsa } })())}</span>

@@ -84,6 +84,14 @@ export function removeRecent(path: string) {
   return list
 }
 
+export function clearRecent(): void {
+  try {
+    localStorage.removeItem(RECENT)
+  } catch {
+    // ignore
+  }
+}
+
 // ---- smart cards (PKCS#11) -------------------------------------------------------------
 
 export interface TokenCert {

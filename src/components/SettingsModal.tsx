@@ -9,6 +9,7 @@ import PluginsSettings from './PluginsSettings'
 import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
 import { DEFAULT_BASE_URL, DEFAULT_MODELS, type AiProvider } from '../ai'
+import { purgeAllPrivateData } from '../privacy'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -18,6 +19,8 @@ export interface Settings {
   author: string
   /** Timestamp server URL; empty turns timestamps off. */
   tsa: string
+  /** Whether to strictly enforce air-gapped signing (blocking external TSA/OCSP). */
+  airGappedSign?: boolean
   /** Certificates the user trusts, as PEM with a display name. */
   trusted: { pem: string; name: string; issuer: string; expires: string }[]
   /** OCR language code, or 'auto'. */
@@ -54,7 +57,7 @@ export const ACCENTS: { key: string; hue: number }[] = [
   { key: 'rose', hue: 340 },
 ]
 
-type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'ai' | 'hotkeys' | 'plugins' | 'about'
+type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'privacy' | 'ai' | 'hotkeys' | 'plugins' | 'about'
 
 interface Props {
   settings: Settings
@@ -83,6 +86,7 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
 
 export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins }: Props) {
   const [certError, setCertError] = useState('')
+  const [purgeFeedback, setPurgeFeedback] = useState('')
   const [tab, setTab] = useState<Tab>('appearance')
   const [installed, setInstalled] = useState<NativeTools | null>(null)
   // Escape closes Settings wherever focus is, even after the focused control went away.
@@ -213,6 +217,58 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
               ))}
             </>
           )}
+          {tab === 'privacy' && (
+            <>
+              <h2>{m.settings.tabs.privacy}</h2>
+              <p className="hint">{m.settings.privacyIntro}</p>
+
+              <Item name={m.settings.airGapped} desc={m.settings.airGappedDesc}>
+                <input
+                  type="checkbox"
+                  className="toggle"
+                  checked={!!settings.airGappedSign}
+                  aria-label={m.settings.airGapped}
+                  onChange={(e) => set({ airGappedSign: e.target.checked })}
+                />
+              </Item>
+
+              <Item name={m.settings.storageEncryption} desc={m.settings.storageEncryptionDesc}>
+                <span className="badge" style={{ padding: '3px 8px', borderRadius: 4, background: 'var(--panel)', fontSize: '0.85rem', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                  Active (Web Crypto AES-GCM)
+                </span>
+              </Item>
+
+              <Item name={m.settings.memoryZeroize} desc={m.settings.memoryZeroizeDesc}>
+                <span className="badge" style={{ padding: '3px 8px', borderRadius: 4, background: 'var(--panel)', fontSize: '0.85rem', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                  Active (RAM &amp; Key Zeroization)
+                </span>
+              </Item>
+
+              <div className="setting-item stacked" style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 16 }}>
+                <div className="setting-info">
+                  <div className="setting-name" style={{ color: '#e53935' }}>{m.settings.purgeData}</div>
+                  <div className="setting-desc">{m.settings.purgeDataDesc}</div>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', cursor: 'pointer', fontWeight: 500 }}
+                    onClick={async () => {
+                      if (window.confirm('Are you sure you want to purge all stored signatures, recent files, and saved AI keys from this browser?')) {
+                        await purgeAllPrivateData()
+                        set({ aiKey: '', aiProfile: '', author: 'OpenQuire user' })
+                        setPurgeFeedback(m.settings.purgedSuccess)
+                        setTimeout(() => setPurgeFeedback(''), 4000)
+                      }
+                    }}
+                  >
+                    {m.settings.purgeDataBtn}
+                  </button>
+                  {purgeFeedback && <p className="success small" style={{ marginTop: 8, color: 'var(--accent)', fontWeight: 500 }}>{purgeFeedback}</p>}
+                </div>
+              </div>
+            </>
+          )}
           {tab === 'ai' && (
             <>
               <h2>{m.settings.tabs.ai}</h2>
@@ -225,9 +281,20 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                     <select value={settings.aiProvider} aria-label={m.settings.aiProvider} onChange={(e) => set({ aiProvider: e.target.value as AiProvider, aiModel: '' })}>
                       <option value="anthropic">{m.settings.aiProviders.anthropic}</option>
                       <option value="openai">{m.settings.aiProviders.openai}</option>
+                      <option value="ollama">{m.settings.aiProviders.ollama}</option>
                     </select>
                   </Item>
-                  {settings.aiProvider === 'openai' && (
+                  {settings.aiProvider === 'ollama' && (
+                    <div className="hint" style={{ padding: '8px 12px', background: 'var(--panel)', borderRadius: 6, margin: '8px 0', border: '1px solid var(--border)' }}>
+                      <strong>100% Offline &amp; Private:</strong> Runs against your local Ollama instance ({DEFAULT_BASE_URL}). Zero data is sent to external servers.
+                    </div>
+                  )}
+                  {settings.aiProvider !== 'ollama' && (
+                    <div className="hint" style={{ padding: '8px 12px', background: 'var(--panel)', borderRadius: 6, margin: '8px 0', border: '1px solid var(--border)' }}>
+                      <strong>Data in flight:</strong> OpenQuire sends form fields or document text over HTTPS only when you explicitly trigger an AI action.
+                    </div>
+                  )}
+                  {(settings.aiProvider === 'openai' || settings.aiProvider === 'ollama') && (
                     <Item name={m.settings.aiBaseUrl} desc={m.settings.aiBaseUrlDesc}>
                       <input defaultValue={settings.aiBaseUrl} placeholder={DEFAULT_BASE_URL} aria-label={m.settings.aiBaseUrl} style={{ width: 240 }}
                         onBlur={(e) => e.target.value.trim() !== settings.aiBaseUrl && set({ aiBaseUrl: e.target.value.trim() })} />

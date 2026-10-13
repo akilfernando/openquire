@@ -253,12 +253,22 @@ export class Engine {
     return this.state()
   }
 
-  /** Releases the document and everything cached for it. */
+  /** Releases the document and everything cached for it, securely zeroizing sensitive memory buffers. */
   close() {
     this.touch('all')
     this.doc?.destroy()
     this.doc = null
     this.lastSave = null
+    if (this.bytes && this.bytes.length > 0) {
+      this.bytes.fill(0)
+    }
+    this.bytes = new Uint8Array(0)
+    this.password = undefined
+    this.signatures = []
+    this.stext.clear()
+    this.fonts.clear()
+    this.infoCache.clear()
+    this.revs.clear()
   }
 
   private replaceDoc(doc: mupdf.PDFDocument, name: string) {
@@ -270,6 +280,10 @@ export class Engine {
     this.encrypted = false
     this.signatures = []
     this.lastSave = null
+    this.stext.clear()
+    this.fonts.clear()
+    this.infoCache.clear()
+    this.revs.clear()
     doc.enableJournal()
   }
 
@@ -2350,22 +2364,26 @@ export class Engine {
 
   async sign(req: SignRequest) {
     if (this.encrypted) throw new Error('Remove the password protection (Compression & security) and save before signing.')
-    const id = req.token
-      ? externalDigitalId(req.token.chain, (digestInfo) => {
-        if (!this.externalSigner) throw new Error('Smart card signing is only available in the desktop app.')
-        return this.externalSigner(req.token!.key, digestInfo)
+    try {
+      const id = req.token
+        ? externalDigitalId(req.token.chain, (digestInfo) => {
+          if (!this.externalSigner) throw new Error('Smart card signing is only available in the desktop app.')
+          return this.externalSigner(req.token!.key, digestInfo)
+        })
+        : readDigitalId(req.p12!, req.password ?? '')
+      const order = this.pageIds()
+      const base = this.save({ compress: this.signatures.length ? 'none' : 'standard', security: { mode: 'keep' } })
+      const bytes = await signPdf(base, id, {
+        page: req.pageId === null ? undefined : order.indexOf(req.pageId),
+        rect: req.pageId === null ? undefined : req.rect,
+        reason: req.reason, location: req.location, image: req.image, field: req.field, certify: req.certify,
+        timestamp: (!req.airGapped && req.timestampUrl) ? { url: req.timestampUrl, fetcher: this.fetcher } : undefined,
       })
-      : readDigitalId(req.p12!, req.password ?? '')
-    const order = this.pageIds()
-    const base = this.save({ compress: this.signatures.length ? 'none' : 'standard', security: { mode: 'keep' } })
-    const bytes = await signPdf(base, id, {
-      page: req.pageId === null ? undefined : order.indexOf(req.pageId),
-      rect: req.pageId === null ? undefined : req.rect,
-      reason: req.reason, location: req.location, image: req.image, field: req.field, certify: req.certify,
-      timestamp: req.timestampUrl ? { url: req.timestampUrl, fetcher: this.fetcher } : undefined,
-    })
-    const state = this.open(`${this.name}.pdf`, bytes.slice())
-    return { bytes, state }
+      const state = this.open(`${this.name}.pdf`, bytes.slice())
+      return { bytes, state }
+    } finally {
+      req.password = undefined
+    }
   }
 
   /** Adds a document timestamp over everything so far (PAdES B-LTA). */

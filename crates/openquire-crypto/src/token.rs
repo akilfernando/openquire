@@ -111,5 +111,7 @@ pub fn sign_with_token(module: &str, slot: u64, id: &str, pin: &str, digest_info
         ])
         .map_err(|e| e.to_string())?;
     let key = keys.into_iter().next().ok_or("The private key for this certificate was not found on the card.")?;
-    session.sign(&Mechanism::RsaPkcs, key, digest_info).map_err(|e| e.to_string())
+    let signature = session.sign(&Mechanism::RsaPkcs, key, digest_info).map_err(|e| e.to_string());
+    let _ = session.logout();
+    signature
 }

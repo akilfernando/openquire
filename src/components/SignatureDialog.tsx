@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { canvasPng } from '../util'
 import Modal from './Modal'
 import { m } from '../i18n'
+import { encryptSensitive, decryptSensitive } from '../privacy'
 
 interface Props {
   onPlace: (png: Uint8Array, aspect: number) => void
@@ -37,14 +38,6 @@ async function cropped(src: HTMLCanvasElement) {
   return { png: await canvasPng(out), aspect: w / h, url: out.toDataURL('image/png') }
 }
 
-const load = () => {
-  try {
-    return JSON.parse(localStorage.getItem(SAVED) ?? 'null') as { url: string; aspect: number } | null
-  } catch {
-    return null
-  }
-}
-
 export default function SignatureDialog({ onPlace, onClose }: Props) {
   const ref = useRef<HTMLCanvasElement>(null)
   const drawing = useRef(false)
@@ -52,7 +45,23 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
   const [name, setName] = useState('')
   const [empty, setEmpty] = useState(true)
   const [remember, setRemember] = useState(true)
-  const [saved, setSaved] = useState(load)
+  const [saved, setSaved] = useState<{ url: string; aspect: number } | null>(null)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SAVED)
+      if (!raw) return
+      void decryptSensitive(raw).then((json) => {
+        try {
+          if (json) setSaved(JSON.parse(json))
+        } catch {
+          // ignore
+        }
+      })
+    } catch {
+      // ignore
+    }
+  }, [])
 
   const ctx = () => ref.current!.getContext('2d')!
   const clear = () => {
@@ -84,7 +93,9 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
     if (!out) return
     if (remember) {
       try {
-        localStorage.setItem(SAVED, JSON.stringify({ url: out.url, aspect: out.aspect }))
+        const payload = JSON.stringify({ url: out.url, aspect: out.aspect })
+        const encrypted = await encryptSensitive(payload)
+        localStorage.setItem(SAVED, encrypted)
       } catch {
         // storage unavailable; nothing to remember
       }

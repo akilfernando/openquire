@@ -149,6 +149,8 @@ export interface SignRequest {
   certify?: 1 | 2 | 3
   /** Timestamp server for a trusted signing time (PAdES B-T). */
   timestampUrl?: string
+  /** When true, strictly forbids any external network calls (air-gapped operation). */
+  airGapped?: boolean
 }
 
 export type AnnotSpec =

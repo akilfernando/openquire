@@ -8,6 +8,7 @@ use rsa::pkcs1::DecodeRsaPrivateKey as DecodePkcs1;
 use rsa::pkcs8::DecodePrivateKey as DecodePkcs8;
 use rsa::RsaPrivateKey;
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 #[derive(Debug, Clone)]
 pub struct DigitalId {
@@ -16,12 +17,16 @@ pub struct DigitalId {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct CreateDigitalIdOptions {
+    #[zeroize(skip)]
     pub name: String,
+    #[zeroize(skip)]
     pub email: Option<String>,
+    #[zeroize(skip)]
     pub organization: Option<String>,
     pub password: String,
+    #[zeroize(skip)]
     pub years: Option<u32>,
 }
 
@@ -58,7 +63,7 @@ pub fn create_digital_id(opts: &CreateDigitalIdOptions) -> Result<Vec<u8>> {
         .map_err(|e| anyhow!("Failed to self-sign certificate: {}", e))?;
 
     let cert_der = cert.der().to_vec();
-    let key_der = pkcs8_der.as_bytes().to_vec();
+    let key_der = Zeroizing::new(pkcs8_der.as_bytes().to_vec());
 
     let pfx = PFX::new(&cert_der, &key_der, None, &opts.password, &opts.name)
         .ok_or_else(|| anyhow!("Failed to create PKCS#12 archive"))?;
@@ -79,10 +84,10 @@ pub fn read_digital_id(p12_bytes: &[u8], password: &str) -> Result<DigitalId> {
         .key_bags(password)
         .map_err(|e| anyhow!("Failed to decrypt private key from digital ID: {:?}", e))?;
 
-    let key_der = key_bags
+    let key_der = Zeroizing::new(key_bags
         .into_iter()
         .next()
-        .ok_or_else(|| anyhow!("This digital ID has no private key."))?;
+        .ok_or_else(|| anyhow!("This digital ID has no private key."))?);
 
     // Try parsing as PKCS#8 or PKCS#1 RSA private key
     let rsa_key = RsaPrivateKey::from_pkcs8_der(&key_der)
