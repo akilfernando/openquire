@@ -48,7 +48,7 @@ function Section({ title, count, open, onOpen, children }: { title: string; coun
   return (
     <details className="section" open={open} onToggle={(e) => e.currentTarget.open && onOpen?.()}>
       <summary>
-        <ChevronRight size={14} className="chev" />
+        <ChevronRight size={16} className="chev" />
         {title}
         {count !== undefined && count !== 0 && <span className="count tnum">{count}</span>}
       </summary>
@@ -284,14 +284,14 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
   return (
     <aside className="sidebar right" style={{ width: `${width}px` }}>
       <div className="sidebar-header">
-        <Wrench size={16} className="faint" />
+        <Wrench size={18} className="faint" />
         <span className="sidebar-title">{m.panel.title}</span>
       </div>
       <div className="pane" style={{ gap: 0, padding: '4px 6px 60px' }}>
         <Section title={m.panel.organize} open count={selectedCount ? m.panel.selected(selectedCount) : undefined}>
           <div className="row">
-            <button onClick={() => actions.rotate(270)}><RotateCcw size={16} />{m.panel.left}</button>
-            <button onClick={() => actions.rotate(90)}><RotateCw size={16} />{m.panel.right}</button>
+            <button onClick={() => actions.rotate(270)}><RotateCcw size={18} />{m.panel.left}</button>
+            <button onClick={() => actions.rotate(90)}><RotateCw size={18} />{m.panel.right}</button>
           </div>
           <p className="hint">{m.panel.rotateScope(scope)}</p>
           <div className="row">

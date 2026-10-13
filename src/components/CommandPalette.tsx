@@ -89,7 +89,7 @@ export default function CommandPalette({ commands, onClose }: { commands: Comman
                 onPointerMove={() => setIndex(i)}
                 onClick={() => choose(c)}
               >
-                {Icon ? <Icon size={16} /> : <span style={{ width: 16 }} />}
+                {Icon ? <Icon size={18} /> : <span style={{ width: 18 }} />}
                 <span className="name"><Highlighted text={c.name} hits={m.hits} /></span>
                 {c.hotkey && <kbd>{c.hotkey}</kbd>}
               </div>
@@ -97,8 +97,8 @@ export default function CommandPalette({ commands, onClose }: { commands: Comman
           })}
         </div>
         <div className="prompt-instructions">
-          <span className="instruction"><ArrowUp size={12} /><ArrowDown size={12} />{m.palette.navigate}</span>
-          <span className="instruction"><CornerDownLeft size={12} />{m.palette.use}</span>
+          <span className="instruction"><ArrowUp size={14} /><ArrowDown size={14} />{m.palette.navigate}</span>
+          <span className="instruction"><CornerDownLeft size={14} />{m.palette.use}</span>
           <span className="instruction"><b>{m.palette.esc}</b>{m.palette.dismiss}</span>
         </div>
       </div>

@@ -1367,7 +1367,7 @@ export default function App() {
   const accept = 'application/pdf,image/*,.docx,.xlsx,.pptx,.epub,.html,.htm,.txt,.cbz,.fb2,.mobi'
   const IconButton = ({ Icon, label, hotkey, onClick, disabled, active }: { Icon: Icon; label: string; hotkey?: string; onClick: () => void; disabled?: boolean; active?: boolean }) => (
     <button type="button" className={`clickable-icon${active ? ' is-active' : ''}`} aria-label={label} title={hotkey ? m.actions.withHotkey(label, hotkey) : label} disabled={disabled} onClick={onClick}>
-      <Icon size={18} />
+      <Icon size={20} />
     </button>
   )
   const signedOk = doc && doc.signatures.length > 0 && doc.signatures.every((s) => s.valid)
@@ -1438,15 +1438,15 @@ export default function App() {
             return (
               <div key={t.id} className={`tab${isActive ? ' is-active' : ''}${side?.id === t.id ? ' is-side' : ''}`} title={name}>
                 <button aria-current={isActive ? 'page' : undefined} className="tab-title" onClick={() => void switchTab(t.id)}>
-                  <FileText size={15} className="faint" />
+                  <FileText size={16} className="faint" />
                   <span className="label">{name}</span>
                 </button>
                 {!isActive && (
                   <button className="clickable-icon tab-side" aria-label={m.workspace.openToSide(name)} title={m.workspace.openToSideShort} onClick={() => void openSide(t.id)}>
-                    <Columns2 size={14} />
+                    <Columns2 size={15} />
                   </button>
                 )}
-                <button className="clickable-icon" aria-label={m.workspace.closeTab(name)} title={m.actions.close} onClick={() => closeTab(t.id)}><X size={14} /></button>
+                <button className="clickable-icon" aria-label={m.workspace.closeTab(name)} title={m.actions.close} onClick={() => closeTab(t.id)}><X size={15} /></button>
               </div>
             )
           })}
@@ -1498,7 +1498,7 @@ export default function App() {
               <button className="clickable-icon zoom-label tnum" title={m.actions.fitWidth} onClick={() => fitWidth()}>{Math.round(zoom * 100)}%</button>
               <IconButton Icon={ZoomIn} label={m.actions.zoomIn} hotkey={hk('zoom-in')} onClick={() => zoomBy(0.25)} />
               <button className="cta" style={{ marginLeft: 6, height: 28 }} title={hk('save') ? m.actions.withHotkey(m.actions.saveCopy, hk('save')!) : m.actions.saveCopy} onClick={save}>
-                <Download size={15} />{m.actions.save}
+                <Download size={16} />{m.actions.save}
               </button>
             </div>
           </div>
@@ -1538,7 +1538,7 @@ export default function App() {
                         key={t.id} type="button" aria-pressed={tool === t.id} className={`clickable-icon${tool === t.id ? ' is-active' : ''}`}
                         aria-label={t.name} title={`${t.name}: ${t.hint}`} onClick={() => setTool(t.id)}
                       >
-                        <t.Icon size={18} />
+                        <t.Icon size={20} />
                       </button>
                     ))}
                   </span>
@@ -1551,7 +1551,7 @@ export default function App() {
                       key={id} type="button" aria-pressed={tool === id} className={`clickable-icon${tool === id ? ' is-active' : ''}`}
                       aria-label={t.name} title={`${t.name} (${pluginName(t.plugin)})`} onClick={() => setTool(id)}
                     >
-                      <Puzzle size={18} />
+                      <Puzzle size={20} />
                     </button>
                   )
                 })}
@@ -1597,7 +1597,7 @@ export default function App() {
                     <div className="pane-heading">{m.workspace.recent}</div>
                     {recent.map((p) => (
                       <button key={p} className="empty-state-action recent-file" title={p} onClick={() => openPaths([p])}>
-                        <FileText size={15} />{fileName(p)}
+                        <FileText size={16} />{fileName(p)}
                       </button>
                     ))}
                   </div>
@@ -1615,16 +1615,16 @@ export default function App() {
       <div className="status-bar">
         {recording && (
           <span className="status-item recording">
-            <Circle size={10} className="rec-dot" />{m.workflows.recording(recording.length)}
-            <button className="clickable-icon" aria-label={m.workflows.stop} title={m.workflows.stop} onClick={stopRecording}><StopIcon size={12} /></button>
+            <Circle size={11} className="rec-dot" />{m.workflows.recording(recording.length)}
+            <button className="clickable-icon" aria-label={m.workflows.stop} title={m.workflows.stop} onClick={stopRecording}><StopIcon size={14} /></button>
           </span>
         )}
-        {busy && <span className="status-item"><Loader2 size={13} className="spin" />{busy}</span>}
+        {busy && <span className="status-item"><Loader2 size={15} className="spin" />{busy}</span>}
         {!busy && status && <span className={`status-item${status === statusError ? ' error' : ''}`}>{status}</span>}
-        {doc?.encrypted && <span className="status-item" title={m.status.passwordProtected}><Lock size={13} />{m.status.protected}</span>}
+        {doc?.encrypted && <span className="status-item" title={m.status.passwordProtected}><Lock size={15} />{m.status.protected}</span>}
         {doc && doc.signatures.length > 0 && (
           <span className={`status-item ${signedOk ? 'ok' : 'error'}`} title={m.status.signatures}>
-            {signedOk ? <ShieldCheck size={13} /> : <ShieldAlert size={13} />}{signedOk ? m.status.signedOk : m.status.signatureProblem}
+            {signedOk ? <ShieldCheck size={15} /> : <ShieldAlert size={15} />}{signedOk ? m.status.signedOk : m.status.signatureProblem}
           </span>
         )}
         {doc && (

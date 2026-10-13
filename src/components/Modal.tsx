@@ -32,7 +32,7 @@ export default function Modal({ title, onClose, className = '', children }: Prop
       <div ref={ref} className={`modal ${className}`} role="dialog" aria-modal="true" aria-label={title}>
         {onClose && (
           <button className="clickable-icon modal-close" aria-label={m.actions.close} onClick={onClose}>
-            <X size={18} />
+            <X size={20} />
           </button>
         )}
         {title && <h2 className="modal-title">{title}</h2>}

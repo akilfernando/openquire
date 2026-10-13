@@ -61,14 +61,14 @@
 
   --font-interface: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', Inter, Roboto, Ubuntu, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
-  --font-smaller: 12px;
-  --font-small: 13px;
-  --font-medium: 15px;
-  --radius-s: 4px;
+  --font-smaller: 13px;
+  --font-small: 14.5px;
+  --font-medium: 16.5px;
+  --radius-s: 5px;
   --radius-m: 8px;
   --radius-l: 12px;
-  --ribbon-width: 44px;
-  --header-height: 40px;
+  --ribbon-width: 48px;
+  --header-height: 44px;
 }
 
 /* ---- base -------------------------------------------------------------------- */
@@ -89,7 +89,7 @@ body { overflow: hidden; }
   -webkit-font-smoothing: antialiased;
 }
 
-svg.lucide { flex: none; stroke-width: 1.75px; }
+svg.lucide { flex: none; stroke-width: 1.85px; }
 
 /* Thin, quiet scrollbars, as in Obsidian. */
 .app ::-webkit-scrollbar { width: 12px; height: 12px; background: transparent; }
@@ -108,8 +108,8 @@ input, textarea, .comment, .reply { user-select: text; }
 button, input, select, textarea { font: inherit; color: inherit; }
 
 button {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 30px; padding: 0 12px; border: none; border-radius: var(--radius-s);
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 32px; padding: 0 13px; border: none; border-radius: var(--radius-s);
   background: var(--interactive); color: var(--text-normal); cursor: pointer; white-space: nowrap;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(var(--mono-rgb), 0.04);
 }
@@ -122,42 +122,42 @@ button:focus-visible, .clickable-icon:focus-visible { outline: 2px solid var(--a
 
 /* Obsidian's borderless icon buttons. */
 .clickable-icon {
-  height: auto; padding: 4px; background: none; box-shadow: none; color: var(--text-muted);
+  height: auto; padding: 5px; background: none; box-shadow: none; color: var(--text-muted);
   border-radius: var(--radius-s); position: relative;
 }
 .clickable-icon:hover:not(:disabled) { background: var(--hover); color: var(--text-normal); }
 .clickable-icon.is-active { color: var(--accent); background: var(--accent-soft); }
 .clickable-icon .badge {
-  position: absolute; top: 0; right: -1px; min-width: 14px; height: 14px; padding: 0 3px;
-  border-radius: 7px; background: var(--accent); color: var(--on-accent);
-  font-size: 9px; font-weight: 700; line-height: 14px; text-align: center;
+  position: absolute; top: 0; right: -1px; min-width: 15px; height: 15px; padding: 0 3px;
+  border-radius: 7.5px; background: var(--accent); color: var(--on-accent);
+  font-size: 10px; font-weight: 700; line-height: 15px; text-align: center;
 }
 
 input:not([type='checkbox']):not([type='color']):not([type='file']), select, textarea {
   background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-s);
-  padding: 4px 8px; min-height: 30px; outline: none;
+  padding: 5px 9px; min-height: 32px; outline: none;
 }
 input:hover, select:hover, textarea:hover { border-color: var(--border-hover); }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-input[type='checkbox'] { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+input[type='checkbox'] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
 /* Obsidian-style toggle switch. */
 input[type='checkbox'].toggle {
-  appearance: none; flex: none; position: relative; width: 38px; height: 22px; border-radius: 11px; cursor: pointer;
+  appearance: none; flex: none; position: relative; width: 40px; height: 23px; border-radius: 11.5px; cursor: pointer;
   background: var(--text-faint); transition: background 0.15s ease;
 }
 input[type='checkbox'].toggle::after {
-  content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+  content: ''; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%;
   background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s ease;
 }
 input[type='checkbox'].toggle:checked { background: var(--accent); }
-input[type='checkbox'].toggle:checked::after { transform: translateX(16px); }
+input[type='checkbox'].toggle:checked::after { transform: translateX(17px); }
 input[type='checkbox'].toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { input[type='checkbox'].toggle, input[type='checkbox'].toggle::after { transition: none; } }
 input[type='file'] { font-size: var(--font-smaller); color: var(--text-muted); }
 textarea { resize: vertical; }
 kbd {
-  font-family: var(--font-interface); font-size: 11px; color: var(--text-muted);
-  background: var(--bg-secondary-alt); border-radius: var(--radius-s); padding: 1px 6px;
+  font-family: var(--font-interface); font-size: 12px; color: var(--text-muted);
+  background: var(--bg-secondary-alt); border-radius: var(--radius-s); padding: 2px 7px;
 }
 
 /* ---- ribbon ------------------------------------------------------------------- */
@@ -166,7 +166,7 @@ kbd {
   width: var(--ribbon-width); flex: none; display: flex; flex-direction: column; align-items: center;
   gap: 4px; padding: 8px 0; background: var(--bg-secondary); border-right: 1px solid var(--border);
 }
-.ribbon .clickable-icon { padding: 6px; }
+.ribbon .clickable-icon { padding: 8px; }
 .ribbon .spacer { flex: 1; }
 
 /* ---- sidebars ------------------------------------------------------------------ */
@@ -185,7 +185,7 @@ kbd {
 .sidebar-title { font-weight: 600; color: var(--text-normal); padding: 0 6px; }
 .pane { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 60px; display: flex; flex-direction: column; gap: 8px; }
 .pane-heading {
-  color: var(--text-faint); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin: 8px 2px 2px;
+  color: var(--text-faint); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin: 8px 2px 2px;
 }
 .empty-note { color: var(--text-faint); font-size: var(--font-smaller); padding: 4px 2px; }
 
@@ -233,7 +233,7 @@ body.is-col-resizing * {
 
 /* Thumbnails */
 .thumbs { flex: 1; overflow-y: auto; padding: 12px 10px 60px; display: flex; flex-direction: column; gap: 8px; }
-.thumb { border-radius: var(--radius-m); padding: 8px 6px 6px; cursor: pointer; text-align: center; color: var(--text-faint); font-size: 11px; flex: none; }
+.thumb { border-radius: var(--radius-m); padding: 8px 6px 6px; cursor: pointer; text-align: center; color: var(--text-faint); font-size: 12px; flex: none; }
 .thumb:hover { background: var(--hover); }
 .thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .thumb.selected { background: var(--accent-soft); color: var(--accent); }
@@ -562,33 +562,33 @@ label.check:hover { color: var(--text-normal); }
 
 /* Floating tool dock (the Canvas-inspired twist). */
 .dock {
-  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 5;
-  display: flex; align-items: center; gap: 2px; padding: 4px;
+  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: 3px; padding: 5px 6px;
   background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-l);
   box-shadow: var(--shadow); width: max-content; max-width: calc(100% - 24px); flex-wrap: wrap; justify-content: center;
 }
-.dock .clickable-icon { padding: 6px; }
-.dock .divider { width: 1px; height: 20px; background: var(--border); margin: 0 4px; flex: none; }
-.dock select { min-height: 28px !important; padding: 0 4px; font-size: var(--font-smaller); }
-.dock input[type='number'] { width: 56px; min-height: 28px !important; }
-.dock .color-input { width: 24px; height: 24px; margin: 0 4px; }
+.dock .clickable-icon { padding: 7px; }
+.dock .divider { width: 1px; height: 22px; background: var(--border); margin: 0 5px; flex: none; }
+.dock select { min-height: 32px !important; padding: 0 6px; font-size: var(--font-small); }
+.dock input[type='number'] { width: 62px; min-height: 32px !important; }
+.dock .color-input { width: 26px; height: 26px; margin: 0 5px; }
 
 .selbar {
-  position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 6;
-  display: flex; gap: 2px; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border);
+  position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%); z-index: 6;
+  display: flex; gap: 3px; padding: 5px; background: var(--bg-secondary); border: 1px solid var(--border);
   border-radius: var(--radius-m); box-shadow: var(--shadow);
 }
-.selbar button { height: 28px; padding: 0 10px; background: none; box-shadow: none; color: var(--text-muted); }
+.selbar button { height: 30px; padding: 0 12px; background: none; box-shadow: none; color: var(--text-muted); }
 .selbar button:hover { background: var(--hover) !important; color: var(--text-normal); }
 
 /* Status bar: floats over the bottom-right corner, like Obsidian's. */
 .status-bar {
-  position: fixed; right: 0; bottom: 0; z-index: 7; display: flex; align-items: center; gap: 2px;
-  padding: 3px 6px; background: var(--bg-secondary); border: 1px solid var(--border);
+  position: fixed; right: 0; bottom: 0; z-index: 7; display: flex; align-items: center; gap: 3px;
+  padding: 4px 8px; background: var(--bg-secondary); border: 1px solid var(--border);
   border-right: none; border-bottom: none; border-radius: var(--radius-m) 0 0 0;
   color: var(--text-muted); font-size: var(--font-smaller);
 }
-.status-item { display: flex; align-items: center; gap: 5px; padding: 0 6px; height: 22px; border-radius: var(--radius-s); }
+.status-item { display: flex; align-items: center; gap: 6px; padding: 0 8px; height: 24px; border-radius: var(--radius-s); }
 .status-item.error { color: var(--red); }
 .status-item.ok { color: var(--green); }
 .spin { animation: spin 0.9s linear infinite; }

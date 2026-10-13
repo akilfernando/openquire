@@ -108,7 +108,7 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
     <div className="modal-container">
       <div className="modal-bg" onPointerDown={onClose} />
       <div ref={ref} className="modal settings" role="dialog" aria-modal="true" aria-label={m.settings.label}>
-        <button className="clickable-icon modal-close" aria-label={m.actions.close} onClick={onClose}><X size={18} /></button>
+        <button className="clickable-icon modal-close" aria-label={m.actions.close} onClick={onClose}><X size={20} /></button>
         <nav className="settings-nav">
           <div className="pane-heading">{m.settings.options}</div>
           {tabs.map(([k, label]) => (

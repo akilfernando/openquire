@@ -242,8 +242,8 @@ function Bookmarks({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
               <span className="label">{b.title || m.sidebar.untitled}</span>
             )}
             <span className="faint small tnum">{b.page >= 0 ? b.page + 1 : ''}</span>
-            <button className="clickable-icon" aria-label={m.sidebar.rename} title={m.sidebar.rename} onClick={(e) => { e.stopPropagation(); setRenaming(key) }}><Pencil size={14} /></button>
-            <button className="clickable-icon" aria-label={m.sidebar.delete} title={m.sidebar.delete} onClick={(e) => { e.stopPropagation(); actions.deleteBookmark(p) }}><X size={14} /></button>
+            <button className="clickable-icon" aria-label={m.sidebar.rename} title={m.sidebar.rename} onClick={(e) => { e.stopPropagation(); setRenaming(key) }}><Pencil size={15} /></button>
+            <button className="clickable-icon" aria-label={m.sidebar.delete} title={m.sidebar.delete} onClick={(e) => { e.stopPropagation(); actions.deleteBookmark(p) }}><X size={15} /></button>
           </div>
           {b.children.length > 0 && <ul>{tree(b.children, p)}</ul>}
         </li>
@@ -253,7 +253,7 @@ function Bookmarks({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
     <div className="pane">
       <form className="row" onSubmit={(e) => { e.preventDefault(); if (title.trim()) { actions.addBookmark(title.trim()); setTitle('') } }}>
         <input placeholder={m.sidebar.bookmarkPlaceholder} aria-label={m.sidebar.bookmarkPlaceholder} value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
-        <button className="clickable-icon" aria-label={m.sidebar.addBookmark} title={m.sidebar.addBookmark} style={{ flex: 'none' }}><Plus size={18} /></button>
+        <button className="clickable-icon" aria-label={m.sidebar.addBookmark} title={m.sidebar.addBookmark} style={{ flex: 'none' }}><Plus size={20} /></button>
       </form>
       {doc.outline.length ? <ul className="tree">{tree(doc.outline, [])}</ul> : <div className="empty-note">{m.sidebar.noBookmarks}</div>}
     </div>
@@ -278,7 +278,7 @@ function Comment({ a, pageId, replies, focused, selected, actions }: {
         <b>{m.annotations[a.type] ?? a.type}</b>
         <span className="muted">{a.author}</span>
         <button className="clickable-icon" aria-label={m.sidebar.delete} title={m.sidebar.delete} onClick={(e) => { e.stopPropagation(); actions.deleteAnnot(pageId, a.id) }}>
-          <Trash2 size={14} />
+          <Trash2 size={15} />
         </button>
       </div>
       <textarea
@@ -289,7 +289,7 @@ function Comment({ a, pageId, replies, focused, selected, actions }: {
       {replies.map((r) => (
         <div key={r.id} className="reply">
           <span><b>{r.author}</b> {r.contents}</span>
-          <button className="clickable-icon" aria-label={m.sidebar.deleteReply} title={m.sidebar.deleteReply} onClick={() => actions.deleteAnnot(pageId, r.id)}><X size={12} /></button>
+          <button className="clickable-icon" aria-label={m.sidebar.deleteReply} title={m.sidebar.deleteReply} onClick={() => actions.deleteAnnot(pageId, r.id)}><X size={13} /></button>
         </div>
       ))}
       <form onSubmit={(e) => { e.preventDefault(); if (reply.trim()) { actions.reply(pageId, a.id, reply.trim()); setReply('') } }}>
@@ -329,16 +329,16 @@ function Comments({ doc, selectedAnnot, commentFocus, actions }: Pick<Props, 'do
 function Attachments({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   return (
     <div className="pane">
-      <button onClick={actions.attach}><Plus size={16} />{m.sidebar.attach}</button>
+      <button onClick={actions.attach}><Plus size={18} />{m.sidebar.attach}</button>
       {!doc.attachments.length && <div className="empty-note">{m.sidebar.noAttachments}</div>}
       <ul className="tree">
         {doc.attachments.map((a) => (
           <li key={a.name} className="tree-item" onClick={() => actions.saveAttachment(a.name)} title={m.sidebar.download}>
-            <Paperclip size={14} />
+            <Paperclip size={16} />
             <span className="label">{a.name}</span>
             <span className="faint small tnum">{kb(a.size)}</span>
-            <button className="clickable-icon" aria-label={m.sidebar.download} title={m.sidebar.download}><Download size={14} /></button>
-            <button className="clickable-icon" aria-label={m.sidebar.remove} title={m.sidebar.remove} onClick={(e) => { e.stopPropagation(); actions.removeAttachment(a.name) }}><X size={14} /></button>
+            <button className="clickable-icon" aria-label={m.sidebar.download} title={m.sidebar.download}><Download size={15} /></button>
+            <button className="clickable-icon" aria-label={m.sidebar.remove} title={m.sidebar.remove} onClick={(e) => { e.stopPropagation(); actions.removeAttachment(a.name) }}><X size={15} /></button>
           </li>
         ))}
       </ul>
@@ -350,14 +350,14 @@ function Signatures({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   const any = doc.signatures.length > 0
   return (
     <div className="pane">
-      <button onClick={actions.digitalSign}><BadgeCheck size={16} />{m.panel.signWithId}</button>
+      <button onClick={actions.digitalSign}><BadgeCheck size={18} />{m.panel.signWithId}</button>
       {!any && <div className="empty-note">{m.sidebar.noSignatures}</div>}
       {doc.signatures.map((s) => {
         const trusted = s.trust.trusted && s.valid
         return (
           <div key={s.field} className={`sig ${!s.valid ? 'bad' : trusted ? 'ok' : 'warn'}`}>
             <span className="sig-status">
-              {!s.valid ? <ShieldAlert size={16} /> : trusted ? <ShieldCheck size={16} /> : <ShieldQuestion size={16} />}
+              {!s.valid ? <ShieldAlert size={18} /> : trusted ? <ShieldCheck size={18} /> : <ShieldQuestion size={18} />}
               {s.kind === 'timestamp'
                 ? (s.valid ? m.sidebar.validTimestamp : m.sidebar.invalidTimestamp)
                 : !s.valid ? m.sidebar.invalidSignature : trusted ? m.sidebar.validSignature : m.sidebar.unverifiedSignature}
@@ -424,13 +424,13 @@ function Accessibility({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
       {checking && report && (
         <section className="a11y-report" aria-live="polite">
           <div className={`pane-heading${errors ? ' error' : ''}`}>
-            {errors ? <CircleAlert size={14} /> : <CircleCheck size={14} />}
+            {errors ? <CircleAlert size={16} /> : <CircleCheck size={16} />}
             {m.sidebar.a11y.summary(errors, report.problems.length - errors)}
           </div>
           <ul className="tree">
             {report.problems.map((p, i) => (
               <li key={i} className="tree-item problem" onClick={() => go(p.page)}>
-                {p.severity === 'error' ? <CircleAlert size={14} className="error" /> : <TriangleAlert size={14} className="faint" />}
+                {p.severity === 'error' ? <CircleAlert size={16} className="error" /> : <TriangleAlert size={16} className="faint" />}
                 <span className="label wrap">{p.message}</span>
                 {p.page !== undefined && <span className="faint small tnum">{m.sidebar.a11y.page(p.page + 1)}</span>}
               </li>
@@ -454,8 +454,8 @@ function Accessibility({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
               )}
               <span className="muted small tnum">{t.page >= 0 ? m.sidebar.a11y.page(t.page + 1) : ''}</span>
               <span className="grow" />
-              <button className="clickable-icon" aria-label={m.sidebar.a11y.earlier} title={m.sidebar.a11y.earlier} disabled={i === 0} onClick={() => actions.moveTag(t.id, -1)}><ArrowUp size={14} /></button>
-              <button className="clickable-icon" aria-label={m.sidebar.a11y.later} title={m.sidebar.a11y.later} disabled={i === tags.length - 1} onClick={() => actions.moveTag(t.id, 1)}><ArrowDown size={14} /></button>
+              <button className="clickable-icon" aria-label={m.sidebar.a11y.earlier} title={m.sidebar.a11y.earlier} disabled={i === 0} onClick={() => actions.moveTag(t.id, -1)}><ArrowUp size={16} /></button>
+              <button className="clickable-icon" aria-label={m.sidebar.a11y.later} title={m.sidebar.a11y.later} disabled={i === tags.length - 1} onClick={() => actions.moveTag(t.id, 1)}><ArrowDown size={16} /></button>
             </div>
             {t.type === 'Figure' ? (
               <input
@@ -497,7 +497,7 @@ function Compare({ compare, actions }: Pick<Props, 'compare' | 'actions'>) {
           {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
       </label>
-      <button className="cta" onClick={() => chosen !== undefined && actions.compare(chosen)}><GitCompareArrows size={16} />{m.sidebar.cmp.run}</button>
+      <button className="cta" onClick={() => chosen !== undefined && actions.compare(chosen)}><GitCompareArrows size={18} />{m.sidebar.cmp.run}</button>
       <p className="hint">{m.sidebar.cmp.hint}</p>
       {data && counts && (
         <>
@@ -664,7 +664,7 @@ export default function Sidebar(props: Props) {
             key={id} role="tab" aria-selected={shown === id} className={`clickable-icon${shown === id ? ' is-active' : ''}`}
             aria-label={count ? m.sidebar.tabWithCount(label, count) : label} title={label} onClick={() => onTab(id)}
           >
-            <Icon size={18} />
+            <Icon size={20} />
             {!!count && shown !== id && <span className="badge tnum">{count > 99 ? '99+' : count}</span>}
           </button>
         ))}
