@@ -9,3 +9,6 @@ cli/LICENSE
 cli/*.tgz
 src-tauri/target
 src-tauri/gen
+target
+/target
+

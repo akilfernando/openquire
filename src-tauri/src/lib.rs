@@ -4,7 +4,6 @@
 //! writes the files the user opens (so documents save in place), and hands over PDFs opened from
 //! the operating system: on the command line, through file associations, or in a second launch.
 
-mod pkcs11;
 mod tools;
 
 use std::path::Path;
@@ -66,14 +65,14 @@ fn take_opened_files(state: tauri::State<Pending>) -> Vec<String> {
 
 /// Certificates on the smart cards the PKCS#11 library can see.
 #[tauri::command]
-async fn token_certificates(module: String) -> Result<Vec<pkcs11::TokenCert>, String> {
-    tauri::async_runtime::spawn_blocking(move || pkcs11::list(&module)).await.map_err(|e| e.to_string())?
+async fn token_certificates(module: String) -> Result<Vec<openquire_crypto::TokenCert>, String> {
+    tauri::async_runtime::spawn_blocking(move || openquire_crypto::list_token_certificates(&module)).await.map_err(|e| e.to_string())?
 }
 
 /// Signs a DigestInfo with a key on a smart card.
 #[tauri::command]
 async fn token_sign(module: String, slot: u64, id: String, pin: String, digest_info: Vec<u8>) -> Result<Response, String> {
-    let sig = tauri::async_runtime::spawn_blocking(move || pkcs11::sign(&module, slot, &id, &pin, &digest_info))
+    let sig = tauri::async_runtime::spawn_blocking(move || openquire_crypto::sign_with_token(&module, slot, &id, &pin, &digest_info))
         .await
         .map_err(|e| e.to_string())??;
     Ok(Response::new(sig))

@@ -34,6 +34,8 @@ jobs:
       # Type check, OCR assets and the production bundle.
       - run: npm run build
       - run: npm test
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
       - uses: actions/upload-artifact@v4
