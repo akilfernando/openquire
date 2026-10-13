@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType }
 import {
   BadgeCheck, Check, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
   ImagePlus, Loader2, Lock, Maximize2, MousePointer2, MoveUpRight, PanelLeft, PanelRight, Pencil, Redo2, ScanText, Search, Settings as SettingsIcon,
-  ShieldAlert, ShieldCheck, Signature, Square, SquareTerminal, StickyNote, Strikethrough, TextCursorInput, Trash2, Type, Underline, Undo2,
+  ShieldAlert, ShieldCheck, Signature, Sparkles, Square, SquareTerminal, StickyNote, Strikethrough, TextCursorInput, Trash2, Type, Underline, Undo2,
   UnfoldHorizontal, UnfoldVertical, X, ZoomIn, ZoomOut, Link2, SquareX, FormInput, Columns2, Workflow as WorkflowIcon, Square as StopIcon, type LucideProps,
 } from 'lucide-react'
 import CommandPalette, { type Command } from './components/CommandPalette'
@@ -17,7 +17,8 @@ import Sidebar, { type AiEntry, type CompareInfo, type SideActions, type SideTab
 import AiConsentDialog from './components/AiConsentDialog'
 import {
   aiHost, altTextRequest, complete, formRequest, parseFormValues, parsePersonalData, personalDataRequest, questionRequest, selectPages, summaryRequest,
-  type AiRequest, type FormFieldInfo, type PageText,
+  selectionSummaryRequest, selectionQuestionRequest,
+  type AiRequest, type AiScope, type FormFieldInfo, type PageText,
 } from './ai'
 import type { Mark } from './engine/compare'
 import SidePane from './components/SidePane'
@@ -99,6 +100,7 @@ export default function App() {
   const [selAnnot, setSelAnnot] = useState<{ pageId: number; id: number } | null>(null)
   const [editingAnnot, setEditingAnnot] = useState<number | null>(null)
   const [textSel, setTextSel] = useState<{ pageId: number; quads: Quad[]; text: string } | null>(null)
+  const [aiScope, setAiScope] = useState<AiScope>('all')
   const [tab, setTab] = useState<SideTab>((saved.tab as SideTab) ?? 'pages')
   // On narrow screens the sidebars are drawers that start closed.
   const narrowQuery = useMemo(() => matchMedia('(max-width: 900px)'), [])
@@ -626,29 +628,67 @@ export default function App() {
     }
   }
 
-  const documentText = async (): Promise<PageText[]> =>
-    Promise.all(docRef.current!.pages.map(async (p, i) => ({ page: i + 1, text: await engine.pageText(p.id) })))
+  const scopedDocumentText = async (): Promise<PageText[]> => {
+    const cur = currentPage()
+    const all = docRef.current!.pages
+    if (aiScope === 'text' && textSel?.text.trim()) {
+      const idx = all.findIndex((p) => p.id === textSel.pageId)
+      return [{ page: idx >= 0 ? idx + 1 : 1, text: textSel.text }]
+    }
+    if (aiScope === 'current' && cur) {
+      const idx = all.findIndex((p) => p.id === cur.id)
+      return [{ page: idx >= 0 ? idx + 1 : 1, text: await engine.pageText(cur.id) }]
+    }
+    if (aiScope === 'selected' && selected.size > 0) {
+      const list = all
+        .map((p, i) => ({ page: i + 1, id: p.id }))
+        .filter((p) => selected.has(p.id))
+      return Promise.all(list.map(async (p) => ({ page: p.page, text: await engine.pageText(p.id) })))
+    }
+    return Promise.all(all.map(async (p, i) => ({ page: i + 1, text: await engine.pageText(p.id) })))
+  }
 
-  const textItems = (pages: PageText[]) => [m.ai.pagesText(pages.length, pages.reduce((n, p) => n + p.text.length, 0))]
+  const textItems = (pages: PageText[]) => {
+    const chars = pages.reduce((n, p) => n + p.text.length, 0)
+    if (aiScope === 'text') {
+      return [`Selected text excerpt (${chars.toLocaleString()} characters) from page ${pages[0]?.page ?? 1}`]
+    }
+    if (aiScope === 'current') {
+      return [`Current page ${pages[0]?.page ?? 1} only (${chars.toLocaleString()} characters)`]
+    }
+    if (aiScope === 'selected') {
+      return [`${pages.length} selected pages (${chars.toLocaleString()} characters)`]
+    }
+    return [m.ai.pagesText(pages.length, chars)]
+  }
 
   const aiActions: SideActions['ai'] = {
     summarize: () =>
       void aiRun(async () => {
-        const pages = selectPages(await documentText())
+        if (aiScope === 'text' && textSel?.text.trim()) {
+          const text = await sendAi(selectionSummaryRequest(textSel.text), [`Selected excerpt (${textSel.text.length} characters)`])
+          return text === null ? null : { kind: 'answer', question: m.ai.summarizeSelection, text }
+        }
+        const pages = selectPages(await scopedDocumentText())
         if (!pages.length) return { kind: 'info', text: m.ai.noText }
         const text = await sendAi(summaryRequest(pages), textItems(pages))
-        return text === null ? null : { kind: 'answer', question: m.ai.summarize, text }
+        const qTitle = aiScope === 'current' ? `Summarize page ${pages[0]?.page}` : m.ai.summarize
+        return text === null ? null : { kind: 'answer', question: qTitle, text }
       }),
     ask: (question) =>
       void aiRun(async () => {
-        const pages = selectPages(await documentText(), question)
+        if (aiScope === 'text' && textSel?.text.trim()) {
+          const text = await sendAi(selectionQuestionRequest(textSel.text, question), [`Selected excerpt (${textSel.text.length} characters)`, m.ai.question(question)])
+          return text === null ? null : { kind: 'answer', question, text }
+        }
+        const pages = selectPages(await scopedDocumentText(), question)
         if (!pages.length) return { kind: 'info', text: m.ai.noText }
         const text = await sendAi(questionRequest(pages, question), [...textItems(pages), m.ai.question(question)])
         return text === null ? null : { kind: 'answer', question, text }
       }),
     personalData: () =>
       void aiRun(async () => {
-        const all = await documentText()
+        const all = await scopedDocumentText()
         const pages = selectPages(all)
         if (!pages.length) return { kind: 'info', text: m.ai.noText }
         const reply = await sendAi(personalDataRequest(pages), textItems(pages))
@@ -663,10 +703,16 @@ export default function App() {
     fillForm: () =>
       void aiRun(async () => {
         if (!settings.aiProfile.trim()) return { kind: 'info', text: m.ai.noProfile }
+        const cur = currentPage()
         const d = docRef.current!
+        const pagesToScan = (aiScope === 'current' && cur)
+          ? [cur]
+          : (aiScope === 'selected' && selected.size > 0)
+            ? d.pages.filter((p) => selected.has(p.id))
+            : d.pages
         // Each field with the text just left of it or above it, which is usually its label.
         const fields: (FormFieldInfo & { pageId: number })[] = []
-        for (const p of d.pages) {
+        for (const p of pagesToScan) {
           const writable = p.widgets.filter((w) => !w.readOnly && w.kind !== 'signature' && w.kind !== 'button')
           if (!writable.length) continue
           const lines = await engine.textLines(p.id)
@@ -686,7 +732,7 @@ export default function App() {
         const filled: string[] = []
         let state: DocState | null = null
         for (const [name, value] of values) {
-          for (const p of docRef.current!.pages) {
+          for (const p of pagesToScan) {
             const widgets = p.widgets.filter((w) => w.name === name)
             if (!widgets.length) continue
             const radio = widgets.find((w) => w.kind === 'radio' && w.on === value)
@@ -1567,7 +1613,22 @@ export default function App() {
           commentFocus={commentFocus} actions={sideActions}
           compare={{ others: tabs.filter((t) => t.id !== active), result: comparison }}
           pluginPanes={host.panes.map((p) => ({ key: `plugin:${p.plugin}:${p.id}` as const, title: p.title, content: p.content }))}
-          assistant={settings.aiEnabled ? { log: aiLog, busy: aiBusy, hasFields: doc.pages.some((p) => p.widgets.some((w) => !w.readOnly && w.kind !== 'signature' && w.kind !== 'button')) } : null}
+          assistant={settings.aiEnabled ? {
+            log: aiLog,
+            busy: aiBusy,
+            hasFields: doc.pages.some((p) => p.widgets.some((w) => !w.readOnly && w.kind !== 'signature' && w.kind !== 'button')),
+            scope: aiScope,
+            onScopeChange: setAiScope,
+            currentPageNumber: (() => {
+              const cur = currentPage()
+              if (!cur || !doc) return 1
+              const idx = doc.pages.findIndex((p) => p.id === cur.id)
+              return idx >= 0 ? idx + 1 : 1
+            })(),
+            selectedCount: selected.size,
+            hasTextSel: !!textSel,
+            textSelSnippet: textSel ? (textSel.text.length > 30 ? `${textSel.text.slice(0, 27)}...` : textSel.text) : undefined,
+          } : null}
           open={leftOpen}
         />
       )}
@@ -1719,6 +1780,16 @@ export default function App() {
               {textSel && (
                 <div className="selbar">
                   <button onClick={() => { void navigator.clipboard.writeText(textSel.text); setStatus(m.status.copied); setTextSel(null) }}>{m.workspace.copy}</button>
+                  {settings.aiEnabled && (
+                    <button className="cta" onClick={() => {
+                      setAiScope('text')
+                      setTab('assistant')
+                      setLeftOpen(true)
+                    }}>
+                      <Sparkles size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
+                      {m.ai.askAboutSelection}
+                    </button>
+                  )}
                   <button onClick={() => markup('Highlight')}>{m.tools.highlight.name}</button>
                   <button onClick={() => markup('Underline')}>{m.tools.underline.name}</button>
                   <button onClick={() => markup('StrikeOut')}>{m.tools.strike.name}</button>

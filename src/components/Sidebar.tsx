@@ -5,7 +5,7 @@ import {
 import { engine, requestRender } from '../engine/client'
 import type { AnnotInfo, Bookmark, DocState, PageInfo } from '../engine/types'
 import type { ComparisonResult } from '../engine/compare'
-import { citations } from '../ai'
+import { citations, type AiScope } from '../ai'
 import type { PaneElement } from '../plugins/types'
 import PluginPane from './PluginPane'
 import { TAG_TYPES, type AccessibilityProblem, type TagNode, type TagType } from '../engine/tagging'
@@ -57,7 +57,17 @@ export interface AiEntry {
 }
 
 /** The assistant's state, or null when the assistant is turned off. */
-export type AssistantInfo = { log: AiEntry[]; busy: boolean; hasFields: boolean } | null
+export type AssistantInfo = {
+  log: AiEntry[]
+  busy: boolean
+  hasFields: boolean
+  scope: AiScope
+  onScopeChange: (scope: AiScope) => void
+  currentPageNumber: number
+  selectedCount: number
+  hasTextSel: boolean
+  textSelSnippet?: string
+} | null
 
 export interface CompareInfo {
   /** Other open documents that can be compared with this one. */
@@ -545,19 +555,60 @@ function Assistant({ doc, assistant, actions }: Pick<Props, 'doc' | 'assistant' 
     end.current?.scrollIntoView({ block: 'nearest' })
   }, [assistant?.log.length])
   if (!assistant) return null
-  const { log, busy, hasFields } = assistant
+  const { log, busy, hasFields, scope, onScopeChange, currentPageNumber, selectedCount, hasTextSel, textSelSnippet } = assistant
   const go = (page: number) => {
     const p = doc.pages[page - 1]
     if (p) actions.goTo(p.id)
   }
   return (
     <div className="pane assistant">
-      <p className="hint">{m.ai.intro}</p>
+      <div className="ai-scope-box" style={{ marginBottom: 12, padding: '8px 10px', background: 'var(--panel)', borderRadius: 6, border: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            {m.ai.scope}
+          </span>
+          <span className="small muted" style={{ fontSize: '0.72rem' }}>
+            {scope === 'text' && '1 excerpt'}
+            {scope === 'current' && '1 page'}
+            {scope === 'selected' && `${selectedCount} pages`}
+            {scope === 'all' && `${doc.pages.length} pages`}
+          </span>
+        </div>
+        <select
+          value={scope}
+          onChange={(e) => onScopeChange(e.target.value as AiScope)}
+          style={{ width: '100%', padding: '4px 6px', fontSize: '0.84rem', borderRadius: 4, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)' }}
+        >
+          <option value="all">{m.ai.scopeAll(doc.pages.length)}</option>
+          <option value="current">{m.ai.scopeCurrent(currentPageNumber)}</option>
+          {selectedCount > 0 && (
+            <option value="selected">{m.ai.scopeSelected(selectedCount)}</option>
+          )}
+          {hasTextSel && (
+            <option value="text">
+              {textSelSnippet ? `"${textSelSnippet}"` : m.ai.scopeText(0)}
+            </option>
+          )}
+        </select>
+        <p className="small muted" style={{ margin: '4px 0 0 0', fontSize: '0.75rem' }}>
+          {scope === 'all' && m.ai.scopeHintAll}
+          {scope === 'current' && m.ai.scopeHintCurrent(currentPageNumber)}
+          {scope === 'selected' && m.ai.scopeHintSelected(selectedCount)}
+          {scope === 'text' && m.ai.scopeHintText}
+        </p>
+      </div>
+
       <div className="row wrap">
-        <button disabled={busy} onClick={actions.ai.summarize}>{m.ai.summarize}</button>
-        <button disabled={busy} onClick={actions.ai.personalData}>{m.ai.personalData}</button>
-        <button disabled={busy || !hasFields} onClick={actions.ai.fillForm}>{m.ai.fillForm}</button>
-        <button disabled={busy} onClick={actions.ai.altText} title={m.ai.altTextHint}>{m.ai.altText}</button>
+        <button disabled={busy} onClick={actions.ai.summarize}>
+          {scope === 'text' ? m.ai.summarizeSelection : m.ai.summarize}
+        </button>
+        {scope !== 'text' && (
+          <>
+            <button disabled={busy} onClick={actions.ai.personalData}>{m.ai.personalData}</button>
+            <button disabled={busy || !hasFields} onClick={actions.ai.fillForm}>{m.ai.fillForm}</button>
+            <button disabled={busy} onClick={actions.ai.altText} title={m.ai.altTextHint}>{m.ai.altText}</button>
+          </>
+        )}
       </div>
       <div className="ai-log" aria-live="polite">
         {log.map((e, i) => (

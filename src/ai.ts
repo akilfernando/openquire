@@ -117,7 +117,21 @@ export function selectPages(pages: PageText[], question?: string, budget = TEXT_
 
 const pagesXml = (pages: PageText[]) => pages.map((p) => `<page number="${p.page}">\n${p.text.trim()}\n</page>`).join('\n')
 
-// ---- prompts ---------------------------------------------------------------------------------
+export type AiScope = 'all' | 'current' | 'selected' | 'text'
+
+export function selectionSummaryRequest(snippet: string): AiRequest {
+  return {
+    system: 'You summarize the provided text excerpt accurately and concisely. Use only the excerpt\'s content. Write plain prose in a short paragraph or short list without Markdown headings.',
+    parts: [{ type: 'text', text: `Excerpt:\n"""\n${snippet.trim()}\n"""\n\nSummarize this text excerpt.` }],
+  }
+}
+
+export function selectionQuestionRequest(snippet: string, question: string): AiRequest {
+  return {
+    system: 'You answer questions about the provided text excerpt using only its content. If the excerpt does not answer the question, say so. Answer in plain prose without Markdown headings.',
+    parts: [{ type: 'text', text: `Excerpt:\n"""\n${snippet.trim()}\n"""\n\nQuestion: ${question}` }],
+  }
+}
 
 export function summaryRequest(pages: PageText[]): AiRequest {
   return {
