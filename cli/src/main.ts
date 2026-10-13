@@ -42,6 +42,9 @@ Commands:
   pdfa       Save PDF/A copies: --part 2|3 (default 2)
   tag        Tag for accessibility: --lang <BCP 47 code> (default en-US)
   export     Convert: --to docx|xlsx|txt|html
+  mcp        Start Model Context Protocol (MCP) server for Claude Desktop / AI agents
+               --allow-dir <path>      Permitted directory (repeatable, defaults to CWD)
+               --allow-overwrite       Allow mutating output files without non-destructive suffix
 
 Options:
   -o, --out <path>   Output folder (or file, for one input or merge). Default: next to each input
@@ -51,7 +54,7 @@ Options:
   -v, --version      Show the version
 `
 
-const COMMANDS = ['info', 'redact', 'stamp', 'ocr', 'sign', 'run', 'merge', 'compress', 'pdfa', 'tag', 'export'] as const
+const COMMANDS = ['info', 'redact', 'stamp', 'ocr', 'sign', 'run', 'merge', 'compress', 'pdfa', 'tag', 'export', 'mcp'] as const
 type Command = (typeof COMMANDS)[number]
 
 class UsageError extends Error {}
@@ -122,6 +125,8 @@ export async function main(argv: string[], log: (s: string) => void = console.lo
         level: { type: 'string' },
         part: { type: 'string' },
         to: { type: 'string' },
+        'allow-dir': { type: 'string', multiple: true },
+        'allow-overwrite': { type: 'boolean' },
       },
     })
   } catch (e) {
@@ -143,6 +148,16 @@ export async function main(argv: string[], log: (s: string) => void = console.lo
     return 2
   }
   const say = (s: string) => !o.quiet && log(s)
+
+  if (command === 'mcp') {
+    const { runMcpServer } = await import('./mcp/server')
+    await runMcpServer({
+      version: typeof VERSION !== 'undefined' ? VERSION : '1.0.0',
+      allowedDirs: o['allow-dir'],
+      allowOverwrite: o['allow-overwrite'],
+    })
+    return 0
+  }
 
   try {
     let workflow = null

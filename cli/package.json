@@ -24,9 +24,11 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@tesseract.js-data/eng": "^1.0.0",
     "mupdf": "^1.28.1",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "zod": "^4.6.7"
   },
   "keywords": [
     "pdf",
