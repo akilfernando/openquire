@@ -14,4 +14,5 @@ export { parseWorkflow, newWorkflow, resolvePages, type Workflow, type WorkflowS
 export { recognize } from './ocr'
 export { createOpenQuireMcpServer, runMcpServer } from './mcp/server'
 export { registerOpenQuireTools, type McpToolOptions } from './mcp/tools'
+export { getClaudeDesktopConfigPath, getClaudeDesktopStatus, setupClaudeDesktop, uninstallClaudeDesktop } from './mcp/install'
 export type * from '../../src/engine/types'

@@ -150,6 +150,32 @@ export async function main(argv: string[], log: (s: string) => void = console.lo
   const say = (s: string) => !o.quiet && log(s)
 
   if (command === 'mcp') {
+    const sub = rest[0]
+    if (sub === 'setup' || sub === 'install') {
+      const { setupClaudeDesktop } = await import('./mcp/install')
+      const res = setupClaudeDesktop({
+        allowedDir: o['allow-dir']?.[0],
+        log: say,
+      })
+      say(`✔ ${res.status === 'installed' ? 'Configured' : 'Updated'} OpenQuire MCP server in Claude Desktop.`)
+      say(`  Config file: ${res.configPath}`)
+      say(`  Restart Claude Desktop to start using OpenQuire.`)
+      return 0
+    }
+    if (sub === 'uninstall') {
+      const { uninstallClaudeDesktop } = await import('./mcp/install')
+      const res = uninstallClaudeDesktop()
+      say(res.removed ? '✔ Removed OpenQuire from Claude Desktop.' : 'OpenQuire was not configured in Claude Desktop.')
+      return 0
+    }
+    if (sub === 'status') {
+      const { getClaudeDesktopStatus } = await import('./mcp/install')
+      const status = getClaudeDesktopStatus()
+      say(`Claude Desktop config: ${status.configPath}`)
+      say(`OpenQuire MCP status: ${status.isConfigured ? 'Configured' : 'Not configured'}`)
+      return 0
+    }
+
     const { runMcpServer } = await import('./mcp/server')
     await runMcpServer({
       version: typeof VERSION !== 'undefined' ? VERSION : '1.0.0',

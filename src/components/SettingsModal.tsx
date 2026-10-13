@@ -87,6 +87,7 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
 export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins }: Props) {
   const [certError, setCertError] = useState('')
   const [purgeFeedback, setPurgeFeedback] = useState('')
+  const [copiedMcp, setCopiedMcp] = useState(false)
   const [tab, setTab] = useState<Tab>('appearance')
   const [installed, setInstalled] = useState<NativeTools | null>(null)
   // Escape closes Settings wherever focus is, even after the focused control went away.
@@ -318,6 +319,38 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                   </div>
                 </>
               )}
+
+              <div style={{ marginTop: 24, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>{m.settings.claudeDesktopTitle}</h3>
+                  <span className="badge" style={{ padding: '2px 8px', borderRadius: 4, background: 'var(--panel)', fontSize: '0.75rem', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                    Model Context Protocol
+                  </span>
+                </div>
+                <p className="hint" style={{ margin: '4px 0 12px 0' }}>{m.settings.claudeDesktopDesc}</p>
+                <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '12px 14px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: 8 }}>
+                    {m.settings.claudeDesktopCommandHint}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <code style={{ flex: 1, padding: '6px 10px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, fontSize: '0.82rem', fontFamily: 'monospace', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+                      npx -y openquire mcp setup
+                    </code>
+                    <button
+                      type="button"
+                      style={{ padding: '6px 14px', fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      onClick={() => {
+                        void navigator.clipboard.writeText('npx -y openquire mcp setup')
+                        setCopiedMcp(true)
+                        setTimeout(() => setCopiedMcp(false), 3000)
+                      }}
+                    >
+                      {copiedMcp ? '✔ Copied!' : m.settings.claudeDesktopCopyCmd}
+                    </button>
+                  </div>
+                  {copiedMcp && <p className="success small" style={{ margin: '8px 0 0 0', color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500 }}>{m.settings.claudeDesktopCopied}</p>}
+                </div>
+              </div>
             </>
           )}
           {tab === 'hotkeys' && <HotkeySettings commands={commands} overrides={settings.hotkeys} onChange={(hotkeys) => set({ hotkeys })} />}
