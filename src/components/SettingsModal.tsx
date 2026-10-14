@@ -46,6 +46,8 @@ export interface Settings {
   aiBaseUrl: string
   /** Facts about the user for filling forms, sent only when they ask. */
   aiProfile: string
+  /** Air-gapped privacy mode: completely disables/hides all AI features and settings. */
+  aiDisabled?: boolean
 }
 
 export const ACCENTS: { key: string; hue: number }[] = [
@@ -70,6 +72,7 @@ interface Props {
   onPlugins: (list: InstalledPlugin[]) => void
   /** Reads certificate files into displayable entries. */
   readCertificates: (data: Uint8Array) => Promise<Settings['trusted']>
+  onOpenWizard?: () => void
 }
 
 function Item({ name, desc, children }: { name: string; desc?: string; children: React.ReactNode }) {
@@ -84,7 +87,7 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins }: Props) {
+export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard }: Props) {
   const [certError, setCertError] = useState('')
   const [purgeFeedback, setPurgeFeedback] = useState('')
   const [copiedMcp, setCopiedMcp] = useState(false)
@@ -272,10 +275,41 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
           )}
           {tab === 'ai' && (
             <>
-              <h2>{m.settings.tabs.ai}</h2>
-              <Item name={m.settings.aiEnabled} desc={m.settings.aiEnabledDesc}>
-                <input type="checkbox" className="toggle" checked={settings.aiEnabled} aria-label={m.settings.aiEnabled} onChange={(e) => set({ aiEnabled: e.target.checked })} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <h2 style={{ margin: 0 }}>{m.settings.tabs.ai}</h2>
+                {onOpenWizard && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose()
+                      onOpenWizard()
+                    }}
+                    style={{ padding: '4px 10px', fontSize: '0.8rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)' }}
+                  >
+                    {m.settings.openOnboardingWizard}
+                  </button>
+                )}
+              </div>
+
+              <Item name={m.settings.aiDisabled} desc={m.settings.aiDisabledDesc}>
+                <input
+                  type="checkbox"
+                  className="toggle"
+                  checked={settings.aiDisabled ?? false}
+                  aria-label={m.settings.aiDisabled}
+                  onChange={(e) => set({ aiDisabled: e.target.checked, aiEnabled: e.target.checked ? false : settings.aiEnabled })}
+                />
               </Item>
+
+              {settings.aiDisabled ? (
+                <div className="hint" style={{ padding: '12px 14px', background: 'var(--panel)', borderRadius: 6, margin: '14px 0', border: '1px solid var(--border)', lineHeight: 1.45 }}>
+                  <strong>Air-Gapped Mode Active:</strong> All AI features (sidebars, form suggestions, and network LLM prompts) are completely disabled. Uncheck above to re-enable.
+                </div>
+              ) : (
+                <>
+                  <Item name={m.settings.aiEnabled} desc={m.settings.aiEnabledDesc}>
+                    <input type="checkbox" className="toggle" checked={settings.aiEnabled} aria-label={m.settings.aiEnabled} onChange={(e) => set({ aiEnabled: e.target.checked })} />
+                  </Item>
               {settings.aiEnabled && (
                 <>
                   <Item name={m.settings.aiProvider} desc={m.settings.aiProviderDesc}>
@@ -351,6 +385,8 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                   {copiedMcp && <p className="success small" style={{ margin: '8px 0 0 0', color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500 }}>{m.settings.claudeDesktopCopied}</p>}
                 </div>
               </div>
+                </>
+              )}
             </>
           )}
           {tab === 'hotkeys' && <HotkeySettings commands={commands} overrides={settings.hotkeys} onChange={(hotkeys) => set({ hotkeys })} />}

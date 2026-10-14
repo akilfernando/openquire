@@ -149,3 +149,40 @@ export async function nativeConvert(bytes: Uint8Array, ext: string) {
 }
 
 export const nativeOcr = (png: Uint8Array, lang: string) => invoke<string>('native_ocr', png, { headers: { lang } })
+
+// ---- AI desktop assistants & MCP detection ----------------------------------------------------
+
+export interface AssistantStatus {
+  name: string
+  installed: boolean
+  linked: boolean
+  config_path?: string | null
+  details?: string | null
+}
+
+export interface AiAssistantsReport {
+  claude_desktop: AssistantStatus
+  chatgpt_desktop: AssistantStatus
+  cursor: AssistantStatus
+}
+
+export async function detectAiAssistants(): Promise<AiAssistantsReport> {
+  if (!isDesktop) {
+    return {
+      claude_desktop: { name: 'Claude Desktop', installed: false, linked: false },
+      chatgpt_desktop: { name: 'ChatGPT Desktop', installed: false, linked: false },
+      cursor: { name: 'Cursor', installed: false, linked: false },
+    }
+  }
+  return invoke<AiAssistantsReport>('detect_ai_assistants')
+}
+
+export async function linkClaudeDesktop(allowedDir?: string): Promise<string> {
+  if (!isDesktop) throw new Error('Native link is only available in the desktop app.')
+  return invoke<string>('link_claude_desktop', { allowedDir })
+}
+
+export async function unlinkClaudeDesktop(): Promise<void> {
+  if (!isDesktop) throw new Error('Native unlink is only available in the desktop app.')
+  await invoke('unlink_claude_desktop')
+}

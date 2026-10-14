@@ -4,6 +4,7 @@
 //! writes the files the user opens (so documents save in place), and hands over PDFs opened from
 //! the operating system: on the command line, through file associations, or in a second launch.
 
+mod ai_detect;
 mod tools;
 
 use std::path::Path;
@@ -110,6 +111,24 @@ async fn native_ocr(request: Request<'_>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || tools::ocr_tsv(&png, &lang)).await.map_err(|e| e.to_string())?
 }
 
+/// Detects installed AI desktop assistants (Claude Desktop, ChatGPT, Cursor).
+#[tauri::command]
+async fn detect_ai_assistants() -> ai_detect::AiAssistantsReport {
+    tauri::async_runtime::spawn_blocking(ai_detect::detect_all).await.unwrap_or_default()
+}
+
+/// Links Claude Desktop to OpenQuire via local MCP.
+#[tauri::command]
+async fn link_claude_desktop(allowed_dir: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_detect::link_claude(allowed_dir)).await.map_err(|e| e.to_string())?
+}
+
+/// Unlinks OpenQuire from Claude Desktop.
+#[tauri::command]
+async fn unlink_claude_desktop() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(ai_detect::unlink_claude).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial = pdf_args(std::env::args().skip(1));
@@ -128,7 +147,19 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .manage(Pending(Mutex::new(initial)))
-        .invoke_handler(tauri::generate_handler![read_file, write_file, take_opened_files, token_certificates, token_sign, native_tools, native_convert, native_ocr])
+        .invoke_handler(tauri::generate_handler![
+            read_file,
+            write_file,
+            take_opened_files,
+            token_certificates,
+            token_sign,
+            native_tools,
+            native_convert,
+            native_ocr,
+            detect_ai_assistants,
+            link_claude_desktop,
+            unlink_claude_desktop
+        ])
         .build(tauri::generate_context!())
         .expect("error while starting OpenQuire")
         .run(|_app, _event| {

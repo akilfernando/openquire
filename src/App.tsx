@@ -13,6 +13,7 @@ import SanitizeDialog from './components/SanitizeDialog'
 import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsModal, { type Settings } from './components/SettingsModal'
+import OnboardingModal from './components/OnboardingModal'
 import Sidebar, { type AiEntry, type CompareInfo, type SideActions, type SideTab } from './components/Sidebar'
 import AiConsentDialog from './components/AiConsentDialog'
 import {
@@ -67,7 +68,7 @@ const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
   const fallback: Settings = {
     theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', airGappedSign: false, trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true, hotkeys: {}, themes: [], activeTheme: '', snippets: [],
-    aiEnabled: false, aiProvider: 'anthropic', aiKey: '', aiModel: '', aiBaseUrl: '', aiProfile: '',
+    aiEnabled: false, aiDisabled: false, aiProvider: 'anthropic', aiKey: '', aiModel: '', aiBaseUrl: '', aiProfile: '',
   }
   try {
     const legacyAuthor = localStorage.getItem('openquire.author') ?? ''
@@ -120,6 +121,13 @@ export default function App() {
   const [fieldEdit, setFieldEdit] = useState<{ pageId: number; rect: Rect | null; widget: WidgetInfo | null } | null>(null)
   const [linkEdit, setLinkEdit] = useState<{ pageId: number; rect: Rect | null; index: number | null } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try {
+      return localStorage.getItem('openquire.onboarded') !== 'true'
+    } catch {
+      return false
+    }
+  })
   const [settings, setSettingsState] = useState(loadSettings)
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
   const [pwPrompt, setPwPrompt] = useState<{ file: string; retry: boolean; resolve: (p: string | null) => void } | null>(null)
@@ -606,7 +614,7 @@ export default function App() {
 
   /** Sends a request after the user agrees; returns null when they decline. */
   const sendAi = async (req: AiRequest, items: string[]) => {
-    if (!settings.aiEnabled) throw new Error('The AI assistant is turned off.')
+    if (!settings.aiEnabled || settings.aiDisabled) throw new Error('The AI assistant is turned off.')
     if (!(await askConsent(items))) {
       setStatus(m.ai.notSent)
       return null
@@ -1471,7 +1479,7 @@ export default function App() {
     })),
     { id: 'left', name: m.actions.toggleLeft, icon: PanelLeft, enabled: has, run: () => setLeftOpen((o) => !o) },
     { id: 'right', name: m.actions.toggleRight, icon: PanelRight, enabled: has, run: () => setRightOpen((o) => !o) },
-    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility', 'compare', ...(settings.aiEnabled ? ['assistant'] : [])] as (keyof typeof m.actions.showPanel)[]).map((t) => ({
+    ...(['pages', 'bookmarks', 'comments', 'attachments', 'signatures', 'accessibility', 'compare', ...((settings.aiEnabled && !settings.aiDisabled) ? ['assistant'] : [])] as (keyof typeof m.actions.showPanel)[]).map((t) => ({
       id: `show-${t}`, name: m.actions.showPanel[t], enabled: has, run: () => { setLeftOpen(true); setTab(t) },
     })),
     ...ALL_TOOLS.map((t) => ({ id: `tool-${t.id}`, name: m.actions.tool(t.name), icon: t.Icon, enabled: has, run: () => setTool(t.id) })),
@@ -1510,6 +1518,7 @@ export default function App() {
       ? { id: 'stop-recording', name: m.actions.stopRecording, run: stopRecording }
       : { id: 'record-workflow', name: m.actions.recordWorkflow, run: startRecording },
     { id: 'settings', name: m.actions.openSettings, icon: SettingsIcon, hotkey: hk('settings'), run: () => setSettingsOpen(true) },
+    { id: 'onboarding-wizard', name: m.settings.openOnboardingWizard, icon: Sparkles, run: () => setShowOnboarding(true) },
     { id: 'theme', name: m.actions.toggleTheme, run: () => setSettings({ ...settings, theme: dark ? 'light' : 'dark' }) },
   ]
 
@@ -1613,7 +1622,7 @@ export default function App() {
           commentFocus={commentFocus} actions={sideActions}
           compare={{ others: tabs.filter((t) => t.id !== active), result: comparison }}
           pluginPanes={host.panes.map((p) => ({ key: `plugin:${p.plugin}:${p.id}` as const, title: p.title, content: p.content }))}
-          assistant={settings.aiEnabled ? {
+          assistant={(settings.aiEnabled && !settings.aiDisabled) ? {
             log: aiLog,
             busy: aiBusy,
             hasFields: doc.pages.some((p) => p.widgets.some((w) => !w.readOnly && w.kind !== 'signature' && w.kind !== 'button')),
@@ -1780,7 +1789,7 @@ export default function App() {
               {textSel && (
                 <div className="selbar">
                   <button onClick={() => { void navigator.clipboard.writeText(textSel.text); setStatus(m.status.copied); setTextSel(null) }}>{m.workspace.copy}</button>
-                  {settings.aiEnabled && (
+                  {settings.aiEnabled && !settings.aiDisabled && (
                     <button className="cta" onClick={() => {
                       setAiScope('text')
                       setTab('assistant')
@@ -1904,7 +1913,20 @@ export default function App() {
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
       {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
-        plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} />}
+        plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} onOpenWizard={() => setShowOnboarding(true)} />}
+      {showOnboarding && (
+        <OnboardingModal
+          settings={settings}
+          onUpdateSettings={(partial) => {
+            const next = { ...settings, ...partial }
+            setSettings(next)
+            try {
+              localStorage.setItem(SETTINGS_KEY, JSON.stringify(next))
+            } catch {}
+          }}
+          onClose={() => setShowOnboarding(false)}
+        />
+      )}
       {signing && <SignatureDialog onClose={() => setSigning(false)} onPlace={(png, aspect) => { setSigning(false); placeImage(png, aspect) }} />}
       {digitalSigning && doc && (() => {
         const page = currentPage() ?? doc.pages[0]
