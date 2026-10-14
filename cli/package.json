@@ -1,6 +1,6 @@
 {
   "name": "openquire",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "PDF tools on the command line and in Node: redact, stamp, OCR, sign, tag, convert to PDF/A, Word and Excel, and run OpenQuire workflows.",
   "license": "AGPL-3.0-or-later",
   "type": "module",
