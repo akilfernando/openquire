@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
 import { m } from '../i18n'
@@ -8,7 +8,7 @@ import HotkeySettings from './HotkeySettings'
 import PluginsSettings from './PluginsSettings'
 import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
-import { DEFAULT_BASE_URL, DEFAULT_MODELS, type AiProvider } from '../ai'
+import { DEFAULT_BASE_URL, DEFAULT_MODELS, CURATED_MODELS, detectProviderFromKey, fetchAvailableModels, type AiProvider } from '../ai'
 import { purgeAllPrivateData } from '../privacy'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
@@ -93,6 +93,26 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
   const [copiedMcp, setCopiedMcp] = useState(false)
   const [tab, setTab] = useState<Tab>('appearance')
   const [installed, setInstalled] = useState<NativeTools | null>(null)
+  const [modelList, setModelList] = useState<string[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [detectedNotice, setDetectedNotice] = useState('')
+  const [isCustomModel, setIsCustomModel] = useState(false)
+
+  const refreshModels = useCallback(async (provider: AiProvider, apiKey: string, baseUrl: string) => {
+    setLoadingModels(true)
+    try {
+      const list = await fetchAvailableModels({ provider, apiKey, baseUrl })
+      setModelList(list)
+    } finally {
+      setLoadingModels(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'ai' && settings.aiEnabled && !settings.aiDisabled) {
+      void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)
+    }
+  }, [tab, settings.aiEnabled, settings.aiDisabled, settings.aiProvider, settings.aiBaseUrl, refreshModels])
   // Escape closes Settings wherever focus is, even after the focused control went away.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -336,12 +356,88 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                     </Item>
                   )}
                   <Item name={m.settings.aiKey} desc={settings.aiProvider === 'anthropic' ? m.settings.aiKeyDesc : m.settings.aiKeyOptional}>
-                    <input type="password" autoComplete="off" defaultValue={settings.aiKey} aria-label={m.settings.aiKey} style={{ width: 240 }}
-                      onBlur={(e) => e.target.value.trim() !== settings.aiKey && set({ aiKey: e.target.value.trim() })} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        defaultValue={settings.aiKey}
+                        aria-label={m.settings.aiKey}
+                        style={{ width: 240 }}
+                        onChange={(e) => {
+                          const val = e.target.value.trim()
+                          const detected = detectProviderFromKey(val)
+                          if (detected && detected !== settings.aiProvider) {
+                            const optimal = DEFAULT_MODELS[detected]
+                            set({ aiKey: val, aiProvider: detected, aiModel: optimal })
+                            setDetectedNotice(`Auto-detected ${detected === 'anthropic' ? 'Anthropic (Claude)' : 'OpenAI'} from key prefix!`)
+                            void refreshModels(detected, val, settings.aiBaseUrl)
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const val = e.target.value.trim()
+                          if (val !== settings.aiKey) {
+                            set({ aiKey: val })
+                            void refreshModels(settings.aiProvider, val, settings.aiBaseUrl)
+                          }
+                        }}
+                      />
+                      {detectedNotice && (
+                        <span style={{ fontSize: '0.78rem', color: 'var(--accent)', fontWeight: 500 }}>
+                          {detectedNotice}
+                        </span>
+                      )}
+                    </div>
                   </Item>
                   <Item name={m.settings.aiModel} desc={m.settings.aiModelDesc}>
-                    <input key={settings.aiProvider} defaultValue={settings.aiModel} placeholder={DEFAULT_MODELS[settings.aiProvider]} aria-label={m.settings.aiModel} style={{ width: 240 }}
-                      onBlur={(e) => e.target.value.trim() !== settings.aiModel && set({ aiModel: e.target.value.trim() })} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 240 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <select
+                          value={isCustomModel ? '__custom__' : (settings.aiModel || DEFAULT_MODELS[settings.aiProvider])}
+                          aria-label={m.settings.aiModel}
+                          style={{ flex: 1 }}
+                          onChange={(e) => {
+                            if (e.target.value === '__custom__') {
+                              setIsCustomModel(true)
+                            } else {
+                              setIsCustomModel(false)
+                              set({ aiModel: e.target.value })
+                            }
+                          }}
+                        >
+                          {Array.from(new Set([
+                            DEFAULT_MODELS[settings.aiProvider],
+                            ...modelList,
+                            ...(CURATED_MODELS[settings.aiProvider] || []).map((m) => m.id),
+                          ])).map((id) => {
+                            const curated = CURATED_MODELS[settings.aiProvider]?.find((m) => m.id === id)
+                            const label = curated ? curated.name : id
+                            return (
+                              <option key={id} value={id}>
+                                {label}
+                              </option>
+                            )
+                          })}
+                          <option value="__custom__">Custom model name...</option>
+                        </select>
+                        <button
+                          type="button"
+                          title="Refresh active models"
+                          disabled={loadingModels}
+                          style={{ padding: '4px 8px', fontSize: '0.85rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)' }}
+                          onClick={() => void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)}
+                        >
+                          {loadingModels ? '...' : '↻'}
+                        </button>
+                      </div>
+                      {isCustomModel && (
+                        <input
+                          defaultValue={settings.aiModel}
+                          placeholder="e.g. gpt-4o, claude-3-5-sonnet-latest"
+                          aria-label="Custom model name"
+                          onBlur={(e) => set({ aiModel: e.target.value.trim() })}
+                        />
+                      )}
+                    </div>
                   </Item>
                   <div className="setting-item stacked">
                     <div className="setting-info">

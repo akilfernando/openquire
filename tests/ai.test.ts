@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   citations, complete, extractJson, formRequest, parseFormValues, parsePersonalData, questionRequest, selectPages, summaryRequest, type AiConfig,
+  detectProviderFromKey, fetchAvailableModels,
 } from '../src/ai'
 
 const anthropic: AiConfig = { provider: 'anthropic', apiKey: 'test-key', model: 'claude-fable-5-1', baseUrl: '' }
@@ -77,5 +78,25 @@ describe('AI assistant', () => {
     expect(citations('Notice is 90 days [p. 2]. See also [pp. 4-5] and [p. 99].', 5)).toEqual([
       { text: 'Notice is 90 days ' }, { page: 2, label: '2' }, { text: '. See also ' }, { page: 4, label: '4-5' }, { text: ' and [p. 99].' },
     ])
+  })
+
+  it('deduces AI provider from key prefixes', () => {
+    expect(detectProviderFromKey('sk-ant-api03-abcdef123456')).toBe('anthropic')
+    expect(detectProviderFromKey('sk-proj-9876543210')).toBe('openai')
+    expect(detectProviderFromKey('sk-abcdef123456')).toBe('openai')
+    expect(detectProviderFromKey('random-key-string')).toBe(null)
+    expect(detectProviderFromKey('')).toBe(null)
+  })
+
+  it('fetches and returns available models for providers', async () => {
+    const fetcherAnthropic = reply({ data: [{ id: 'claude-3-7-sonnet-latest' }, { id: 'claude-3-5-haiku-latest' }] })
+    const anthropicModels = await fetchAvailableModels({ provider: 'anthropic', apiKey: 'test-key' }, fetcherAnthropic)
+    expect(anthropicModels).toContain('claude-3-7-sonnet-latest')
+
+    const fetcherOpenAI = reply({ data: [{ id: 'gpt-4o' }, { id: 'gpt-4o-mini' }, { id: 'whisper-1' }] })
+    const openaiModels = await fetchAvailableModels({ provider: 'openai', apiKey: 'test-key' }, fetcherOpenAI)
+    expect(openaiModels).toContain('gpt-4o')
+    expect(openaiModels).toContain('gpt-4o-mini')
+    expect(openaiModels).not.toContain('whisper-1')
   })
 })

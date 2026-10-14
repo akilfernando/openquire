@@ -16,8 +16,88 @@ export interface AiConfig {
   baseUrl: string
 }
 
-export const DEFAULT_MODELS: Record<AiProvider, string> = { anthropic: 'claude-fable-5-1', openai: 'gpt-4o-mini', ollama: 'llama3.2' }
+export const DEFAULT_MODELS: Record<AiProvider, string> = { anthropic: 'claude-3-7-sonnet-latest', openai: 'gpt-4o-mini', ollama: 'llama3.2' }
 export const DEFAULT_BASE_URL = 'http://localhost:11434/v1'
+
+/** Known models for each provider used as fallback and autocomplete. */
+export const CURATED_MODELS: Record<AiProvider, { id: string; name: string; recommended?: boolean }[]> = {
+  anthropic: [
+    { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet (Recommended - Most Intelligent)', recommended: true },
+    { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+    { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku (Fast & Economical)' },
+  ],
+  openai: [
+    { id: 'gpt-4o-mini', name: 'GPT-4o mini (Recommended - Fast & Economical)', recommended: true },
+    { id: 'gpt-4o', name: 'GPT-4o (High Intelligence)' },
+    { id: 'o3-mini', name: 'o3-mini (Reasoning)' },
+    { id: 'o1-mini', name: 'o1-mini (Reasoning)' },
+  ],
+  ollama: [
+    { id: 'llama3.2', name: 'Llama 3.2 (Recommended)', recommended: true },
+    { id: 'llama3.3', name: 'Llama 3.3' },
+    { id: 'deepseek-r1:8b', name: 'DeepSeek R1 (8B)' },
+    { id: 'mistral', name: 'Mistral' },
+    { id: 'qwen2.5:7b', name: 'Qwen 2.5 (7B)' },
+  ],
+}
+
+/** Deduces the AI provider from the standard key prefix without needing to read the entire key. */
+export function detectProviderFromKey(key: string): AiProvider | null {
+  const trimmed = key.trim()
+  if (trimmed.startsWith('sk-ant-')) return 'anthropic'
+  if (trimmed.startsWith('sk-proj-') || (trimmed.startsWith('sk-') && !trimmed.startsWith('sk-or-'))) return 'openai'
+  return null
+}
+
+/** Fetches active models from the provider's /models endpoint, falling back to curated options on network failure. */
+export async function fetchAvailableModels(
+  cfg: { provider: AiProvider; apiKey?: string; baseUrl?: string },
+  fetcher: typeof fetch = fetch,
+): Promise<string[]> {
+  if (cfg.provider === 'anthropic') {
+    if (!cfg.apiKey) return CURATED_MODELS.anthropic.map((m) => m.id)
+    try {
+      const res = await fetcher('https://api.anthropic.com/v1/models?limit=50', {
+        headers: {
+          'x-api-key': cfg.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+      })
+      if (res.ok) {
+        const json = await res.json()
+        const list = (json?.data as { id: string }[] | undefined)?.map((m) => m.id)
+        if (list && list.length > 0) {
+          return list.sort()
+        }
+      }
+    } catch {
+      // fallback to curated
+    }
+    return CURATED_MODELS.anthropic.map((m) => m.id)
+  }
+
+  const base = (cfg.baseUrl || (cfg.provider === 'ollama' ? DEFAULT_BASE_URL : 'https://api.openai.com/v1')).replace(/\/+$/, '')
+  try {
+    const res = await fetcher(`${base}/models`, {
+      headers: cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {},
+    })
+    if (res.ok) {
+      const json = await res.json()
+      const list = (json?.data as { id: string }[] | undefined)?.map((m) => m.id)
+      if (list && list.length > 0) {
+        if (cfg.provider === 'openai' && !cfg.baseUrl) {
+          const chatModels = list.filter((id) => /^(gpt-|o1|o3|chatgpt)/.test(id))
+          return (chatModels.length > 0 ? chatModels : list).sort()
+        }
+        return list.sort()
+      }
+    }
+  } catch {
+    // fallback to curated
+  }
+  return CURATED_MODELS[cfg.provider].map((m) => m.id)
+}
 
 export type Part = { type: 'text'; text: string } | { type: 'image'; png: string /* base64 */ }
 
