@@ -62,6 +62,34 @@ The same engine runs without a browser. `cli/` builds the `openquire` package: a
 `compress`, `pdfa`, `tag`, `export`) and a Node library exporting the `Engine`. Build it with
 `npm run build:cli` and run `node cli/dist/openquire.mjs --help`. See [cli/README.md](cli/README.md).
 
+## Claude Desktop Integration (Local MCP)
+
+OpenQuire includes a native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that allows **Claude Desktop** to locally manipulate your PDFs with zero data leakage:
+
+* **Inspect & Read**: Page counts, metadata, text extracts, quads, and scoped page bounds.
+* **Form Filling**: Fills interactive AcroForm fields in-place and preserves appearances.
+* **True Redaction**: Permanent vector/glyph zeroization of PII (emails, SSNs, phone numbers, credit cards).
+* **Comparison & Diffing**: Structured AST and raster delta reports between revisions.
+* **Legal Signatures**: Signs with zeroized local PKCS#12 certificates with explicit human confirmation gates.
+
+### 1-Command Setup
+
+In your terminal or Windows PowerShell:
+```sh
+npx -y openquire mcp setup
+```
+This automatically configures your `claude_desktop_config.json` (supporting macOS, Linux, and Windows / Microsoft Store installations). Restart Claude Desktop to start using OpenQuire tools.
+
+Check connection status:
+```sh
+npx -y openquire mcp status
+```
+
+To disconnect:
+```sh
+npx -y openquire mcp uninstall
+```
+
 ## Extending
 
 Plugins add commands, sidebar panes, dock tools, export formats and workflow steps. Each runs in its

@@ -18,6 +18,43 @@ each file in turn and write results next to the inputs (or into `--out`), so ori
 changed. Workflows recorded in the OpenQuire app run here unchanged, and Bates numbers continue
 from one file to the next.
 
+## Claude Desktop Integration (Model Context Protocol)
+
+Use OpenQuire directly inside **Claude Desktop** on Windows, macOS, or Linux. Claude can read, fill forms, permanently redact PII, compare revisions, and sign PDFs locally without uploading full files to the cloud.
+
+### One-Command Setup
+
+Run this in your terminal or PowerShell:
+
+```sh
+npx -y openquire mcp setup
+```
+
+This automatically discovers and configures your `claude_desktop_config.json` (including Windows Store MSIX installations). Then **restart Claude Desktop**.
+
+You can verify connection status anytime:
+```sh
+npx -y openquire mcp status
+```
+
+To disconnect:
+```sh
+npx -y openquire mcp uninstall
+```
+
+### Available Tools in Claude
+
+* `openquire_get_metadata`: Inspect page counts, encryption status, permissions, bookmarks, and signature validity.
+* `openquire_read_page`: Extract text from a specific page or bounding box `[x0, y0, x1, y1]`.
+* `openquire_search`: Search for phrases, quads, and snippets across pages.
+* `openquire_inspect_fields`: Inspect interactive AcroForm fields (names, types, values, options, and coordinates).
+* `openquire_fill_form`: Fill form dictionaries and update PDF appearance streams non-destructively.
+* `openquire_redact_patterns`: Permanent vector/glyph byte-level redaction of PII (emails, SSNs, phone numbers, cards) or exact terms.
+* `openquire_organize_pages`: Rotate or delete pages non-destructively.
+* `openquire_compare_documents`: Compare two PDF revisions for text additions, deletions, modifications, and visual shifts.
+* `openquire_check_accessibility`: Verify PDF/UA tags and heading structure.
+* `openquire_digital_sign`: Cryptographically sign documents using zeroized Rust crypto (requires explicit user confirmation).
+
 ## As a library
 
 ```js
