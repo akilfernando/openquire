@@ -27,7 +27,7 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Protect | Open password-protected PDFs; add, change or remove AES-256 passwords and permissions |
 | Compress | Lossless clean-up, or image downsampling and re-compression |
 | Bookmarks & files | Add, rename and delete bookmarks; page labels; attach, extract and remove embedded files |
-| Convert | Open Word, Excel, PowerPoint, EPUB, HTML, text and images as PDF; export Word (paragraphs, headings, images and tables), Excel (detected tables, numbers as numbers), PNG, text or HTML |
+| Convert | Open Word, Excel, PowerPoint, EPUB, HTML, text and images as PDF; export Markdown (clean GFM with headings, tables, and lists), Word (paragraphs, headings, images and tables), Excel (detected tables, numbers as numbers), PNG, text or HTML |
 | Properties | Title, author, subject and keywords |
 | Undo | Unlimited undo and redo for every change |
 | Desktop app | Windows, macOS and Linux installers: open PDFs from the file manager, save in place, recent files |
@@ -67,6 +67,7 @@ The same engine runs without a browser. `cli/` builds the `openquire` package: a
 OpenQuire includes a native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that allows **Claude Desktop** to locally manipulate your PDFs with zero data leakage:
 
 * **Inspect & Read**: Page counts, metadata, text extracts, quads, and scoped page bounds.
+* **Markdown Extraction**: High-fidelity GitHub-Flavored Markdown (`openquire_to_markdown`) preserving tables and heading hierarchies for token-efficient LLM ingestion.
 * **Form Filling**: Fills interactive AcroForm fields in-place and preserves appearances.
 * **True Redaction**: Permanent vector/glyph zeroization of PII (emails, SSNs, phone numbers, credit cards).
 * **Comparison & Diffing**: Structured AST and raster delta reports between revisions.

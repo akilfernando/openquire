@@ -10,6 +10,7 @@ npx openquire ocr scan.pdf --lang fra
 npx openquire sign contract.pdf --p12 me.p12 --timestamp https://rfc3161.ai.moda
 npx openquire run workflow.json ./inbox -o ./done
 npx openquire pdfa report.pdf --part 2
+npx openquire export report.pdf --to md
 npx openquire export report.pdf --to docx
 ```
 
@@ -45,6 +46,7 @@ npx -y openquire mcp uninstall
 ### Available Tools in Claude
 
 * `openquire_get_metadata`: Inspect page counts, encryption status, permissions, bookmarks, and signature validity.
+* `openquire_to_markdown`: Convert a PDF document (or specific page range) to clean, LLM-optimized GitHub-Flavored Markdown (GFM) with preserved tables, headings, and lists.
 * `openquire_read_page`: Extract text from a specific page or bounding box `[x0, y0, x1, y1]`.
 * `openquire_search`: Search for phrases, quads, and snippets across pages.
 * `openquire_inspect_fields`: Inspect interactive AcroForm fields (names, types, values, options, and coordinates).
