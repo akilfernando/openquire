@@ -8,7 +8,7 @@ import HotkeySettings from './HotkeySettings'
 import PluginsSettings from './PluginsSettings'
 import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
-import { DEFAULT_BASE_URL, DEFAULT_MODELS, CURATED_MODELS, detectProviderFromKey, fetchAvailableModels, type AiProvider } from '../ai'
+import { DEFAULT_BASE_URL, DEFAULT_MODELS, CURATED_MODELS, detectProviderFromKey, fetchAvailableModels, formatAndRankModels, pickOptimalModel, type AiProvider } from '../ai'
 import { purgeAllPrivateData } from '../privacy'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
@@ -103,10 +103,14 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
     try {
       const list = await fetchAvailableModels({ provider, apiKey, baseUrl })
       setModelList(list)
+      const optimal = pickOptimalModel(provider, list)
+      if (!settings.aiModel || (!list.includes(settings.aiModel) && !isCustomModel)) {
+        set({ aiModel: optimal })
+      }
     } finally {
       setLoadingModels(false)
     }
-  }, [])
+  }, [settings.aiModel, isCustomModel, set])
 
   useEffect(() => {
     if (tab === 'ai' && settings.aiEnabled && !settings.aiDisabled) {
@@ -404,19 +408,11 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                             }
                           }}
                         >
-                          {Array.from(new Set([
-                            DEFAULT_MODELS[settings.aiProvider],
-                            ...modelList,
-                            ...(CURATED_MODELS[settings.aiProvider] || []).map((m) => m.id),
-                          ])).map((id) => {
-                            const curated = CURATED_MODELS[settings.aiProvider]?.find((m) => m.id === id)
-                            const label = curated ? curated.name : id
-                            return (
-                              <option key={id} value={id}>
-                                {label}
-                              </option>
-                            )
-                          })}
+                          {formatAndRankModels(settings.aiProvider, modelList).map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
                           <option value="__custom__">Custom model name...</option>
                         </select>
                         <button

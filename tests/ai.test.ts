@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   citations, complete, extractJson, formRequest, parseFormValues, parsePersonalData, questionRequest, selectPages, summaryRequest, type AiConfig,
-  detectProviderFromKey, fetchAvailableModels,
+  detectProviderFromKey, fetchAvailableModels, rankModel, pickOptimalModel, formatAndRankModels,
 } from '../src/ai'
 
 const anthropic: AiConfig = { provider: 'anthropic', apiKey: 'test-key', model: 'claude-fable-5-1', baseUrl: '' }
@@ -98,5 +98,25 @@ describe('AI assistant', () => {
     expect(openaiModels).toContain('gpt-4o')
     expect(openaiModels).toContain('gpt-4o-mini')
     expect(openaiModels).not.toContain('whisper-1')
+  })
+
+  it('ranks models dynamically and selects the newest optimal generation', () => {
+    // Newer models should rank higher than older ones
+    expect(rankModel('claude-5-5-sonnet-latest', 'anthropic')).toBeGreaterThan(rankModel('claude-3-7-sonnet-latest', 'anthropic'))
+    expect(rankModel('claude-3-7-sonnet-latest', 'anthropic')).toBeGreaterThan(rankModel('claude-3-5-sonnet-latest', 'anthropic'))
+
+    // In Anthropic, Sonnet is preferred as primary optimal
+    const anthropicModels = ['claude-3-5-haiku-20241022', 'claude-3-7-sonnet-20250219', 'claude-5-5-sonnet-latest', 'claude-5-haiku-latest']
+    expect(pickOptimalModel('anthropic', anthropicModels)).toBe('claude-5-5-sonnet-latest')
+
+    // In OpenAI, mini models are preferred for cost/speed on documents
+    const openaiModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-5', 'gpt-5-mini']
+    expect(pickOptimalModel('openai', openaiModels)).toBe('gpt-5-mini')
+
+    // formatAndRankModels tags the optimal model with (Recommended)
+    const formatted = formatAndRankModels('anthropic', anthropicModels)
+    expect(formatted[0].id).toBe('claude-5-5-sonnet-latest')
+    expect(formatted[0].recommended).toBe(true)
+    expect(formatted[0].name).toContain('Recommended')
   })
 })

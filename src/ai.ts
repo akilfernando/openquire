@@ -16,29 +16,107 @@ export interface AiConfig {
   baseUrl: string
 }
 
-export const DEFAULT_MODELS: Record<AiProvider, string> = { anthropic: 'claude-3-7-sonnet-latest', openai: 'gpt-4o-mini', ollama: 'llama3.2' }
+export const DEFAULT_MODELS: Record<AiProvider, string> = {
+  anthropic: 'claude-5-5-sonnet-latest',
+  openai: 'gpt-5-mini',
+  ollama: 'llama3.3',
+}
 export const DEFAULT_BASE_URL = 'http://localhost:11434/v1'
 
-/** Known models for each provider used as fallback and autocomplete. */
+/** Known contemporary models for each provider used as initial seed and fallback. */
 export const CURATED_MODELS: Record<AiProvider, { id: string; name: string; recommended?: boolean }[]> = {
   anthropic: [
-    { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet (Recommended - Most Intelligent)', recommended: true },
+    { id: 'claude-5-5-sonnet-latest', name: 'Claude 5.5 Sonnet (Recommended - Most Intelligent)', recommended: true },
+    { id: 'claude-5-haiku-latest', name: 'Claude 5 Haiku (Fast & Economical)' },
+    { id: 'claude-5-sonnet-latest', name: 'Claude 5 Sonnet' },
+    { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet' },
     { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
-    { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku (Fast & Economical)' },
   ],
   openai: [
-    { id: 'gpt-4o-mini', name: 'GPT-4o mini (Recommended - Fast & Economical)', recommended: true },
-    { id: 'gpt-4o', name: 'GPT-4o (High Intelligence)' },
+    { id: 'gpt-5-mini', name: 'GPT-5 mini (Recommended - Fast & Economical)', recommended: true },
+    { id: 'gpt-5', name: 'GPT-5 (Flagship Intelligence)' },
     { id: 'o3-mini', name: 'o3-mini (Reasoning)' },
-    { id: 'o1-mini', name: 'o1-mini (Reasoning)' },
+    { id: 'gpt-4o-mini', name: 'GPT-4o mini' },
+    { id: 'gpt-4o', name: 'GPT-4o' },
   ],
   ollama: [
-    { id: 'llama3.2', name: 'Llama 3.2 (Recommended)', recommended: true },
-    { id: 'llama3.3', name: 'Llama 3.3' },
+    { id: 'llama3.3', name: 'Llama 3.3 (Recommended)', recommended: true },
+    { id: 'llama3.2', name: 'Llama 3.2' },
     { id: 'deepseek-r1:8b', name: 'DeepSeek R1 (8B)' },
-    { id: 'mistral', name: 'Mistral' },
     { id: 'qwen2.5:7b', name: 'Qwen 2.5 (7B)' },
+    { id: 'mistral', name: 'Mistral' },
   ],
+}
+
+/** Extracts a numerical version and tier rank from a model ID to sort from newest to oldest. */
+export function rankModel(id: string, provider: AiProvider): number {
+  const lower = id.toLowerCase()
+  let score = 0
+
+  // 1. Numerical version extraction (e.g. 5.5, 5-5, 5, 4.5, 3.7, 3.5)
+  const ver = lower.match(/(?:claude-|gpt-|llama|qwen|o)?(\d+)(?:[._-](\d+))?/)
+  if (ver) {
+    const major = parseInt(ver[1], 10)
+    const minor = ver[2] ? parseInt(ver[2], 10) : 0
+    score += major * 1000 + minor * 10
+  }
+
+  // 2. Provider tier weighting
+  if (provider === 'anthropic') {
+    if (lower.includes('sonnet')) score += 50
+    else if (lower.includes('haiku')) score += 30
+    else if (lower.includes('opus')) score += 40
+  } else if (provider === 'openai') {
+    // For document analysis and form filling, mini models offer the best speed/cost/intelligence balance
+    if (lower.includes('mini')) score += 25
+    if (lower.startsWith('o')) score += 15
+  }
+
+  if (lower.includes('latest')) score += 5
+
+  return score
+}
+
+/** Dynamically determines the optimal model from an available list of model IDs. */
+export function pickOptimalModel(provider: AiProvider, models: string[]): string {
+  if (!models.length) return DEFAULT_MODELS[provider]
+  const sorted = [...models].sort((a, b) => rankModel(b, provider) - rankModel(a, provider))
+  if (provider === 'anthropic') {
+    const sonnet = sorted.find((m) => m.toLowerCase().includes('sonnet'))
+    if (sonnet) return sonnet
+  }
+  if (provider === 'openai') {
+    const mini = sorted.find((m) => m.toLowerCase().includes('mini'))
+    if (mini) return mini
+  }
+  return sorted[0]
+}
+
+/** Formats and sorts models with dynamic recommendations based on generation and tier. */
+export function formatAndRankModels(provider: AiProvider, models: string[]): { id: string; name: string; recommended?: boolean }[] {
+  const unique = Array.from(new Set([...models, ...CURATED_MODELS[provider].map((m) => m.id)]))
+  const sorted = unique.sort((a, b) => rankModel(b, provider) - rankModel(a, provider))
+  const optimal = pickOptimalModel(provider, sorted)
+
+  return sorted.map((id) => {
+    const isRecommended = id === optimal
+    const curated = CURATED_MODELS[provider].find((m) => m.id === id)
+    let label = curated ? curated.name : id
+
+    if (!curated) {
+      if (id.startsWith('claude-')) {
+        label = id.replace(/^claude-/, 'Claude ').replace(/-/g, ' ')
+      } else if (id.startsWith('gpt-')) {
+        label = id.toUpperCase().replace('GPT-', 'GPT-')
+      }
+    }
+
+    if (isRecommended && !label.includes('Recommended')) {
+      label = `${label} (Recommended)`
+    }
+
+    return { id, name: label, recommended: isRecommended }
+  })
 }
 
 /** Deduces the AI provider from the standard key prefix without needing to read the entire key. */
@@ -49,13 +127,36 @@ export function detectProviderFromKey(key: string): AiProvider | null {
   return null
 }
 
-/** Fetches active models from the provider's /models endpoint, falling back to curated options on network failure. */
+const CACHE_KEY_PREFIX = 'openquire.cached_models.'
+
+/** Fetches active models from the provider's /models endpoint, sorting dynamically and caching locally. */
 export async function fetchAvailableModels(
   cfg: { provider: AiProvider; apiKey?: string; baseUrl?: string },
   fetcher: typeof fetch = fetch,
 ): Promise<string[]> {
+  const cacheKey = `${CACHE_KEY_PREFIX}${cfg.provider}`
+  let cached: string[] = []
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(cacheKey)
+      if (stored) cached = JSON.parse(stored)
+    }
+  } catch {
+    // ignore
+  }
+
+  const updateCache = (list: string[]) => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(cacheKey, JSON.stringify(list))
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   if (cfg.provider === 'anthropic') {
-    if (!cfg.apiKey) return CURATED_MODELS.anthropic.map((m) => m.id)
+    if (!cfg.apiKey) return cached.length ? cached : CURATED_MODELS.anthropic.map((m) => m.id)
     try {
       const res = await fetcher('https://api.anthropic.com/v1/models?limit=50', {
         headers: {
@@ -68,13 +169,15 @@ export async function fetchAvailableModels(
         const json = await res.json()
         const list = (json?.data as { id: string }[] | undefined)?.map((m) => m.id)
         if (list && list.length > 0) {
-          return list.sort()
+          const sorted = list.sort((a, b) => rankModel(b, 'anthropic') - rankModel(a, 'anthropic'))
+          updateCache(sorted)
+          return sorted
         }
       }
     } catch {
-      // fallback to curated
+      // fallback to cached or curated
     }
-    return CURATED_MODELS.anthropic.map((m) => m.id)
+    return cached.length ? cached : CURATED_MODELS.anthropic.map((m) => m.id)
   }
 
   const base = (cfg.baseUrl || (cfg.provider === 'ollama' ? DEFAULT_BASE_URL : 'https://api.openai.com/v1')).replace(/\/+$/, '')
@@ -86,17 +189,20 @@ export async function fetchAvailableModels(
       const json = await res.json()
       const list = (json?.data as { id: string }[] | undefined)?.map((m) => m.id)
       if (list && list.length > 0) {
+        let chatModels = list
         if (cfg.provider === 'openai' && !cfg.baseUrl) {
-          const chatModels = list.filter((id) => /^(gpt-|o1|o3|chatgpt)/.test(id))
-          return (chatModels.length > 0 ? chatModels : list).sort()
+          const filtered = list.filter((id) => /^(gpt-|o1|o3|o4|o5|chatgpt)/.test(id))
+          if (filtered.length > 0) chatModels = filtered
         }
-        return list.sort()
+        const sorted = chatModels.sort((a, b) => rankModel(b, cfg.provider) - rankModel(a, cfg.provider))
+        updateCache(sorted)
+        return sorted
       }
     }
   } catch {
-    // fallback to curated
+    // fallback
   }
-  return CURATED_MODELS[cfg.provider].map((m) => m.id)
+  return cached.length ? cached : CURATED_MODELS[cfg.provider].map((m) => m.id)
 }
 
 export type Part = { type: 'text'; text: string } | { type: 'image'; png: string /* base64 */ }
