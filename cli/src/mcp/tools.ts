@@ -476,4 +476,55 @@ export function registerOpenQuireTools(server: McpServer, options: McpToolOption
       }
     }
   )
+
+  // 11. openquire_to_markdown
+  server.tool(
+    'openquire_to_markdown',
+    'Convert a PDF document (or specific page range) to clean, LLM-optimized GitHub-Flavored Markdown (GFM) with preserved tables, headings, and lists.',
+    {
+      filePath: z.string().describe('Path to the PDF file'),
+      pages: z.array(z.number().int().min(1)).optional().describe('Optional list of 1-based page numbers to extract (e.g. [1, 2, 3]). Defaults to all pages.'),
+      includePageMarkers: z.boolean().default(true).describe('Include HTML comment page markers (e.g. <!-- Page 1 -->) for citation and grounding.'),
+      frontmatter: z.boolean().default(false).describe('Include YAML frontmatter with title, author, and keywords.'),
+      outputPath: z.string().optional().describe('Optional path to write the .md file to disk; if omitted, returns the markdown directly in the response content.'),
+      allowOverwrite: z.boolean().default(false).describe('Allow overwriting existing output file when outputPath is provided.'),
+      password: z.string().optional(),
+    },
+    async ({ filePath, pages, includePageMarkers, frontmatter, outputPath, allowOverwrite, password }) => {
+      try {
+        const md = await withEngine(filePath, allowedDirs, password, (engine) => {
+          let pageIds: number[] | undefined
+          if (pages?.length) {
+            const state = engine.state()
+            pageIds = pages
+              .map((p) => state.pages[p - 1]?.id)
+              .filter((id): id is number => typeof id === 'number')
+          }
+          return engine.exportMarkdown({
+            pageMarkers: includePageMarkers,
+            frontmatter,
+            pageIds,
+          })
+        })
+
+        if (outputPath) {
+          const out = resolveOutputPath(filePath, outputPath, 'markdown', allowedDirs, allowOverwrite || options.allowOverwrite, '.md')
+          writeFileSync(out, md, 'utf8')
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ status: 'success', outputPath: out, characterCount: md.length }, null, 2),
+              },
+            ],
+          }
+        }
+
+        return { content: [{ type: 'text', text: md }] }
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: `Error: ${(err as Error).message}` }] }
+      }
+    }
+  )
 }
+

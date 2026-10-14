@@ -123,6 +123,8 @@ describe('command line', () => {
     expect(run('info', join(dir, 'a-tagged.pdf')).out).toContain('tagged: yes')
     expect(run('export', join(dir, 'b.pdf'), '--to', 'docx').code).toBe(0)
     expect(readFileSync(join(dir, 'b-export.docx')).subarray(0, 2).toString()).toBe('PK')
+    expect(run('export', join(dir, 'b.pdf'), '--to', 'md').code).toBe(0)
+    expect(readFileSync(join(dir, 'b-export.md'), 'utf8')).toContain('Second file')
     expect(run('export', join(dir, 'b.pdf'), '--to', 'xlsx').out).toContain('no tables found')
   })
 

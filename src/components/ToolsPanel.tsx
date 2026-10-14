@@ -18,6 +18,7 @@ export interface PanelActions {
   flatten: (annots: boolean, widgets: boolean) => void
   exportImages: () => void
   exportText: () => void
+  exportMarkdown: () => void
   exportHtml: () => void
   exportDocx: () => void
   exportXlsx: () => void
@@ -351,6 +352,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
         <Section title={m.panel.export}>
           <div className="row">
             <button onClick={actions.exportImages}>{m.panel.exportPng}</button>
+            <button onClick={actions.exportMarkdown}>{m.panel.exportMarkdown}</button>
             <button onClick={actions.exportText}>{m.panel.exportText}</button>
             <button onClick={actions.exportHtml}>{m.panel.exportHtml}</button>
             <button onClick={actions.exportDocx}>{m.panel.exportDocx}</button>

@@ -1288,6 +1288,12 @@ export default function App() {
       }),
     exportImages: () => void run(m.busy.renderingImages, async () => download(await engine.exportImages(2), `${doc!.name}-images.zip`, 'application/zip')),
     exportText: () => void run(m.busy.extractingText, async () => download(await engine.exportText(), `${doc!.name}.txt`, 'text/plain')),
+    exportMarkdown: () =>
+      void run(m.busy.converting, async () => {
+        const file = `${doc!.name}.md`
+        download(await engine.exportMarkdown(), file, 'text/markdown')
+        setStatus(m.status.exported(file))
+      }),
     exportDocx: () =>
       void run(m.busy.exportingOffice, async () => {
         const file = `${doc!.name}.docx`
@@ -1503,6 +1509,7 @@ export default function App() {
     { id: 'save-pdfa', name: m.actions.savePdfA, enabled: has, run: () => panelActions.savePdfA(doc?.attachments.length ? 3 : 2) },
     { id: 'check-pdfa', name: m.actions.checkPdfA, enabled: has, run: panelActions.checkPdfA },
     { id: 'export-html', name: m.actions.exportHtml, enabled: has, run: panelActions.exportHtml },
+    { id: 'export-markdown', name: m.actions.exportMarkdown, enabled: has, run: panelActions.exportMarkdown },
     { id: 'export-docx', name: m.actions.exportDocx, enabled: has, run: panelActions.exportDocx },
     { id: 'export-xlsx', name: m.actions.exportXlsx, enabled: has, run: panelActions.exportXlsx },
     { id: 'straighten', name: m.actions.straighten, enabled: has, run: panelActions.straighten },

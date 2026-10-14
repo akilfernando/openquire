@@ -53,7 +53,8 @@ export function resolveOutputPath(
   outputPath: string | undefined,
   suffix: string,
   allowedDirs: string[] = [],
-  allowOverwrite = false
+  allowOverwrite = false,
+  extension?: string
 ): string {
   const normInput = normalizePath(inputPath)
   const roots = (allowedDirs.length > 0 ? allowedDirs : [process.cwd()]).map((d) => resolve(normalizePath(d)))
@@ -73,7 +74,7 @@ export function resolveOutputPath(
   } else {
     const dir = dirname(normInput)
     const base = basename(normInput, extname(normInput))
-    const ext = extname(normInput) || '.pdf'
+    const ext = extension ?? (extname(normInput) || '.pdf')
     target = join(dir, `${base}-${suffix}${ext}`)
     // If generated default exists, append timestamp or incremental counter to ensure non-destructive behavior
     if (existsSync(target) && !allowOverwrite) {

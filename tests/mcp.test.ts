@@ -37,7 +37,7 @@ describe('openquire mcp server', () => {
     expect(() => validatePath(join(tempDir, '..', 'other.pdf'), [tempDir])).toThrowError(SecurityError)
   })
 
-  it('registers all 10 core tools on the MCP server', () => {
+  it('registers all 11 core tools on the MCP server', () => {
     const server = createOpenQuireMcpServer({ allowedDirs: [tempDir] })
     // Verify registered tools on internal tools map
     // @ts-expect-error accessing private property for test verification
@@ -53,6 +53,7 @@ describe('openquire mcp server', () => {
     expect(tools['openquire_compare_documents']).toBeDefined()
     expect(tools['openquire_check_accessibility']).toBeDefined()
     expect(tools['openquire_digital_sign']).toBeDefined()
+    expect(tools['openquire_to_markdown']).toBeDefined()
   })
 
   it('reads metadata without leaking whole document bytes', async () => {
@@ -147,4 +148,31 @@ describe('openquire mcp server', () => {
     expect(res.isError).toBe(true)
     expect(res.content[0].text).toContain('confirm must be explicitly true')
   })
+
+  it('converts PDF to clean LLM-ready markdown via MCP', async () => {
+    const server = createOpenQuireMcpServer({ allowedDirs: [tempDir] })
+    // @ts-expect-error test handler invocation
+    const tool = server._registeredTools['openquire_to_markdown']
+
+    // Test inline markdown retrieval
+    const res = await tool.handler({ filePath: samplePdfPath, includePageMarkers: true })
+    expect(res.isError).toBeFalsy()
+    expect(res.content[0].text).toContain('<!-- Page 1 -->')
+    expect(res.content[0].text).toContain('alice@example.com on page 1')
+
+    // Test selective page extraction
+    const page2Res = await tool.handler({ filePath: samplePdfPath, pages: [2], includePageMarkers: true })
+    expect(page2Res.isError).toBeFalsy()
+    expect(page2Res.content[0].text).toContain('page 2')
+    expect(page2Res.content[0].text).not.toContain('page 1')
+
+    // Test file output
+    const outPath = join(tempDir, 'sample-out.md')
+    const fileRes = await tool.handler({ filePath: samplePdfPath, outputPath: outPath })
+    expect(fileRes.isError).toBeFalsy()
+    const outJson = JSON.parse(fileRes.content[0].text)
+    expect(outJson.status).toBe('success')
+    expect(readFileSync(outPath, 'utf8')).toContain('alice@example.com')
+  })
 })
+

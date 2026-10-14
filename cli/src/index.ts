@@ -11,6 +11,7 @@
 export { Engine, PasswordError } from '../../src/engine/core'
 export { REDACTION_PATTERNS, type PatternName } from '../../src/engine/patterns'
 export { parseWorkflow, newWorkflow, resolvePages, type Workflow, type WorkflowStep } from '../../src/engine/workflow'
+export { buildMarkdown, type MarkdownOptions } from '../../src/engine/markdown'
 export { recognize } from './ocr'
 export { createOpenQuireMcpServer, runMcpServer } from './mcp/server'
 export { registerOpenQuireTools, type McpToolOptions } from './mcp/tools'

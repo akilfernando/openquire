@@ -8,6 +8,7 @@ import { checkPdfA, convertToPdfA, type PdfAPart } from './pdfa'
 import { compare, type ComparisonResult } from './compare'
 import { rotationAbout, skewAngle } from './scan'
 import { buildDocx, buildXlsx, type ExportImage, type ExportPage } from './office'
+import { buildMarkdown, type MarkdownOptions } from './markdown'
 import { detectTables, pageWords } from './tables'
 import { resolvePages, type WorkflowStep } from './workflow'
 import { autoTag, checkAccessibility, moveTag, structure, updateTag, type TagType } from './tagging'
@@ -2511,6 +2512,20 @@ export class Engine {
       return { width: x1 - x0, height: y1 - y0, blocks, tables: tables[i], images: this.exportImagesOf(id, blocks.length > 0) }
     })
     return buildDocx(pages, this.meta())
+  }
+
+  /** The document as clean GitHub-Flavored Markdown: headings, tables, lists and paragraphs. */
+  exportMarkdown(options?: MarkdownOptions & { pageIds?: number[] }) {
+    const targetIds = options?.pageIds ?? this.pageIds()
+    const tables = this.tables(targetIds)
+    const pages: ExportPage[] = targetIds.map((id, i) => {
+      const page = this.page(id)
+      const [x0, y0, x1, y1] = page.getBounds()
+      page.destroy()
+      const blocks = this.textBlocks(id)
+      return { width: x1 - x0, height: y1 - y0, blocks, tables: tables[i], images: this.exportImagesOf(id, blocks.length > 0) }
+    })
+    return buildMarkdown(pages, this.meta(), options)
   }
 
   /** The document's tables as an Excel workbook, one sheet per table; null when there are none. */

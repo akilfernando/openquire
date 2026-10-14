@@ -115,7 +115,7 @@ function coreProps(meta: Metadata) {
 }
 
 /** Heading levels for blocks: short, clearly larger than the body text, ranked by size. */
-function headingLevels(pages: ExportPage[]) {
+export function headingLevels(pages: ExportPage[]) {
   const sizes = pages.flatMap((p) => p.blocks.flatMap((b) => Array(Math.min(b.text.length, 2000)).fill(Math.round(b.size)) as number[])).sort((a, b) => a - b)
   const body = sizes[Math.floor(sizes.length / 2)] ?? 11
   const isHeading = (b: TextBlock) => b.text.length <= 200 && b.lines.length <= 3 && b.size >= body * 1.15

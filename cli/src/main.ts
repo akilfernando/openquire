@@ -41,7 +41,7 @@ Commands:
   compress   Save smaller files: --level standard|medium|strong (default medium)
   pdfa       Save PDF/A copies: --part 2|3 (default 2)
   tag        Tag for accessibility: --lang <BCP 47 code> (default en-US)
-  export     Convert: --to docx|xlsx|txt|html
+  export     Convert: --to docx|xlsx|txt|html|md
   mcp        Start Model Context Protocol (MCP) server for Claude Desktop / AI agents
                --allow-dir <path>      Permitted directory (repeatable, defaults to CWD)
                --allow-overwrite       Allow mutating output files without non-destructive suffix
@@ -221,7 +221,7 @@ export async function main(argv: string[], log: (s: string) => void = console.lo
     if (command === 'redact' && !patterns.length && !o.term?.length) throw new UsageError('Give at least one --pattern or --term.')
     if (command === 'stamp' && !o.text) throw new UsageError('Give the stamp text with --text.')
     if (command === 'sign' && !o.p12) throw new UsageError('Give your digital ID with --p12.')
-    if (command === 'export' && !['docx', 'xlsx', 'txt', 'html'].includes(o.to ?? '')) throw new UsageError('Choose a format with --to docx, xlsx, txt or html.')
+    if (command === 'export' && !['docx', 'xlsx', 'txt', 'html', 'md', 'markdown'].includes(o.to ?? '')) throw new UsageError('Choose a format with --to docx, xlsx, txt, html or md.')
     const position = (o.position ?? 'bc') as StampPosition
     if (command === 'stamp' && !['tl', 'tc', 'tr', 'bl', 'bc', 'br', 'center'].includes(position)) throw new UsageError(`Unknown position "${position}".`)
     const p12 = o.p12 ? new Uint8Array(readFileSync(o.p12)) : null
@@ -318,6 +318,7 @@ export async function main(argv: string[], log: (s: string) => void = console.lo
             if (to === 'docx') say(write('export', e.exportDocx(), '.docx'))
             else if (to === 'html') say(write('export', e.exportHtml(), '.html'))
             else if (to === 'txt') say(write('export', e.exportText(), '.txt'))
+            else if (to === 'md' || to === 'markdown') say(write('export', e.exportMarkdown(), '.md'))
             else {
               const x = e.exportXlsx()
               say(x ? write('export', x, '.xlsx') : `${file}: no tables found`)
