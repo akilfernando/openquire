@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   citations, complete, extractJson, formRequest, parseFormValues, parsePersonalData, questionRequest, selectPages, summaryRequest, type AiConfig,
-  detectProviderFromKey, fetchAvailableModels, rankModel, pickOptimalModel, formatAndRankModels,
+  detectProviderFromKey, fetchAvailableModels, rankModel, pickOptimalModel, formatAndRankModels, verifyApiKey,
 } from '../src/ai'
 
 const anthropic: AiConfig = { provider: 'anthropic', apiKey: 'test-key', model: 'claude-fable-5-1', baseUrl: '' }
@@ -119,4 +119,42 @@ describe('AI assistant', () => {
     expect(formatted[0].recommended).toBe(true)
     expect(formatted[0].name).toContain('Recommended')
   })
+
+  it('verifies API keys using free /models endpoint', async () => {
+    // Anthropic valid key
+    const anthropicOkFetcher = reply({ data: [{ id: 'claude-5-5-sonnet-latest' }] })
+    const res1 = await verifyApiKey({ provider: 'anthropic', apiKey: 'sk-ant-test' }, anthropicOkFetcher)
+    expect(res1.ok).toBe(true)
+    expect(res1.message).toContain('Anthropic API key is valid and active')
+
+    // Anthropic invalid key
+    const anthropicFailFetcher = reply({ error: { message: 'invalid x-api-key' } }, false)
+    const res2 = await verifyApiKey({ provider: 'anthropic', apiKey: 'sk-ant-bad' }, anthropicFailFetcher)
+    expect(res2.ok).toBe(false)
+    expect(res2.message).toBe('invalid x-api-key')
+
+    // OpenAI valid key
+    const openaiOkFetcher = reply({ data: [{ id: 'gpt-5-mini' }] })
+    const res3 = await verifyApiKey({ provider: 'openai', apiKey: 'sk-proj-test' }, openaiOkFetcher)
+    expect(res3.ok).toBe(true)
+    expect(res3.message).toContain('OpenAI API key is valid and active')
+
+    // OpenAI invalid key
+    const openaiFailFetcher = reply({ error: { message: 'Incorrect API key provided' } }, false)
+    const res4 = await verifyApiKey({ provider: 'openai', apiKey: 'sk-bad' }, openaiFailFetcher)
+    expect(res4.ok).toBe(false)
+    expect(res4.message).toBe('Incorrect API key provided')
+
+    // Empty key check
+    const resEmpty = await verifyApiKey({ provider: 'openai', apiKey: '   ' })
+    expect(resEmpty.ok).toBe(false)
+    expect(resEmpty.message).toContain('Please enter an API key')
+
+    // Ollama connection test (no key required)
+    const ollamaOkFetcher = reply({ data: [{ id: 'llama3.3' }] })
+    const resOllama = await verifyApiKey({ provider: 'ollama', apiKey: '', baseUrl: 'http://localhost:11434/v1' }, ollamaOkFetcher)
+    expect(resOllama.ok).toBe(true)
+    expect(resOllama.message).toContain('Connected to local Ollama')
+  })
 })
+

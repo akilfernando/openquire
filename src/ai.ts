@@ -205,6 +205,66 @@ export async function fetchAvailableModels(
   return cached.length ? cached : CURATED_MODELS[cfg.provider].map((m) => m.id)
 }
 
+export interface ApiKeyVerification {
+  ok: boolean
+  message: string
+  provider: AiProvider
+}
+
+/** Verifies that an API key is authentic and active by testing the provider's free /models endpoint. */
+export async function verifyApiKey(
+  cfg: { provider: AiProvider; apiKey: string; baseUrl?: string },
+  fetcher: typeof fetch = fetch,
+): Promise<ApiKeyVerification> {
+  const key = cfg.apiKey.trim()
+  if (!key && cfg.provider !== 'ollama') {
+    return { ok: false, message: 'Please enter an API key.', provider: cfg.provider }
+  }
+
+  if (cfg.provider === 'anthropic') {
+    try {
+      const res = await fetcher('https://api.anthropic.com/v1/models?limit=1', {
+        headers: {
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+      })
+      if (res.ok) {
+        return { ok: true, message: 'Anthropic API key is valid and active.', provider: 'anthropic' }
+      }
+      const data = await res.json().catch(() => null)
+      const err = data?.error?.message || `Authentication failed (${res.status})`
+      return { ok: false, message: err, provider: 'anthropic' }
+    } catch (e) {
+      return { ok: false, message: `Could not connect to Anthropic: ${String(e)}`, provider: 'anthropic' }
+    }
+  }
+
+  const base = (cfg.baseUrl || (cfg.provider === 'ollama' ? DEFAULT_BASE_URL : 'https://api.openai.com/v1')).replace(/\/+$/, '')
+  try {
+    const res = await fetcher(`${base}/models`, {
+      headers: key ? { authorization: `Bearer ${key}` } : {},
+    })
+    if (res.ok) {
+      return {
+        ok: true,
+        message: cfg.provider === 'ollama' ? 'Connected to local Ollama instance.' : 'OpenAI API key is valid and active.',
+        provider: cfg.provider,
+      }
+    }
+    const data = await res.json().catch(() => null)
+    const err = data?.error?.message || `Authentication failed (${res.status})`
+    return { ok: false, message: err, provider: cfg.provider }
+  } catch (e) {
+    return {
+      ok: false,
+      message: cfg.provider === 'ollama' ? `Could not connect to local Ollama at ${base}` : `Could not connect to endpoint: ${String(e)}`,
+      provider: cfg.provider,
+    }
+  }
+}
+
 export type Part = { type: 'text'; text: string } | { type: 'image'; png: string /* base64 */ }
 
 export interface AiRequest {
