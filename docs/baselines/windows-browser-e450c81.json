@@ -1,0 +1,233 @@
+[
+  {
+    "commit": "e450c81b79351d8c12e09a078da920f6678fa322",
+    "worktreeDirty": false,
+    "platform": "win32",
+    "cpu": "13th Gen Intel(R) Core(TM) i9-13900H",
+    "systemMemoryBytes": 33957584896,
+    "browser": "153.0.8010.12",
+    "kind": "large",
+    "pages": 1000,
+    "inputBytes": 350079,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "samples": [
+      {
+        "trial": 1,
+        "profile": "fresh-context",
+        "openUiMs": 1043.199999999255,
+        "firstCanvasMs": 932.0999999977648,
+        "editUiMs": 249.09999999776483,
+        "saveDownloadMs": 500.3203000000012,
+        "outputBytes": 348755
+      },
+      {
+        "trial": 1,
+        "profile": "warm-worker",
+        "openUiMs": 359.1000000014901,
+        "firstCanvasMs": 304.19999999925494,
+        "editUiMs": 289.8999999985099,
+        "saveDownloadMs": 394.22949999999946,
+        "outputBytes": 348755
+      },
+      {
+        "trial": 2,
+        "profile": "fresh-context",
+        "openUiMs": 1047.699999999255,
+        "firstCanvasMs": 931.6999999992549,
+        "editUiMs": 331.19999999925494,
+        "saveDownloadMs": 359.60229999999865,
+        "outputBytes": 348755
+      },
+      {
+        "trial": 2,
+        "profile": "warm-worker",
+        "openUiMs": 316.6000000014901,
+        "firstCanvasMs": 259.30000000074506,
+        "editUiMs": 238.10000000149012,
+        "saveDownloadMs": 361.125,
+        "outputBytes": 348755
+      },
+      {
+        "trial": 3,
+        "profile": "fresh-context",
+        "openUiMs": 1069.5,
+        "firstCanvasMs": 946.8999999985099,
+        "editUiMs": 302,
+        "saveDownloadMs": 351.5073000000011,
+        "outputBytes": 348755
+      },
+      {
+        "trial": 3,
+        "profile": "warm-worker",
+        "openUiMs": 322.9000000022352,
+        "firstCanvasMs": 272.4000000022352,
+        "editUiMs": 227.70000000298023,
+        "saveDownloadMs": 328.3775999999998,
+        "outputBytes": 348755
+      }
+    ],
+    "memory": {
+      "observedPeakRss": null,
+      "memorySamples": 0,
+      "intervalMs": 100,
+      "method": "unavailable on this OS"
+    }
+  },
+  {
+    "commit": "e450c81b79351d8c12e09a078da920f6678fa322",
+    "worktreeDirty": false,
+    "platform": "win32",
+    "cpu": "13th Gen Intel(R) Core(TM) i9-13900H",
+    "systemMemoryBytes": 33957584896,
+    "browser": "153.0.8010.12",
+    "kind": "mixed-scan",
+    "pages": 100,
+    "inputBytes": 1045447,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "samples": [
+      {
+        "trial": 1,
+        "profile": "fresh-context",
+        "openUiMs": 722,
+        "firstCanvasMs": 608.1999999992549,
+        "editUiMs": 142.39999999850988,
+        "saveDownloadMs": 362.6121999999996,
+        "outputBytes": 1046021
+      },
+      {
+        "trial": 1,
+        "profile": "warm-worker",
+        "openUiMs": 297.9000000022352,
+        "firstCanvasMs": 243.30000000074506,
+        "editUiMs": 210.30000000074506,
+        "saveDownloadMs": 234.77449999999953,
+        "outputBytes": 1046021
+      },
+      {
+        "trial": 2,
+        "profile": "fresh-context",
+        "openUiMs": 680.9000000022352,
+        "firstCanvasMs": 563.2000000029802,
+        "editUiMs": 147,
+        "saveDownloadMs": 254.42399999999907,
+        "outputBytes": 1046021
+      },
+      {
+        "trial": 2,
+        "profile": "warm-worker",
+        "openUiMs": 288.69999999925494,
+        "firstCanvasMs": 222,
+        "editUiMs": 202.80000000074506,
+        "saveDownloadMs": 253.75470000000132,
+        "outputBytes": 1046021
+      },
+      {
+        "trial": 3,
+        "profile": "fresh-context",
+        "openUiMs": 689.7000000029802,
+        "firstCanvasMs": 566.3000000007451,
+        "editUiMs": 168.29999999701977,
+        "saveDownloadMs": 260.0929999999971,
+        "outputBytes": 1046021
+      },
+      {
+        "trial": 3,
+        "profile": "warm-worker",
+        "openUiMs": 301.0999999977648,
+        "firstCanvasMs": 230.19999999925494,
+        "editUiMs": 219.90000000223517,
+        "saveDownloadMs": 234.33260000000155,
+        "outputBytes": 1046021
+      }
+    ],
+    "memory": {
+      "observedPeakRss": null,
+      "memorySamples": 0,
+      "intervalMs": 100,
+      "method": "unavailable on this OS"
+    }
+  },
+  {
+    "commit": "e450c81b79351d8c12e09a078da920f6678fa322",
+    "worktreeDirty": false,
+    "platform": "win32",
+    "cpu": "13th Gen Intel(R) Core(TM) i9-13900H",
+    "systemMemoryBytes": 33957584896,
+    "browser": "153.0.8010.12",
+    "kind": "small",
+    "pages": 2,
+    "inputBytes": 1062,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "samples": [
+      {
+        "trial": 1,
+        "profile": "fresh-context",
+        "openUiMs": 461.5999999977648,
+        "firstCanvasMs": 422,
+        "editUiMs": 228.19999999925494,
+        "saveDownloadMs": 292.8552000000004,
+        "outputBytes": 1717
+      },
+      {
+        "trial": 1,
+        "profile": "warm-worker",
+        "openUiMs": 73,
+        "firstCanvasMs": 54.599999997764826,
+        "editUiMs": 342.29999999701977,
+        "saveDownloadMs": 148.15700000000015,
+        "outputBytes": 1717
+      },
+      {
+        "trial": 2,
+        "profile": "fresh-context",
+        "openUiMs": 431.8999999985099,
+        "firstCanvasMs": 392.30000000074506,
+        "editUiMs": 230.19999999925494,
+        "saveDownloadMs": 167.7449999999999,
+        "outputBytes": 1717
+      },
+      {
+        "trial": 2,
+        "profile": "warm-worker",
+        "openUiMs": 74.89999999850988,
+        "firstCanvasMs": 58.30000000074506,
+        "editUiMs": 337.5,
+        "saveDownloadMs": 199.97879999999986,
+        "outputBytes": 1717
+      },
+      {
+        "trial": 3,
+        "profile": "fresh-context",
+        "openUiMs": 437,
+        "firstCanvasMs": 401.1000000014901,
+        "editUiMs": 249.09999999776483,
+        "saveDownloadMs": 161.40220000000045,
+        "outputBytes": 1717
+      },
+      {
+        "trial": 3,
+        "profile": "warm-worker",
+        "openUiMs": 140.5,
+        "firstCanvasMs": 61.80000000074506,
+        "editUiMs": 209.80000000074506,
+        "saveDownloadMs": 148.47109999999975,
+        "outputBytes": 1717
+      }
+    ],
+    "memory": {
+      "observedPeakRss": null,
+      "memorySamples": 0,
+      "intervalMs": 100,
+      "method": "unavailable on this OS"
+    }
+  }
+]

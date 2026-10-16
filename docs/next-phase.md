@@ -36,6 +36,9 @@ The native capability decision can be developed alongside canonical correctness,
 The [import lifecycle assessment and initial performance/accessibility baselines](workflow-baselines.md)
 record the next focused package, measurement method and remaining gaps. Single-file
 conversion interruption and browser peak-memory budgets remain unverified.
+The [browser baseline protocol](browser-baselines.md) adds repeated fresh-context/
+warm-worker samples, sampled Linux browser-process memory and focused Firefox/WebKit
+save/import/keyboard checks. Human pilot acceptance remains separate.
 
 Use the [pilot result template](pilot-results.md), initially marked NOT RUN. Use synthetic or explicitly shareable files. Record OS/browser/viewer versions, source commit, fixture identity, exact steps, expected and actual behavior, output verification and a linked defect for every failure.
 
