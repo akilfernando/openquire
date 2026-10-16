@@ -3,5 +3,6 @@
   "identifier": "default",
   "description": "What the OpenQuire window may do",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:default", "dialog:allow-open", "dialog:allow-save", "dialog:allow-message"]
+  "permissions": ["core:default", "core:event:default", "core:window:allow-close", "dialog:allow-open", "dialog:allow-save", "dialog:allow-message"]
 }
+

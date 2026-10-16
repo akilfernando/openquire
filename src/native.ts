@@ -6,10 +6,22 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 export const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path
+
+export function watchWindowClose(shouldPrevent: () => boolean, onRequest: () => void) {
+  return getCurrentWindow().onCloseRequested((event) => {
+    if (shouldPrevent()) {
+      event.preventDefault()
+      onRequest()
+    }
+  })
+}
+
+export const closeNativeWindow = () => getCurrentWindow().close()
 
 const OPENABLE = [
   { name: 'PDF documents', extensions: ['pdf'] },
@@ -186,3 +198,4 @@ export async function unlinkClaudeDesktop(): Promise<void> {
   if (!isDesktop) throw new Error('Native unlink is only available in the desktop app.')
   await invoke('unlink_claude_desktop')
 }
+

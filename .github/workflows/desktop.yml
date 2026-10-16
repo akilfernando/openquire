@@ -110,6 +110,8 @@ jobs:
         shell: pwsh
         run: |
           Compress-Archive -Path target/release/openquire.exe -DestinationPath ${{ matrix.cli_artifact }}
+      - name: Smoke the extracted native CLI archive
+        run: node scripts/smoke-native-cli.mjs ${{ matrix.cli_artifact }}
       - name: Build installers
         if: "!startsWith(github.ref, 'refs/tags/')"
         run: npx tauri build

@@ -17,7 +17,7 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Split | By page ranges (`1-3, 4-6, 7-`) or every page, as a zip; each part keeps its structure |
 | Forms | Fill text fields, checkboxes, radio buttons and dropdowns on the page; design forms (add, move, resize and configure fields); detect fields automatically; flatten |
 | Sign | Draw, type or upload a signature, remembered on this device |
-| Digital signatures | Sign with a certificate (.p12/.pfx) or a self-signed ID created in the app; certify documents; trusted timestamps and long-term validation (PAdES B-T, B-LT and B-LTA); trust chains checked against bundled and user-added roots; later edits are appended so signatures stay valid |
+| Digital signatures | Sign with a certificate (.p12/.pfx) or a self-signed ID created in the app; certify documents; trusted timestamps and long-term validation (PAdES B-T, B-LT and B-LTA); trust chains checked against bundled and user-added roots; ordinary later edits are appended. Applied redaction and sanitization rewrite the file and invalidate prior signatures. |
 | OCR | Recognize text on scanned pages and add an invisible, searchable, selectable text layer, entirely on-device; twelve Western European languages, detected automatically (English built in, others downloaded on request); crooked scans straightened first |
 | Redact | Mark areas, text selections, search terms or patterns (emails, phone/card numbers, dates, URLs), then apply. Only the covered content is removed. |
 | Accessibility | Check against PDF/UA; tag untagged documents automatically (headings, paragraphs, figures, links, form fields); edit tag types, reading order and alternate text |
@@ -32,8 +32,9 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Undo | Unlimited undo and redo for every change |
 | Desktop app | Windows, macOS and Linux installers: open PDFs from the file manager, save in place, recent files |
 
-Changes are saved into the existing file, so links, bookmarks, form fields, tags and comments are
-preserved when you reorganize pages. Annotations are standard PDF annotations that Acrobat and other
+Page organization preserves links, bookmarks, form fields, tags and comments.
+Browser saves prepare downloads; the desktop app can save back to the source file.
+Annotations are standard PDF annotations that Acrobat and other
 viewers can display and reply to.
 
 ## Design
@@ -64,14 +65,14 @@ The same engine runs without a browser. `cli/` builds the `openquire` package: a
 
 ## Claude Desktop Integration (Local MCP)
 
-OpenQuire includes a native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that allows **Claude Desktop** to locally manipulate your PDFs with zero data leakage:
+OpenQuire includes a local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Claude Desktop** and other MCP clients. File operations run locally within configured directories. Requested text and tool results are returned to the client; that client's model, network and privacy settings determine where those results go.
 
 * **Inspect & Read**: Page counts, metadata, text extracts, quads, and scoped page bounds.
 * **Markdown Extraction**: High-fidelity GitHub-Flavored Markdown (`openquire_to_markdown`) preserving tables and heading hierarchies for token-efficient LLM ingestion.
-* **Form Filling**: Fills interactive AcroForm fields in-place and preserves appearances.
-* **True Redaction**: Permanent vector/glyph zeroization of PII (emails, SSNs, phone numbers, credit cards).
+* **Form Filling**: Fills interactive AcroForm fields and writes a derived PDF with updated appearances.
+* **Redaction**: Marks and removes matching content, then writes a derived PDF. Inspect the output before sharing it.
 * **Comparison & Diffing**: Structured AST and raster delta reports between revisions.
-* **Legal Signatures**: Signs with zeroized local PKCS#12 certificates with explicit human confirmation gates.
+* **Certificate signatures**: Signs with local PKCS#12 certificates after explicit confirmation.
 
 ### 1-Command Setup
 
@@ -121,6 +122,14 @@ missing.
   English data into `public/ocr` so nothing is fetched from a CDN.
 
 ## Known limitations
+
+- **Text matching for redaction** depends on PDF text extraction. Visually continuous
+  text can be stored in separate blocks. Review the marks and use area redaction
+  when text matching misses content; inspect the saved output before sharing it.
+
+See the [capability matrix and release checks](docs/reliability-phase.md) for the
+browser/desktop, Node/npm, MCP and native CLI boundaries. The native Rust CLI is
+an experimental subset; it does not provide all features of the Node CLI.
 
 - **Text editing** falls back to a standard font when the original font is not embedded or is missing
   characters for the new text.

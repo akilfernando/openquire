@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import * as mupdf from 'mupdf'
-import { openReport, save } from './fixtures'
+import { PDFDocument, PDFDict, PDFName } from 'pdf-lib'
+import { openFile, openReport, save } from './fixtures'
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
 
@@ -51,11 +51,18 @@ test('reads, annotates, fills and signs on a 390 px phone', async ({ page }) => 
   await page.getByRole('button', { name: 'Place on page' }).tap()
   await expect(page.locator('.modal')).toHaveCount(0)
 
-  const doc = mupdf.Document.openDocument(await save(page), 'application/pdf').asPDF() as mupdf.PDFDocument
-  const types = [0, 1].flatMap((i) => doc.loadPage(i).getAnnotations().map((a) => a.getType()))
-  expect(types).toContain('Text')
-  expect(types).toContain('Stamp')
-  expect(Object.fromEntries(doc.loadPage(1).getWidgets().map((w) => [w.getName(), w.getValue()])).full_name).toBe('Ada Lovelace')
+  const bytes = await save(page)
+  // Inspect with a parser independent of the producing engine, then reopen in the UI.
+  const doc = await PDFDocument.load(bytes)
+  const types = doc.getPages().flatMap((page) => (page.node.Annots()?.asArray() ?? []).map((annotation) =>
+    doc.context.lookup(annotation, PDFDict).get(PDFName.of('Subtype'))?.toString()))
+  expect(types).toContain('/Text')
+  expect(types).toContain('/Stamp')
+  expect(doc.getForm().getTextField('full_name').getText()).toBe('Ada Lovelace')
+  await openFile(page, 'reviewed.pdf', Buffer.from(bytes))
+  await expect(page.locator('.tab.is-active')).toContainText('reviewed')
+  await page.locator('.page').nth(1).scrollIntoViewIfNeeded()
+  await expect(page.locator('.widget.text')).toHaveValue('Ada Lovelace')
 
   const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
   expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id + ': ' + v.nodes.map((n) => n.target.join(' ') + ' ' + n.failureSummary).join(', '))).toEqual([])

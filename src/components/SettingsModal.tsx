@@ -9,7 +9,6 @@ import PluginsSettings from './PluginsSettings'
 import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
 import { DEFAULT_BASE_URL, DEFAULT_MODELS, detectProviderFromKey, fetchAvailableModels, formatAndRankModels, pickOptimalModel, verifyApiKey, type AiProvider, type ApiKeyVerification } from '../ai'
-import { purgeAllPrivateData } from '../privacy'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -48,6 +47,8 @@ export interface Settings {
   aiProfile: string
   /** Air-gapped privacy mode: completely disables/hides all AI features and settings. */
   aiDisabled?: boolean
+  /** Explicit consent to encrypted document checkpoints on this device. Default off. */
+  recoveryEnabled?: boolean
 }
 
 export const ACCENTS: { key: string; hue: number }[] = [
@@ -64,6 +65,7 @@ type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'privacy' | 'ai' |
 interface Props {
   settings: Settings
   onChange: (s: Settings) => void
+  onPurge: () => Promise<void>
   onClose: () => void
   /** Commands that can have shortcuts. */
   commands: { id: string; name: string }[]
@@ -87,10 +89,12 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard }: Props) {
+export default function SettingsModal({ settings, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard }: Props) {
   const set = (p: Partial<Settings>) => onChange({ ...settings, ...p })
   const [certError, setCertError] = useState('')
   const [purgeFeedback, setPurgeFeedback] = useState('')
+  const [purgeError, setPurgeError] = useState('')
+  const [purging, setPurging] = useState(false)
   const [copiedMcp, setCopiedMcp] = useState(false)
   const [tab, setTab] = useState<Tab>('appearance')
   const [installed, setInstalled] = useState<NativeTools | null>(null)
@@ -272,6 +276,11 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
               <h2>{m.settings.tabs.privacy}</h2>
               <p className="hint">{m.settings.privacyIntro}</p>
 
+              <Item name="Encrypted document recovery" desc="Off by default. Keep the newest 3 unsaved document checkpoints on this device for up to 7 days (16 MiB per document, 32 MiB total). Checkpoints may lag your edits. Password-protected documents are skipped. Turning this off removes checkpoints; it does not save your files.">
+                <input type="checkbox" className="toggle" checked={!!settings.recoveryEnabled}
+                  aria-label="Encrypted document recovery" onChange={(e) => set({ recoveryEnabled: e.target.checked })} />
+              </Item>
+
               <Item name={m.settings.airGapped} desc={m.settings.airGappedDesc}>
                 <input
                   type="checkbox"
@@ -284,7 +293,7 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
 
               <Item name={m.settings.storageEncryption} desc={m.settings.storageEncryptionDesc}>
                 <span className="badge" style={{ padding: '3px 8px', borderRadius: 4, background: 'var(--panel)', fontSize: '0.85rem', color: 'var(--accent)', border: '1px solid var(--border)' }}>
-                  Active (Web Crypto AES-GCM)
+                  Required for saved credentials
                 </span>
               </Item>
 
@@ -302,19 +311,28 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                 <div style={{ marginTop: 8 }}>
                   <button
                     type="button"
+                    disabled={purging}
                     style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', cursor: 'pointer', fontWeight: 500 }}
                     onClick={async () => {
-                      if (window.confirm('Are you sure you want to purge all stored signatures, recent files, and saved AI keys from this browser?')) {
-                        await purgeAllPrivateData()
-                        set({ aiKey: '', aiProfile: '', author: 'OpenQuire user' })
-                        setPurgeFeedback(m.settings.purgedSuccess)
-                        setTimeout(() => setPurgeFeedback(''), 4000)
+                      if (window.confirm('Are you sure you want to purge all stored signatures, recent files, saved AI keys, and recovery checkpoints from this browser?')) {
+                        setPurging(true)
+                        setPurgeFeedback('')
+                        setPurgeError('')
+                        try {
+                          await onPurge()
+                          setPurgeFeedback(m.settings.purgedSuccess)
+                        } catch (error) {
+                          setPurgeError(error instanceof Error ? error.message : 'Private data could not be deleted. Please retry.')
+                        } finally {
+                          setPurging(false)
+                        }
                       }
                     }}
                   >
                     {m.settings.purgeDataBtn}
                   </button>
                   {purgeFeedback && <p className="success small" style={{ marginTop: 8, color: 'var(--accent)', fontWeight: 500 }}>{purgeFeedback}</p>}
+                  {purgeError && <p role="alert" className="error small">{purgeError}</p>}
                 </div>
               </div>
             </>
@@ -576,3 +594,4 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
     </div>
   )
 }
+

@@ -226,7 +226,9 @@ export class Engine {
   private password: string | undefined
   private encrypted = false
   private signatures: SignatureInfo[] = []
-  private lastSave: { position: number; bytes: Uint8Array } | null = null
+  /** Destructive removals must discard earlier revisions and unreachable objects. */
+  private requiresFullRewrite = false
+  private lastSave: { revision: string; bytes: Uint8Array } | null = null
   /** The bytes the open document was loaded from (or last saved to, for signed documents). */
   private bytes = new Uint8Array()
   private tick = 0
@@ -234,6 +236,9 @@ export class Engine {
   private fonts = new Map<string, mupdf.Font>()
   private stext = new Map<string, mupdf.StructuredText>()
   private infoCache = new Map<number, PageInfo>()
+  private documentEpoch = 0
+  private nextRevision = 0
+  private revisionIds = new Map<number, number>()
 
   // ---- document lifecycle ----
 
@@ -282,10 +287,14 @@ export class Engine {
     this.signatures = []
     this.lastSave = null
     this.stext.clear()
+    this.requiresFullRewrite = false
     this.fonts.clear()
     this.infoCache.clear()
     this.revs.clear()
     doc.enableJournal()
+    this.documentEpoch++
+    this.nextRevision = 0
+    this.revisionIds = new Map([[doc.getJournal().position, 0]])
   }
 
   /** Appends every page of another file, along with its annotations and form fields. */
@@ -339,6 +348,7 @@ export class Engine {
   /** Runs a change as one undoable step and marks the given pages for re-rendering. */
   private op(label: string, fn: () => void, touched: number[] | 'all' = 'all') {
     const doc = this.d
+    const before = doc.getJournal().position
     doc.beginOperation(label)
     try {
       fn()
@@ -347,7 +357,20 @@ export class Engine {
       doc.abandonOperation()
       throw e
     }
+    const after = doc.getJournal().position
+    if (after !== before) {
+      // A new edit after undo discards the redo branch. Its position may match
+      // an old saved step, but its content must receive a different identity.
+      for (const position of this.revisionIds.keys()) if (position > before) this.revisionIds.delete(position)
+      this.revisionIds.set(after, ++this.nextRevision)
+    }
     this.touch(touched)
+  }
+
+  private contentRevision(): string {
+    const position = this.d.getJournal().position
+    if (!this.revisionIds.has(position)) this.revisionIds.set(position, ++this.nextRevision)
+    return `${this.documentEpoch}:${this.revisionIds.get(position)}`
   }
 
   private touch(ids: number[] | 'all') {
@@ -542,6 +565,7 @@ export class Engine {
     const doc = this.d
     return {
       name: this.name,
+      revision: this.contentRevision(),
       pages: (() => {
         const count = doc.countPages()
         const labels = this.pageLabels(count)
@@ -1329,6 +1353,11 @@ export class Engine {
         page.destroy()
       }
     })
+    if (pages.length) {
+      this.requiresFullRewrite = true
+      this.lastSave = null
+      this.signatures = this.signatures.map((signature) => ({ ...signature, valid: false, problem: 'Redaction requires rewriting the file, invalidating existing signatures.' }))
+    }
     return { count: pages.length, state: this.state() }
   }
 
@@ -1738,6 +1767,7 @@ export class Engine {
     // The next save must rewrite everything, so nothing removed survives in an older revision.
     this.signatures = []
     this.lastSave = null
+    this.requiresFullRewrite = true
     return { report, state: this.state() }
   }
 
@@ -2348,7 +2378,7 @@ export class Engine {
   setTrustedCertificates(pems: string[]) {
     this.trusted = pems
     this.anchorCache = null
-    if (this.doc && this.signatures.length) this.signatures = verifySignatures(this.bytes, this.d, this.anchors())
+    if (this.doc && this.signatures.length && !this.requiresFullRewrite) this.signatures = verifySignatures(this.bytes, this.d, this.anchors())
     return this.doc ? this.state() : null
   }
 
@@ -2415,15 +2445,15 @@ export class Engine {
   }
 
   save(opts: SaveOptions): Uint8Array {
-    if (this.signatures.length) {
+    if (this.signatures.length && !this.requiresFullRewrite) {
       // Rewriting a signed file would break its signatures; append the changes instead.
       if (opts.security.mode !== 'keep') throw new Error("Password changes aren't possible on a signed document without invalidating its signatures.")
       // MuPDF still reports unsaved changes after an incremental save, and a second save with
       // nothing new returns a broken file, so reuse the last output until the journal moves.
-      const position = this.d.getJournal().position
-      if (this.lastSave?.position === position) return this.lastSave.bytes.slice()
+      const revision = this.contentRevision()
+      if (this.lastSave?.revision === revision) return this.lastSave.bytes.slice()
       const out = this.d.saveToBuffer('incremental').asUint8Array().slice()
-      this.lastSave = { position, bytes: out }
+      this.lastSave = { revision, bytes: out }
       this.bytes = out
       this.signatures = verifySignatures(out, this.d, this.anchors())
       return out.slice()
@@ -2434,6 +2464,11 @@ export class Engine {
     }
     if (opts.compress !== 'none') doc.subsetFonts()
     const parts = compressOptions(opts.compress)
+    if (this.requiresFullRewrite) {
+      // MuPDF rejects duplicate options instead of accepting the last one.
+      for (let i = parts.length - 1; i >= 0; i--) if (parts[i].startsWith('garbage=') || parts[i] === 'clean') parts.splice(i, 1)
+      parts.push('garbage=deduplicate', 'clean')
+    }
     if (opts.security.mode === 'none') parts.push('encrypt=none')
     if (opts.security.mode === 'set') {
       const s = opts.security
@@ -2445,6 +2480,12 @@ export class Engine {
     const out = doc.saveToBuffer(parts.join(',')).asUint8Array().slice()
     doc.destroy()
     return out
+  }
+
+  /** Bytes and content identity are captured synchronously in one worker call. */
+  saveSnapshot(opts: SaveOptions) {
+    const bytes = this.save(opts)
+    return { bytes, revision: this.contentRevision(), name: this.name }
   }
 
   exportImages(scale = 2): Uint8Array {
@@ -2602,3 +2643,4 @@ export function downsampleImages(doc: mupdf.PDFDocument, { maxDim, quality }: { 
   }
   return changed
 }
+
