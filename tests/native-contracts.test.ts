@@ -32,7 +32,11 @@ describe.skipIf(!binary)('native output contracts (required in Native PDF contra
 
   it('produces a complete PDF signature that OpenSSL verifies and rejects after tampering', async () => {
     const input = join(root, 'sign.pdf'), output = join(root, 'signed.pdf'), identity = join(root, 'identity.p12')
-    const source = await rotatedFormPdf()
+    const original = await PDFDocument.load(await rotatedFormPdf())
+    const existing = original.getForm().createTextField('Signature1')
+    existing.setText('Existing field')
+    existing.addToPage(original.getPages()[0], { x: 40, y: 220, width: 200, height: 24 })
+    const source = await original.save()
     writeFileSync(input, source)
     writeFileSync(identity, await createDigitalId({ name: 'Native contract signer', password: 'fixture-only' }))
     const result = spawnSync(binary!, ['sign', input, '--p12', identity, '--password', 'fixture-only', '-o', output], { encoding: 'utf8' })
@@ -43,6 +47,8 @@ describe.skipIf(!binary)('native output contracts (required in Native PDF contra
     expect(parsed.getPageCount()).toBe(1)
     expect(parsed.getPages()[0].getRotation().angle).toBe(90)
     expect(parsed.getForm().getTextField('contact').getText()).toBe(SECRET)
+    expect(parsed.getForm().getTextField('Signature1').getText()).toBe('Existing field')
+    expect(parsed.getForm().getFields().map(f => f.getName()).sort()).toEqual(['Signature1', 'Signature2', 'contact'])
     expect(parsed.getForm().getTextField('contact').acroField.getWidgets()[0].getAppearances()?.normal).toBeDefined()
     const signatures = parsed.context.enumerateIndirectObjects().map(([, o]) => o)
       .filter((o): o is PDFDict => o instanceof PDFDict && o.get(PDFName.of('ByteRange')) instanceof PDFArray)

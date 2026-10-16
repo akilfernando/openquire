@@ -246,6 +246,21 @@ impl PdfDocument {
             Ok(value) => resolved(&self.doc, value)?.as_array()?.clone(),
             Err(_) => Vec::new(),
         };
+        let mut field_names = Vec::new();
+        for field in &fields {
+            let object = resolved(&self.doc, field)?;
+            if let Ok(name) = object.as_dict()?.get(b"T").and_then(|v| v.as_str()) {
+                field_names.push(name.to_vec());
+            }
+        }
+        let mut suffix = 1usize;
+        let signature_name = loop {
+            let name = format!("Signature{}", suffix);
+            let mut unicode_name = vec![0xfe, 0xff];
+            for c in name.encode_utf16() { unicode_name.extend_from_slice(&c.to_be_bytes()); }
+            if !field_names.iter().any(|n| n == name.as_bytes() || n == &unicode_name) { break name; }
+            suffix += 1;
+        };
 
         // 1. Create signature object placeholder
         let placeholder_size = 8192; // 8KB for CMS signature
@@ -273,7 +288,7 @@ impl PdfDocument {
         field_dict.set("Type", "Annot");
         field_dict.set("Subtype", "Widget");
         field_dict.set("FT", "Sig");
-        field_dict.set("T", Object::String(b"Signature1".to_vec(), StringFormat::Literal));
+        field_dict.set("T", Object::String(signature_name.into_bytes(), StringFormat::Literal));
         field_dict.set("F", 132);
         field_dict.set("P", Object::Reference(first_page_id));
         field_dict.set("V", Object::Reference(sig_obj_id));
