@@ -1,6 +1,6 @@
 name: Publish CLI
 
-# Publishes the openquire command-line tool to npm when a tag such as cli-v0.6.0 is pushed.
+# Publishes the openquire command-line tool to npm when a tag such as cli-v1.0.3 is pushed.
 # Needs an npm automation token in the repository secret NPM_TOKEN.
 on:
   push:
@@ -24,7 +24,11 @@ jobs:
         run: test "cli-v$(node -p "require('./cli/package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm run build:cli
       - run: npx vitest run tests/cli.test.ts
-      - run: npm publish --provenance --access public
-        working-directory: cli
+      - name: Verify the installed npm tarball
+        id: package
+        run: node scripts/check-cli-package.mjs
+      - name: Publish the verified tarball
+        run: npm publish "$CLI_TARBALL" --provenance --access public
         env:
+          CLI_TARBALL: ${{ steps.package.outputs.tarball }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
