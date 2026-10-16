@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { canvasPng } from '../util'
 import Modal from './Modal'
 import { m } from '../i18n'
-import { encryptSensitive, decryptSensitive } from '../privacy'
+import { encryptSensitive, decryptSensitive, privacyRevision } from '../privacy'
 
 interface Props {
   onPlace: (png: Uint8Array, aspect: number) => void
@@ -48,12 +48,14 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
   const [saved, setSaved] = useState<{ url: string; aspect: number } | null>(null)
 
   useEffect(() => {
+    let active = true
+    const revision = privacyRevision()
     try {
       const raw = localStorage.getItem(SAVED)
       if (!raw) return
       void decryptSensitive(raw).then((json) => {
         try {
-          if (json) setSaved(JSON.parse(json))
+          if (active && revision === privacyRevision() && json) setSaved(JSON.parse(json))
         } catch {
           // ignore
         }
@@ -61,6 +63,7 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
     } catch {
       // ignore
     }
+    return () => { active = false }
   }, [])
 
   const ctx = () => ref.current!.getContext('2d')!
@@ -89,13 +92,14 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
   }
 
   const place = async () => {
+    const revision = privacyRevision()
     const out = await cropped(ref.current!)
     if (!out) return
     if (remember) {
       try {
         const payload = JSON.stringify({ url: out.url, aspect: out.aspect })
         const encrypted = await encryptSensitive(payload)
-        localStorage.setItem(SAVED, encrypted)
+        if (revision === privacyRevision()) localStorage.setItem(SAVED, encrypted)
       } catch {
         // storage unavailable; nothing to remember
       }
@@ -171,3 +175,4 @@ export default function SignatureDialog({ onPlace, onClose }: Props) {
     </Modal>
   )
 }
+

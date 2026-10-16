@@ -9,7 +9,6 @@ import PluginsSettings from './PluginsSettings'
 import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
 import { DEFAULT_BASE_URL, DEFAULT_MODELS, detectProviderFromKey, fetchAvailableModels, formatAndRankModels, pickOptimalModel, verifyApiKey, type AiProvider, type ApiKeyVerification } from '../ai'
-import { purgeAllPrivateData } from '../privacy'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -64,6 +63,7 @@ type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'privacy' | 'ai' |
 interface Props {
   settings: Settings
   onChange: (s: Settings) => void
+  onPurge: () => Promise<void>
   onClose: () => void
   /** Commands that can have shortcuts. */
   commands: { id: string; name: string }[]
@@ -87,10 +87,12 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, onChange, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard }: Props) {
+export default function SettingsModal({ settings, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard }: Props) {
   const set = (p: Partial<Settings>) => onChange({ ...settings, ...p })
   const [certError, setCertError] = useState('')
   const [purgeFeedback, setPurgeFeedback] = useState('')
+  const [purgeError, setPurgeError] = useState('')
+  const [purging, setPurging] = useState(false)
   const [copiedMcp, setCopiedMcp] = useState(false)
   const [tab, setTab] = useState<Tab>('appearance')
   const [installed, setInstalled] = useState<NativeTools | null>(null)
@@ -284,7 +286,7 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
 
               <Item name={m.settings.storageEncryption} desc={m.settings.storageEncryptionDesc}>
                 <span className="badge" style={{ padding: '3px 8px', borderRadius: 4, background: 'var(--panel)', fontSize: '0.85rem', color: 'var(--accent)', border: '1px solid var(--border)' }}>
-                  Active (Web Crypto AES-GCM)
+                  Required for saved credentials
                 </span>
               </Item>
 
@@ -302,19 +304,28 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                 <div style={{ marginTop: 8 }}>
                   <button
                     type="button"
+                    disabled={purging}
                     style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', cursor: 'pointer', fontWeight: 500 }}
                     onClick={async () => {
                       if (window.confirm('Are you sure you want to purge all stored signatures, recent files, and saved AI keys from this browser?')) {
-                        await purgeAllPrivateData()
-                        set({ aiKey: '', aiProfile: '', author: 'OpenQuire user' })
-                        setPurgeFeedback(m.settings.purgedSuccess)
-                        setTimeout(() => setPurgeFeedback(''), 4000)
+                        setPurging(true)
+                        setPurgeFeedback('')
+                        setPurgeError('')
+                        try {
+                          await onPurge()
+                          setPurgeFeedback(m.settings.purgedSuccess)
+                        } catch (error) {
+                          setPurgeError(error instanceof Error ? error.message : 'Private data could not be deleted. Please retry.')
+                        } finally {
+                          setPurging(false)
+                        }
                       }
                     }}
                   >
                     {m.settings.purgeDataBtn}
                   </button>
                   {purgeFeedback && <p className="success small" style={{ marginTop: 8, color: 'var(--accent)', fontWeight: 500 }}>{purgeFeedback}</p>}
+                  {purgeError && <p role="alert" className="error small">{purgeError}</p>}
                 </div>
               </div>
             </>
@@ -576,3 +587,4 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
     </div>
   )
 }
+

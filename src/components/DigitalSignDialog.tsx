@@ -5,7 +5,7 @@ import type { Rect, SignRequest } from '../engine/types'
 import { download } from '../util'
 import Modal from './Modal'
 import { m } from '../i18n'
-import { decryptSensitive } from '../privacy'
+import { decryptSensitive, privacyRevision } from '../privacy'
 
 type Corner = 'br' | 'bl' | 'tr' | 'tl' | 'invisible'
 
@@ -62,12 +62,14 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
   const [error, setError] = useState('')
 
   useEffect(() => {
+    let active = true
+    const revision = privacyRevision()
     try {
       const raw = localStorage.getItem(SAVED_IMAGE)
       if (!raw) return
       void decryptSensitive(raw).then((json) => {
         try {
-          if (json) {
+          if (active && revision === privacyRevision() && json) {
             const parsed = JSON.parse(json) as { url: string } | null
             if (parsed?.url) {
               setSavedImage(parsed.url)
@@ -81,6 +83,7 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
     } catch {
       // ignore
     }
+    return () => { active = false }
   }, [])
 
   const createId = async () => {
@@ -288,3 +291,4 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
     </Modal>
   )
 }
+

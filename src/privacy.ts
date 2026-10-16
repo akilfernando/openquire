@@ -1,171 +1,177 @@
-/**
- * Privacy & Security utilities for OpenQuire.
- *
- * Implements hardware-grade and Web Crypto protections:
- * 1. AES-GCM (256-bit) encryption for sensitive stored credentials (API keys, personal form autofill profiles, handwritten signatures).
- * 2. In-memory zeroization of sensitive byte buffers.
- * 3. One-click data purge for total client-side privacy hygiene.
- */
-
+/** Device-local encrypted storage and private-data lifecycle. */
 const DB_NAME = 'openquire_vault'
 const STORE_NAME = 'keys'
 const MASTER_KEY_ID = 'device_master_key'
+export const PRIVACY_REVISION_KEY = 'openquire.privacy-revision'
+let generation = 0
+let deleting = false
 
-// Open or initialize IndexedDB for non-extractable CryptoKey storage
-function openDb(): Promise<IDBDatabase> {
+/** Detect a purge started by another tab before committing an async write. */
+export function privacyRevision(): string {
+  let shared = ''
+  try { shared = localStorage.getItem(PRIVACY_REVISION_KEY) ?? '' } catch { /* storage may be unavailable */ }
+  return `${generation}:${shared}`
+}
+
+function assertCurrent(revision: string): void {
+  if (deleting || revision.endsWith(':purging') || revision !== privacyRevision()) {
+    throw new Error('Private storage changed during this operation. Please try again.')
+  }
+}
+
+function openDb(revision: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') return reject(new Error('IndexedDB not supported'))
+    if (typeof indexedDB === 'undefined') return reject(new Error('Encrypted storage is unavailable.'))
+    let blocked = false
     const req = indexedDB.open(DB_NAME, 1)
     req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE_NAME)) req.result.createObjectStore(STORE_NAME)
+    }
+    req.onerror = () => reject(req.error ?? new Error('Cannot open encrypted storage.'))
+    req.onblocked = () => {
+      blocked = true
+      reject(new Error('Encrypted storage is blocked. Close other OpenQuire tabs and retry.'))
+    }
+    req.onsuccess = () => {
       const db = req.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME)
+      if (blocked) { db.close(); return }
+      db.onversionchange = () => db.close()
+      try {
+        assertCurrent(revision)
+        resolve(db)
+      } catch (error) {
+        db.close()
+        reject(error)
       }
     }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
   })
 }
 
-async function getOrGenerateMasterKey(): Promise<CryptoKey | null> {
-  if (typeof crypto === 'undefined' || !crypto.subtle) return null
+async function masterKey(create: boolean, revision: string): Promise<CryptoKey | null> {
+  if (typeof crypto === 'undefined' || !crypto.subtle) throw new Error('Encrypted storage requires Web Crypto.')
+  assertCurrent(revision)
+  // Generate outside the transaction, then atomically recheck and insert. No
+  // asynchronous crypto may suspend the transaction between get and put.
+  const candidate = create ? await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  ) : null
+  assertCurrent(revision)
+  const db = await openDb(revision)
   try {
-    const db = await openDb()
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite')
+    return await new Promise<CryptoKey | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, create ? 'readwrite' : 'readonly')
+      let key: CryptoKey | null = null
       const store = tx.objectStore(STORE_NAME)
-      const getReq = store.get(MASTER_KEY_ID)
-      getReq.onsuccess = async () => {
-        if (getReq.result instanceof CryptoKey) {
-          resolve(getReq.result)
-        } else {
-          // Generate new non-extractable 256-bit AES-GCM key
-          const key = await crypto.subtle.generateKey(
-            { name: 'AES-GCM', length: 256 },
-            false, // non-extractable for memory safety
-            ['encrypt', 'decrypt']
-          )
-          const putTx = db.transaction(STORE_NAME, 'readwrite')
-          putTx.objectStore(STORE_NAME).put(key, MASTER_KEY_ID)
-          putTx.oncomplete = () => resolve(key)
-          putTx.onerror = () => reject(putTx.error)
+      const req = store.get(MASTER_KEY_ID)
+      req.onsuccess = () => {
+        if (req.result) key = req.result
+        else if (candidate) {
+          key = candidate
+          store.add(candidate, MASTER_KEY_ID)
         }
       }
-      getReq.onerror = () => reject(getReq.error)
+      tx.oncomplete = () => resolve(key)
+      tx.onerror = () => reject(tx.error ?? new Error('Encrypted storage transaction failed.'))
+      tx.onabort = () => reject(tx.error ?? new Error('Encrypted storage transaction was aborted.'))
     })
-  } catch (err) {
-    console.warn('OpenQuire: Web Crypto storage unavailable, falling back to basic storage', err)
-    return null
+  } finally {
+    db.close()
   }
 }
 
-/**
- * Encrypts a sensitive string using AES-GCM with a random 12-byte IV.
- * Returns a prefixed ciphertext string: "enc:v1:<base64-iv>:<base64-data>".
- */
+/** New values require encryption; raw/plain values remain readable for migration. */
 export async function encryptSensitive(plaintext: string): Promise<string> {
   if (!plaintext) return ''
-  const key = await getOrGenerateMasterKey()
-  if (!key || typeof crypto === 'undefined' || !crypto.subtle) {
-    // Fallback if Web Crypto is absent (e.g. insecure HTTP context)
-    return `raw:${plaintext}`
-  }
-
+  const revision = privacyRevision()
+  const key = await masterKey(true, revision)
+  assertCurrent(revision)
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const encoded = new TextEncoder().encode(plaintext)
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    encoded
-  )
-
-  const ivB64 = btoa(String.fromCharCode(...iv))
-  const dataB64 = btoa(String.fromCharCode(...new Uint8Array(ciphertext)))
-  return `enc:v1:${ivB64}:${dataB64}`
+  try {
+    const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key!, encoded))
+    assertCurrent(revision)
+    // Signatures can exceed the argument limit for String.fromCharCode.
+    let binary = ''
+    for (let offset = 0; offset < encrypted.length; offset += 8192) {
+      binary += String.fromCharCode(...encrypted.subarray(offset, offset + 8192))
+    }
+    return `enc:v1:${btoa(String.fromCharCode(...iv))}:${btoa(binary)}`
+  } finally {
+    encoded.fill(0)
+  }
 }
 
-/**
- * Decrypts a sensitive string previously encrypted with encryptSensitive.
- */
 export async function decryptSensitive(ciphertext: string): Promise<string> {
   if (!ciphertext) return ''
-  if (ciphertext.startsWith('raw:')) {
-    return ciphertext.slice(4)
-  }
-  if (!ciphertext.startsWith('enc:v1:')) {
-    // Legacy unencrypted plaintext fallback
-    return ciphertext
-  }
-
-  const [, , ivB64, dataB64] = ciphertext.split(':')
-  if (!ivB64 || !dataB64) return ''
-
-  const key = await getOrGenerateMasterKey()
-  if (!key || typeof crypto === 'undefined' || !crypto.subtle) {
-    return ''
-  }
-
+  if (ciphertext.startsWith('raw:')) return ciphertext.slice(4)
+  if (!ciphertext.startsWith('enc:v1:')) return ciphertext
+  const revision = privacyRevision()
   try {
-    const iv = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0))
-    const data = Uint8Array.from(atob(dataB64), (c) => c.charCodeAt(0))
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      data
-    )
-    return new TextDecoder().decode(decrypted)
-  } catch (err) {
-    console.warn('OpenQuire: Failed to decrypt sensitive data with device key', err)
+    const parts = ciphertext.split(':')
+    if (parts.length !== 4) return ''
+    // Reading must not create a replacement for a missing encryption key.
+    const key = await masterKey(false, revision)
+    if (!key) return ''
+    const iv = Uint8Array.from(atob(parts[2]), (c) => c.charCodeAt(0))
+    const data = Uint8Array.from(atob(parts[3]), (c) => c.charCodeAt(0))
+    const plaintext = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data))
+    try {
+      assertCurrent(revision)
+      return new TextDecoder().decode(plaintext)
+    } finally {
+      plaintext.fill(0)
+    }
+  } catch {
     return ''
   }
 }
 
-/**
- * Securely overwrites a typed array's memory with zeros.
- */
 export function zeroizeBuffer(buf: Uint8Array | ArrayBuffer | null | undefined): void {
-  if (!buf) return
-  if (buf instanceof Uint8Array) {
-    buf.fill(0)
-  } else if (buf instanceof ArrayBuffer) {
-    new Uint8Array(buf).fill(0)
-  }
+  if (buf instanceof Uint8Array) buf.fill(0)
+  else if (buf instanceof ArrayBuffer) new Uint8Array(buf).fill(0)
 }
 
-/**
- * Purges all private data stored in the browser:
- * - Saved handwritten signatures
- * - Recent files list
- * - AI credentials and autofill profiles
- * - PKCS#11 module paths
- * - Master encryption key
- */
+/** Resolves only after deletion; blocked/failed deletion is reported to the UI. */
 export async function purgeAllPrivateData(): Promise<void> {
-  try {
-    localStorage.removeItem('openquire.signature')
-    localStorage.removeItem('openquire:signature')
-    localStorage.removeItem('openquire.recent')
-    localStorage.removeItem('openquire.pkcs11')
-
-    // Clean sensitive fields in openquire.settings
-    const rawSettings = localStorage.getItem('openquire.settings')
-    if (rawSettings) {
+  generation++
+  const marker = `${Date.now()}-${Math.random()}:purging`
+  localStorage.setItem(PRIVACY_REVISION_KEY, marker)
+  for (const key of ['openquire.signature', 'openquire:signature', 'openquire.recent', 'openquire.pkcs11', 'openquire.author']) {
+    localStorage.removeItem(key)
+  }
+  const raw = localStorage.getItem('openquire.settings')
+  if (raw) {
+    try {
+      const settings = JSON.parse(raw)
+      delete settings.aiKey
+      delete settings.aiProfile
+      settings.aiEnabled = false
+      settings.author = 'OpenQuire user'
+      localStorage.setItem('openquire.settings', JSON.stringify(settings))
+    } catch {
+      localStorage.removeItem('openquire.settings')
+    }
+  }
+  if (typeof indexedDB === 'undefined') {
+    if (localStorage.getItem(PRIVACY_REVISION_KEY) === marker) localStorage.setItem(PRIVACY_REVISION_KEY, marker.replace(':purging', ':complete'))
+    return
+  }
+  deleting = true
+  await new Promise<void>((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB_NAME)
+    req.onblocked = () => reject(new Error('Private-data deletion is blocked. Close other OpenQuire tabs and retry.'))
+    req.onerror = () => {
+      deleting = false
+      reject(req.error ?? new Error('Private-data deletion failed. Please retry.'))
+    }
+    req.onsuccess = () => {
+      deleting = false
       try {
-        const s = JSON.parse(rawSettings)
-        delete s.aiKey
-        delete s.aiProfile
-        s.author = 'OpenQuire user'
-        localStorage.setItem('openquire.settings', JSON.stringify(s))
-      } catch {
-        localStorage.removeItem('openquire.settings')
+        if (localStorage.getItem(PRIVACY_REVISION_KEY) === marker) localStorage.setItem(PRIVACY_REVISION_KEY, marker.replace(':purging', ':complete'))
+        resolve()
+      } catch (error) {
+        reject(error)
       }
     }
-
-    // Delete IndexedDB vault
-    if (typeof indexedDB !== 'undefined') {
-      indexedDB.deleteDatabase(DB_NAME)
-    }
-  } catch (err) {
-    console.error('Error during private data purge:', err)
-  }
+  })
 }

@@ -40,7 +40,8 @@ import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Point, type Q
 import { arrowNavigate } from './focus'
 import { m } from './i18n'
 import { download, imageToPng, kb } from './util'
-import { encryptSensitive, decryptSensitive } from './privacy'
+import { decryptSensitive, purgeAllPrivateData, privacyRevision, PRIVACY_REVISION_KEY } from './privacy'
+import { SettingsWriter } from './settings-storage'
 
 type Icon = ComponentType<LucideProps>
 
@@ -129,6 +130,8 @@ export default function App() {
     }
   })
   const [settings, setSettingsState] = useState(loadSettings)
+  const settingsWriter = useRef<SettingsWriter<Settings> | null>(null)
+  settingsWriter.current ??= new SettingsWriter<Settings>({ initial: settings })
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
   const [pwPrompt, setPwPrompt] = useState<{ file: string; retry: boolean; resolve: (p: string | null) => void } | null>(null)
   const [saveOpts, setSaveOpts] = useState<SaveOptions>({ compress: 'standard', security: { mode: 'keep' } })
@@ -174,36 +177,63 @@ export default function App() {
 
   const setSettings = (s: Settings) => {
     setSettingsState(s)
-    try {
-      void (async () => {
-        const toSave = { ...s }
-        if (toSave.aiKey) toSave.aiKey = await encryptSensitive(toSave.aiKey)
-        if (toSave.aiProfile) toSave.aiProfile = await encryptSensitive(toSave.aiProfile)
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(toSave))
-      })()
-    } catch {
-      // per-device preference only
-    }
+    void settingsWriter.current!.save(s).catch((error: unknown) => {
+      const text = error instanceof Error ? error.message : 'Preferences could not be saved on this device.'
+      setStatus(text)
+      setStatusError(text)
+    })
   }
+
+  const clearPrivateState = () => {
+    settingsWriter.current!.invalidate()
+    setSettingsState((prev) => ({ ...prev, aiKey: '', aiProfile: '', aiEnabled: false, author: 'OpenQuire user' }))
+    setRecent([])
+    setAiLog([])
+    aiAllowed.current.clear()
+    setSigning(false)
+    setDigitalSigning(false)
+  }
+
+  const purgePrivateData = async () => {
+    clearPrivateState()
+    await purgeAllPrivateData()
+  }
+
+  useEffect(() => {
+    const onPurge = (event: StorageEvent) => {
+      if (event.key === PRIVACY_REVISION_KEY && event.newValue?.endsWith(':purging')) clearPrivateState()
+    }
+    window.addEventListener('storage', onPurge)
+    return () => window.removeEventListener('storage', onPurge)
+  }, [])
 
   // Decrypt sensitive credentials if previously stored in encrypted vault format
   useEffect(() => {
+    let active = true
+    const revision = privacyRevision()
+    const originalKey = settings.aiKey
+    const originalProfile = settings.aiProfile
     void (async () => {
       let changed = false
       let key = settings.aiKey
       let profile = settings.aiProfile
-      if (key?.startsWith('enc:v1:')) {
+      if (key?.startsWith('enc:v1:') || key?.startsWith('raw:')) {
         key = await decryptSensitive(key)
         changed = true
       }
-      if (profile?.startsWith('enc:v1:')) {
+      if (profile?.startsWith('enc:v1:') || profile?.startsWith('raw:')) {
         profile = await decryptSensitive(profile)
         changed = true
       }
-      if (changed) {
-        setSettingsState((prev) => ({ ...prev, aiKey: key, aiProfile: profile }))
+      if (changed && active && revision === privacyRevision()) {
+        setSettingsState((prev) => ({
+          ...prev,
+          aiKey: prev.aiKey === originalKey ? key : prev.aiKey,
+          aiProfile: prev.aiProfile === originalProfile ? profile : prev.aiProfile,
+        }))
       }
     })()
+    return () => { active = false; settingsWriter.current!.invalidate() }
   }, [])
   useEffect(() => {
     const mq = matchMedia('(prefers-color-scheme: dark)')
@@ -1919,7 +1949,7 @@ export default function App() {
       </div>
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
-      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
+      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onPurge={purgePrivateData} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
         plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} onOpenWizard={() => setShowOnboarding(true)} />}
       {showOnboarding && (
         <OnboardingModal
@@ -1927,9 +1957,6 @@ export default function App() {
           onUpdateSettings={(partial) => {
             const next = { ...settings, ...partial }
             setSettings(next)
-            try {
-              localStorage.setItem(SETTINGS_KEY, JSON.stringify(next))
-            } catch {}
           }}
           onClose={() => setShowOnboarding(false)}
         />
@@ -2022,3 +2049,4 @@ export default function App() {
     </div>
   )
 }
+
