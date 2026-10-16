@@ -14,7 +14,8 @@ export class SettingsWriter<T extends Credentials> {
   private originalCiphertexts: Set<string>
 
   constructor(options: Partial<WriterOptions<T>> & { initial?: Credentials } = {}) {
-    this.originalCiphertexts = new Set(Object.values(options.initial ?? {}).filter((value) => value.startsWith('enc:v1:')))
+    this.originalCiphertexts = new Set([options.initial?.aiKey, options.initial?.aiProfile]
+      .filter((value): value is string => typeof value === 'string' && value.startsWith('enc:v1:')))
     this.options = {
       encrypt: encryptSensitive,
       write: (settings) => localStorage.setItem('openquire.settings', JSON.stringify(settings)),

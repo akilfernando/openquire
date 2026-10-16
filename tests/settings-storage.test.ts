@@ -18,6 +18,18 @@ function deferred<T>() {
 const settings = (aiKey: string, aiProfile: string, theme: string): Settings => ({ aiKey, aiProfile, theme })
 
 describe('SettingsWriter', () => {
+  it('initializes with full preferences that contain non-string fields', async () => {
+    const initial = { aiKey: 'enc:v1:stored-key', aiProfile: '', theme: 'dark', accentHue: 32, aiEnabled: true, trusted: [] }
+    const writes: typeof initial[] = []
+    const writer = new SettingsWriter<typeof initial>({
+      initial,
+      encrypt: async () => { throw new Error('Stored credentials must not be re-encrypted') },
+      write: (value) => writes.push(value),
+      privacyRevision: () => 'same',
+    })
+    await writer.save(initial)
+    assert.deepEqual(writes, [initial])
+  })
   it('commits only the latest save when encryption finishes out of order', async () => {
     const pending = new Map<string, ReturnType<typeof deferred<string>>>()
     const writes: Settings[] = []
