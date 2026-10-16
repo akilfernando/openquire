@@ -7,6 +7,15 @@ use openquire_crypto::{create_digital_id, verify_cms_signature, CreateDigitalIdO
 use sha2::{Digest, Sha256};
 use regex::Regex;
 
+// lopdf's serializer advances cross-reference IDs. Serialize a copy so the
+// observation itself does not change the state being checked.
+fn snapshot(pdf: &PdfDocument) -> Vec<u8> {
+    let mut copy = pdf.doc.clone();
+    let mut bytes = Vec::new();
+    copy.save_to(&mut bytes).unwrap();
+    bytes
+}
+
 /// Helper to generate a minimal valid 1-page PDF document in memory.
 fn create_test_pdf(text: &str) -> Vec<u8> {
     let mut doc = Document::with_version("1.7");
@@ -98,9 +107,9 @@ fn test_redact_patterns_and_terms() {
 
     let pattern = resolve_pattern("email");
     let regex = Regex::new(pattern).unwrap();
-    let before = pdf.save().unwrap();
+    let before = snapshot(&pdf);
     assert!(pdf.redact(&[regex], &["confidential".to_string()]).is_err());
-    assert_eq!(pdf.save().unwrap(), before);
+    assert_eq!(snapshot(&pdf), before);
 
 }
 
@@ -141,11 +150,11 @@ fn test_digital_signing() {
     };
     let p12_bytes = create_digital_id(&opts).unwrap();
 
-    let original = pdf.save().unwrap();
+    let original = snapshot(&pdf);
     let signed_bytes = pdf.sign(&p12_bytes, "signpass", Some("Approval"), Some("Office")).unwrap();
     assert!(!signed_bytes.is_empty());
     assert!(signed_bytes.len() > bytes.len());
-    assert_eq!(pdf.save().unwrap(), original);
+    assert_eq!(snapshot(&pdf), original);
     let parsed = Document::load_mem(&signed_bytes).unwrap();
     let signature = parsed.objects.values().filter_map(|o| o.as_dict().ok())
         .find(|d| d.has(b"ByteRange")).unwrap();
