@@ -7,7 +7,7 @@ import { PDFDocument, PDFRawStream, decodePDFRawStream, PDFArray, PDFDict, PDFHe
 import { Engine } from '../src/engine/core'
 import { createDigitalId } from '../src/engine/signing'
 import { createOpenQuireMcpServer } from '../cli/src/mcp/server'
-import { embeddedTextPdf, ORPHAN, rotatedFormPdf, SECRET, signedIncrementalPdf, splitTextPdf } from './fixtures/contracts'
+import { embeddedTextPdf, ORPHAN, rotatedFormPdf, SECRET, separateTextObjectsPdf, signedIncrementalPdf, splitTextPdf } from './fixtures/contracts'
 
 const root = mkdtempSync(join(tmpdir(), 'openquire-contract-'))
 const bin = join(__dirname, '..', 'cli', 'dist', 'openquire.mjs')
@@ -67,6 +67,7 @@ describe('shared permanent-redaction contract', () => {
   for (const [name, build] of [
     ['split text operators', splitTextPdf],
     ['embedded font', embeddedTextPdf],
+    ['separate adjacent text objects', separateTextObjectsPdf],
     ['signed incremental history', signedIncrementalPdf],
   ] as const) {
     it(`removes ${name} through engine, Node CLI and MCP`, async () => {

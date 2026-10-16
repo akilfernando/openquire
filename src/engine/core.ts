@@ -1365,19 +1365,25 @@ export class Engine {
   markForRedaction(needles: string[]) {
     let n = 0
     this.op('Mark for redaction', () => {
-      for (const [i, id] of this.pageIds().entries()) {
-        const st = this.structured(id)
+      for (let i = 0, count = this.d.countPages(); i < count; i++) {
         const page = this.d.loadPage(i)
-        for (const needle of needles) {
-          for (const quads of st.search(needle, 'ignore-case') as Quad[][]) {
-            const a = page.createAnnotation('Redact')
-            a.setQuadPoints(quads)
-            a.setContents(needle)
-            a.update()
-            n++
+        // Editing preserves font spans. Matching must instead let MuPDF join
+        // geometrically adjacent fragments, including separate BT/ET objects.
+        const st = page.toStructuredText('preserve-whitespace')
+        try {
+          for (const needle of needles) {
+            for (const quads of st.search(needle, 'ignore-case') as Quad[][]) {
+              const a = page.createAnnotation('Redact')
+              a.setQuadPoints(quads)
+              a.setContents(needle)
+              a.update()
+              n++
+            }
           }
+        } finally {
+          st.destroy()
+          page.destroy()
         }
-        page.destroy()
       }
     })
     return { count: n, state: this.state() }
@@ -1387,7 +1393,16 @@ export class Engine {
   markPattern(source: string) {
     const re = new RegExp(source, 'gi')
     const found = new Set<string>()
-    for (const id of this.pageIds()) for (const m of this.pageText(id).matchAll(re)) if (m[0].trim()) found.add(m[0].trim())
+    for (let i = 0, count = this.d.countPages(); i < count; i++) {
+      const page = this.d.loadPage(i)
+      const st = page.toStructuredText('preserve-whitespace')
+      try {
+        for (const m of st.asText().matchAll(re)) if (m[0].trim()) found.add(m[0].trim())
+      } finally {
+        st.destroy()
+        page.destroy()
+      }
+    }
     return found.size ? this.markForRedaction([...found]) : { count: 0, state: this.state() }
   }
 

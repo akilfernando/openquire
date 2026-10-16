@@ -32,6 +32,26 @@ export async function embeddedTextPdf() {
   return doc.save()
 }
 
+/** Two text operators whose position can be varied for extraction tests. */
+export async function separateTextObjectsPdf(layout: 'adjacent' | 'columns' | 'lines' = 'adjacent') {
+  const doc = await PDFDocument.create()
+  doc.registerFontkit(fontkit)
+  const bytes = readFileSync(fileURLToPath(new URL('../../node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf', import.meta.url)))
+  const font = await doc.embedFont(bytes, { subset: true })
+  const page = doc.addPage([595, 842])
+  page.drawText('Contact', { x: 60, y: 700, size: 12, font })
+  const x = 60
+  const y = 760
+  const size = 12
+  const secondX = layout === 'adjacent'
+    ? x + font.widthOfTextAtSize('alice@', size)
+    : layout === 'columns' ? x + 250 : x
+  const secondY = layout === 'lines' ? y - 24 : y
+  page.drawText('alice@', { x, y, size, font })
+  page.drawText('example.com', { x: secondX, y: secondY, size, font })
+  return doc.save()
+}
+
 export async function rotatedFormPdf() {
   const doc = await PDFDocument.create()
   const page = doc.addPage([400, 500])

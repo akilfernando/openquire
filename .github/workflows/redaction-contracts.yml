@@ -1,0 +1,20 @@
+name: Redaction boundaries
+on:
+  pull_request:
+    paths:
+      - 'src/engine/**'
+      - 'tests/**'
+      - '.github/workflows/redaction-contracts.yml'
+  push:
+    branches: [main]
+jobs:
+  boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run tests/redaction-boundaries.test.ts
