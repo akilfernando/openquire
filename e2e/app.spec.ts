@@ -155,11 +155,11 @@ test.describe('tablet', () => {
   test('uses drawers and supports keyboard page navigation', async ({ page }) => {
     await openReport(page)
     // Sidebars start closed on a narrow screen and open as drawers.
-    await expect(page.locator('.sidebar')).toHaveCount(0)
+    await expect(page.locator('.sidebar:visible')).toHaveCount(0)
     await page.getByRole('button', { name: 'Toggle left sidebar' }).click()
     await expect(page.locator('.sidebar.left')).toBeVisible()
     await page.locator('.drawer-scrim').click({ position: { x: 700, y: 500 } })
-    await expect(page.locator('.sidebar')).toHaveCount(0)
+    await expect(page.locator('.sidebar:visible')).toHaveCount(0)
 
     // Ctrl+wheel zooms, as a trackpad pinch does.
     const before = await page.locator('.zoom-label').textContent()
@@ -533,7 +533,12 @@ test('exports to Word', async ({ page }) => {
 
 test('the AI assistant is off by default and never sends without consent', async ({ page, context }) => {
   const sent: { headers: Record<string, string>; body: { system: string; messages: { content: { text?: string }[] }[] } }[] = []
-  await context.route('https://api.anthropic.com/**', async (route) => {
+  let modelRequests = 0
+  await context.route('https://api.anthropic.com/v1/models**', async (route) => {
+    modelRequests++
+    await route.fulfill({ json: { data: [{ id: 'test-model' }] } })
+  })
+  await context.route('https://api.anthropic.com/v1/messages', async (route) => {
     const body = route.request().postDataJSON()
     sent.push({ headers: route.request().headers(), body })
     const system: string = body.system
@@ -551,6 +556,8 @@ test('the AI assistant is off by default and never sends without consent', async
   await page.getByRole('checkbox', { name: 'Enable the AI assistant' }).check()
   await page.getByLabel('API key').fill('test-key')
   await page.getByRole('textbox', { name: 'Your details for forms' }).fill('Jane Doe. I want the Pro plan and the newsletter.')
+  // Blurring the key loads models once; later state updates must not fetch them again.
+  await expect.poll(() => modelRequests).toBe(1)
   await page.getByLabel('API key').focus()
   await page.keyboard.press('Escape')
 
@@ -585,6 +592,7 @@ test('the AI assistant is off by default and never sends without consent', async
   await page.getByRole('button', { name: 'Fill form from my details' }).click()
   await expect(page.locator('.ai-entry').last()).toContainText('Filled 3 fields')
   expect(sent).toHaveLength(3)
+  expect(modelRequests).toBe(1)
   expect(JSON.stringify(sent[2].body)).toContain('Jane Doe. I want the Pro plan')
   const saved = mupdf.Document.openDocument(await save(page), 'application/pdf').asPDF()!
   const values = Object.fromEntries((saved.loadPage(1) as mupdf.PDFPage).getWidgets().map((w) => [w.getName(), w.getValue()]))
@@ -641,7 +649,7 @@ test('reopening restores the layout', async ({ page }) => {
   await openReport(page)
   await page.getByRole('tab', { name: 'Bookmarks' }).click()
   await page.getByRole('button', { name: 'Toggle right sidebar' }).click()
-  await expect(page.locator('.sidebar.right')).toHaveCount(0)
+  await expect(page.locator('.sidebar.right')).toBeHidden()
   await page.getByRole('button', { name: 'Zoom in' }).click()
   const zoom = await page.locator('.zoom-label').textContent()
   await page.locator('select[aria-label="Line width"]').selectOption('5')
@@ -649,7 +657,7 @@ test('reopening restores the layout', async ({ page }) => {
   await page.reload()
   await openReport(page)
   await expect(page.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.locator('.sidebar.right')).toHaveCount(0)
+  await expect(page.locator('.sidebar.right')).toBeHidden()
   await expect(page.locator('select[aria-label="Line width"]')).toHaveValue('5')
   // Opening a document fits it to the width, so zoom is kept only until then; the saved value is used for the first view.
   expect(zoom).toBeTruthy()

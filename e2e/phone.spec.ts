@@ -21,7 +21,7 @@ test('reads, annotates, fills and signs on a 390 px phone', async ({ page }) => 
   await bar.getByRole('button', { name: 'Toggle left sidebar' }).click()
   await expect(page.locator('.sidebar.left')).toBeVisible()
   await page.locator('.drawer-scrim').click({ position: { x: 370, y: 400 } })
-  await expect(page.locator('.sidebar.left')).toHaveCount(0)
+  await expect(page.locator('.sidebar.left')).toBeHidden()
   for (const name of ['Open file', 'Command palette', 'Settings']) await expect(bar.getByRole('button', { name })).toBeVisible()
 
   // Annotate: a sticky note, placed with a tap.
