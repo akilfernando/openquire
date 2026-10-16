@@ -226,6 +226,8 @@ export class Engine {
   private password: string | undefined
   private encrypted = false
   private signatures: SignatureInfo[] = []
+  /** Destructive removals must discard earlier revisions and unreachable objects. */
+  private requiresFullRewrite = false
   private lastSave: { position: number; bytes: Uint8Array } | null = null
   /** The bytes the open document was loaded from (or last saved to, for signed documents). */
   private bytes = new Uint8Array()
@@ -282,6 +284,7 @@ export class Engine {
     this.signatures = []
     this.lastSave = null
     this.stext.clear()
+    this.requiresFullRewrite = false
     this.fonts.clear()
     this.infoCache.clear()
     this.revs.clear()
@@ -1329,6 +1332,11 @@ export class Engine {
         page.destroy()
       }
     })
+    if (pages.length) {
+      this.requiresFullRewrite = true
+      this.lastSave = null
+      this.signatures = this.signatures.map((signature) => ({ ...signature, valid: false, problem: 'Redaction requires rewriting the file, invalidating existing signatures.' }))
+    }
     return { count: pages.length, state: this.state() }
   }
 
@@ -1738,6 +1746,7 @@ export class Engine {
     // The next save must rewrite everything, so nothing removed survives in an older revision.
     this.signatures = []
     this.lastSave = null
+    this.requiresFullRewrite = true
     return { report, state: this.state() }
   }
 
@@ -2415,7 +2424,7 @@ export class Engine {
   }
 
   save(opts: SaveOptions): Uint8Array {
-    if (this.signatures.length) {
+    if (this.signatures.length && !this.requiresFullRewrite) {
       // Rewriting a signed file would break its signatures; append the changes instead.
       if (opts.security.mode !== 'keep') throw new Error("Password changes aren't possible on a signed document without invalidating its signatures.")
       // MuPDF still reports unsaved changes after an incremental save, and a second save with
@@ -2434,6 +2443,7 @@ export class Engine {
     }
     if (opts.compress !== 'none') doc.subsetFonts()
     const parts = compressOptions(opts.compress)
+    if (this.requiresFullRewrite) parts.push('garbage=deduplicate', 'clean')
     if (opts.security.mode === 'none') parts.push('encrypt=none')
     if (opts.security.mode === 'set') {
       const s = opts.security
@@ -2602,3 +2612,4 @@ export function downsampleImages(doc: mupdf.PDFDocument, { maxDim, quality }: { 
   }
   return changed
 }
+
