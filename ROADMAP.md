@@ -4,10 +4,16 @@ OpenQuire aims to match Adobe Acrobat on everyday PDF work, then do better in th
 local-first privacy, automation, extensibility and price. This roadmap lists the major work in order.
 Each release has a theme, a short list of deliverables, and a test for when it's done.
 
-> **Status (October 2026):** every release below, through 1.0, has been delivered; see
-> [CHANGELOG.md](CHANGELOG.md). One step remains outside the code: publishing the command-line
-> tool to npm, which needs the maintainer's npm account. "Where we are (0.1)" describes the
-> starting point, kept for context.
+> **Status (16 October 2026):** the sections below preserve the original milestone plan.
+> Many features are implemented, but completion of every acceptance criterion has not
+> been established. The current reliability implementation is ready for review in
+> [PR #49](https://github.com/akilfernando/openquire/pull/49); it is not yet on main.
+> The npm registry audit reports public latest **1.0.2**, while CLI source targets
+> **1.0.3**. Desktop/viewer pilot acceptance remains open.
+>
+> **Active plan:** [Dependable document workflows](docs/next-phase.md).
+> Use the [capability matrix](docs/reliability-phase.md) for current interface
+> boundaries; historical version headings below do not identify shipped artifacts.
 
 ## Where we are (0.1)
 
