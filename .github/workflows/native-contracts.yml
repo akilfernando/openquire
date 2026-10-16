@@ -1,0 +1,23 @@
+name: Native PDF contracts
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: cargo build -p openquire-cli
+      - run: npx vitest run tests/native-contracts.test.ts
+        env:
+          OPENQUIRE_NATIVE_BIN: ./target/debug/openquire
+      - run: cargo test -p openquire-crypto
+        if: always()
