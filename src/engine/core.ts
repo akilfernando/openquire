@@ -1365,7 +1365,7 @@ export class Engine {
   markForRedaction(needles: string[]) {
     let n = 0
     this.op('Mark for redaction', () => {
-      for (let i = 0; i < this.pageIds().length; i++) {
+      for (let i = 0, count = this.d.countPages(); i < count; i++) {
         const page = this.d.loadPage(i)
         // Editing preserves font spans. Matching must instead let MuPDF join
         // geometrically adjacent fragments, including separate BT/ET objects.
@@ -1393,7 +1393,7 @@ export class Engine {
   markPattern(source: string) {
     const re = new RegExp(source, 'gi')
     const found = new Set<string>()
-    for (let i = 0; i < this.pageIds().length; i++) {
+    for (let i = 0, count = this.d.countPages(); i < count; i++) {
       const page = this.d.loadPage(i)
       const st = page.toStructuredText('preserve-whitespace')
       try {
