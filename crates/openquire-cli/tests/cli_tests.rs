@@ -76,7 +76,7 @@ fn test_cli_help_and_errors() {
     let unknown = Command::new(&bin).args(["frobnicate", "x.pdf"]).output().unwrap();
     assert_eq!(unknown.status.code(), Some(2));
 
-    let missing = Command::new(&bin).args(["redact", "--pattern", "email", "missing_folder_test"]).output().unwrap();
+    let missing = Command::new(&bin).args(["info", "missing_folder_test"]).output().unwrap();
     assert_eq!(missing.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&missing.stderr).contains("No such file or folder"));
 }

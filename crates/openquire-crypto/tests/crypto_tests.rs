@@ -72,6 +72,11 @@ fn test_pades_cms_signing_and_verification() {
     for length in [0, 1, cms_signature.len() / 2, cms_signature.len() - 1] {
         assert!(verify_cms_signature(&cms_signature[..length], &digest).is_err());
     }
+    let mut mismatched = read_digital_id(&p12_bytes, "p12password").unwrap();
+    mismatched.key = Some(rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap());
+    assert!(create_pades_cms_signature(&SignOptions {
+        digital_id: &mismatched, content_digest: digest, signing_time: None,
+    }).is_err());
 }
 
 #[test]

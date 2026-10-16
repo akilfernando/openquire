@@ -217,6 +217,11 @@ pub fn create_pades_cms_signature(opts: &SignOptions) -> Result<Vec<u8>> {
         });
     });
 
+    // A mismatched certificate/private key must never produce a reported success.
+    let verified = verify_cms_signature(&cms_der, &opts.content_digest)?;
+    if !verified.valid_signature || !verified.valid_digest {
+        return Err(anyhow!("Generated CMS signature failed verification"));
+    }
     Ok(cms_der)
 }
 
