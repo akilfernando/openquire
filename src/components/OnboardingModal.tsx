@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Bot, Check, CheckCircle2, Copy, ShieldCheck, ZapOff } from 'lucide-react'
 import Modal from './Modal'
 import { m } from '../i18n'
@@ -12,6 +12,7 @@ interface Props {
 }
 
 export default function OnboardingModal({ settings, onUpdateSettings, onClose }: Props) {
+  const titleId = useId()
   const [report, setReport] = useState<AiAssistantsReport | null>(null)
   const [scanning, setScanning] = useState(true)
   const [linking, setLinking] = useState(false)
@@ -94,7 +95,7 @@ export default function OnboardingModal({ settings, onUpdateSettings, onClose }:
   const cursor = report?.cursor
 
   return (
-    <Modal className="onboarding-modal" onClose={handleFinish}>
+    <Modal className="onboarding-modal" labelledBy={titleId} onClose={handleFinish}>
       <div style={{ padding: '4px 8px 12px 8px', maxWidth: 580 }}>
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
@@ -114,7 +115,7 @@ export default function OnboardingModal({ settings, onUpdateSettings, onClose }:
           >
             <ShieldCheck size={32} />
           </div>
-          <h2 style={{ margin: '0 0 6px 0', fontSize: '1.45rem', fontWeight: 600 }}>{m.onboarding.title}</h2>
+          <h2 id={titleId} style={{ margin: '0 0 6px 0', fontSize: '1.45rem', fontWeight: 600 }}>{m.onboarding.title}</h2>
           <p style={{ margin: '0 0 10px 0', color: 'var(--text-muted)', fontSize: '0.92rem' }}>{m.onboarding.subtitle}</p>
           <span
             style={{
@@ -156,6 +157,7 @@ export default function OnboardingModal({ settings, onUpdateSettings, onClose }:
             <label className="toggle-switch" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', marginTop: 2 }}>
               <input
                 type="checkbox"
+                aria-label={m.onboarding.disableAiTitle}
                 checked={aiDisabled}
                 onChange={(e) => handleToggleAiDisabled(e.target.checked)}
                 style={{ width: 18, height: 18, cursor: 'pointer' }}

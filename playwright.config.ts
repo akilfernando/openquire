@@ -11,6 +11,14 @@ export default defineConfig({
     baseURL: 'http://localhost:4173',
     viewport: { width: 1440, height: 1000 },
     acceptDownloads: true,
+    // Workspace tests start after setup; onboarding.spec.ts covers fresh profiles.
+    storageState: {
+      cookies: [],
+      origins: [{
+        origin: 'http://localhost:4173',
+        localStorage: [{ name: 'openquire.onboarded', value: 'true' }],
+      }],
+    },
     // Service workers would cache between tests; they're covered by a dedicated test.
     serviceWorkers: 'block',
   },

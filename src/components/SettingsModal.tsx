@@ -111,25 +111,35 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
     }
   }, [])
 
+  // Read current settings when a request completes without making renders re-trigger it.
+  const latestAi = useRef({ settings, onChange, isCustomModel })
+  latestAi.current = { settings, onChange, isCustomModel }
+  const modelRequest = useRef(0)
   const refreshModels = useCallback(async (provider: AiProvider, apiKey: string, baseUrl: string) => {
+    const request = ++modelRequest.current
     setLoadingModels(true)
     try {
       const list = await fetchAvailableModels({ provider, apiKey, baseUrl })
+      const latest = latestAi.current
+      if (request !== modelRequest.current || !latest.settings.aiEnabled || latest.settings.aiDisabled ||
+          provider !== latest.settings.aiProvider || apiKey !== latest.settings.aiKey || baseUrl !== latest.settings.aiBaseUrl) return
       setModelList(list)
       const optimal = pickOptimalModel(provider, list)
-      if (!settings.aiModel || (!list.includes(settings.aiModel) && !isCustomModel)) {
-        set({ aiModel: optimal })
+      if ((!latest.settings.aiModel || (!list.includes(latest.settings.aiModel) && !latest.isCustomModel)) &&
+          optimal !== latest.settings.aiModel) {
+        latest.onChange({ ...latest.settings, aiModel: optimal })
       }
     } finally {
-      setLoadingModels(false)
+      if (request === modelRequest.current) setLoadingModels(false)
     }
-  }, [settings.aiModel, isCustomModel, set])
+  }, [])
 
+  useEffect(() => () => { modelRequest.current++ }, [])
   useEffect(() => {
     if (tab === 'ai' && settings.aiEnabled && !settings.aiDisabled) {
       void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)
     }
-  }, [tab, settings.aiEnabled, settings.aiDisabled, settings.aiProvider, settings.aiBaseUrl, refreshModels])
+  }, [tab, settings.aiEnabled, settings.aiDisabled, settings.aiProvider, settings.aiKey, settings.aiBaseUrl, refreshModels])
   // Escape closes Settings wherever focus is, even after the focused control went away.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -378,7 +388,6 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                             if (val !== settings.aiBaseUrl) {
                               set({ aiBaseUrl: val })
                               setKeyVerification(null)
-                              void refreshModels(settings.aiProvider, settings.aiKey, val)
                             }
                           }}
                         />
@@ -412,7 +421,6 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                               const optimal = DEFAULT_MODELS[detected]
                               set({ aiKey: val, aiProvider: detected, aiModel: optimal })
                               setDetectedNotice(`Auto-detected ${detected === 'anthropic' ? 'Anthropic (Claude)' : 'OpenAI'} from key prefix!`)
-                              void refreshModels(detected, val, settings.aiBaseUrl)
                             }
                           }}
                           onBlur={(e) => {
@@ -420,7 +428,6 @@ export default function SettingsModal({ settings, onChange, onClose, readCertifi
                             if (val !== settings.aiKey) {
                               set({ aiKey: val })
                               setKeyVerification(null)
-                              void refreshModels(settings.aiProvider, val, settings.aiBaseUrl)
                             }
                           }}
                         />

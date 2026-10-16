@@ -575,6 +575,7 @@ function Assistant({ doc, assistant, actions }: Pick<Props, 'doc' | 'assistant' 
           </span>
         </div>
         <select
+          aria-label={m.ai.scope}
           value={scope}
           onChange={(e) => onScopeChange(e.target.value as AiScope)}
           style={{ width: '100%', padding: '4px 6px', fontSize: '0.84rem', borderRadius: 4, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)' }}
