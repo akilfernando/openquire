@@ -230,7 +230,7 @@ test('keeps at most three checkpoints and rejects oversized replacements without
   expect(result.previous).toEqual({ name: 'C', revision: 'r-C', bytes: [67] })
 })
 
-test('purging through the privacy module deletes both key and recovery stores', async ({ page }) => {
+test('purging through the privacy module removes stored keys and checkpoints', async ({ page }) => {
   await page.goto('/')
   const result = await page.evaluate(async ({ recovery, privacy }) => {
     const recoveryApi = new Function(`${recovery}; return recoveryTest;`)()
@@ -250,19 +250,27 @@ test('purging through the privacy module deletes both key and recovery stores', 
       }
     })
     await privacyApi.purgeAllPrivateData()
-    const storesAfter = await new Promise<string[]>((resolve, reject) => {
-      // A fresh versionless open after deletion creates an empty database.
+    const after = await new Promise<{ keys: number; checkpoints: number }>((resolve, reject) => {
+      // App startup may recreate an empty schema after deletion. No key or
+      // checkpoint may reappear; database existence alone is not sensitive data.
       const request = indexedDB.open('openquire_vault')
       request.onerror = () => reject(request.error)
       request.onupgradeneeded = () => { /* No schema means the old database was deleted. */ }
-      request.onsuccess = () => { const db = request.result; const names = Array.from(db.objectStoreNames); db.close(); resolve(names) }
+      request.onsuccess = () => {
+        const db = request.result
+        if (!db.objectStoreNames.length) { db.close(); resolve({ keys: 0, checkpoints: 0 }); return }
+        const tx = db.transaction(['keys', 'recovery'], 'readonly')
+        const keys = tx.objectStore('keys').count(), checkpoints = tx.objectStore('recovery').count()
+        tx.oncomplete = () => { db.close(); resolve({ keys: keys.result, checkpoints: checkpoints.result }) }
+        tx.onerror = () => { db.close(); reject(tx.error) }
+      }
     })
-    return { before, storesAfter }
+    return { before, after }
   }, { recovery: recoveryCode, privacy: privacyCode })
 
   expect(result.before).toMatchObject({ keys: 1, checkpoints: 1 })
   expect(result.before.stores).toEqual(['keys', 'recovery'])
-  expect(result.storesAfter).toEqual([])
+  expect(result.after).toEqual({ keys: 0, checkpoints: 0 })
 })
 
 test('listing removes expired checkpoints from the IndexedDB store', async ({ page }) => {

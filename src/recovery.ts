@@ -68,20 +68,20 @@ export async function writeRecovery(id: string, snapshot: RecoverySnapshot, vali
     const request = store.getAll()
     request.onsuccess = () => {
       try {
-      if (!current(epoch, revision) || consent() !== permission || !valid()) { done(false); return }
-      const replacement: Record = { id, updated: Date.now(), encrypted }
-      const remaining = (request.result as Record[]).filter((record) => record.id !== id && !expired(record)).sort((a, b) => b.updated - a.updated)
-      const keep: Record[] = [replacement]
-      let total = encrypted.data.byteLength
-      for (const record of remaining) {
-        if (keep.length >= RECOVERY_LIMITS.documents || total + record.encrypted.data.byteLength > RECOVERY_LIMITS.bytes) continue
-        keep.push(record)
-        total += record.encrypted.data.byteLength
-      }
-      const ids = new Set(keep.map((record) => record.id))
-      for (const record of request.result as Record[]) if (!ids.has(record.id)) store.delete(record.id)
-      store.put(replacement, id)
-      done(true)
+        if (!current(epoch, revision) || consent() !== permission || !valid()) { done(false); return }
+        const replacement: Record = { id, updated: Date.now(), encrypted }
+        const remaining = (request.result as Record[]).filter((record) => record.id !== id && !expired(record)).sort((a, b) => b.updated - a.updated)
+        const keep: Record[] = [replacement]
+        let total = encrypted.data.byteLength
+        for (const record of remaining) {
+          if (keep.length >= RECOVERY_LIMITS.documents || total + record.encrypted.data.byteLength > RECOVERY_LIMITS.bytes) continue
+          keep.push(record)
+          total += record.encrypted.data.byteLength
+        }
+        const ids = new Set(keep.map((record) => record.id))
+        for (const record of request.result as Record[]) if (!ids.has(record.id)) store.delete(record.id)
+        store.put(replacement, id)
+        done(true)
       } catch (error) { fail(error) }
     }
   })

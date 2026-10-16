@@ -26,6 +26,8 @@ Preserving a valid original signature would preserve the original signed content
 The output contract takes precedence over signature preservation for destructive
 redaction and sanitization.
 
-Coverage still to add: corrupt/encrypted inputs across every interface, native
-CLI's supported subset, and extraction of the existing hidden-content/PDF-A
-builders. This corpus does not claim those additional contracts yet.
+The integrated suite also checks corrupt/protected input refusal through Engine,
+Node CLI and MCP, plus form filling followed by independently verified signing.
+Coverage still to add includes native CLI parity, embedded text spanning separate
+text objects, and extraction of the existing hidden-content/PDF-A builders into
+this shared directory. Existing sanitization/PDF-A tests remain in their suites.

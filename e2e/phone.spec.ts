@@ -60,6 +60,7 @@ test('reads, annotates, fills and signs on a 390 px phone', async ({ page }) => 
   expect(types).toContain('/Stamp')
   expect(doc.getForm().getTextField('full_name').getText()).toBe('Ada Lovelace')
   await openFile(page, 'reviewed.pdf', Buffer.from(bytes))
+  await expect(page.locator('.tab.is-active')).toContainText('reviewed')
   await page.locator('.page').nth(1).scrollIntoViewIfNeeded()
   await expect(page.locator('.widget.text')).toHaveValue('Ada Lovelace')
 

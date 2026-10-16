@@ -123,6 +123,10 @@ missing.
 
 ## Known limitations
 
+- **Text matching for redaction** depends on PDF text extraction. Visually continuous
+  text can be stored in separate blocks. Review the marks and use area redaction
+  when text matching misses content; inspect the saved output before sharing it.
+
 See the [capability matrix and release checks](docs/reliability-phase.md) for the
 browser/desktop, Node/npm, MCP and native CLI boundaries. The native Rust CLI is
 an experimental subset; it does not provide all features of the Node CLI.

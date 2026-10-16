@@ -1075,6 +1075,7 @@ export default function App() {
       const options = saveOptions.current.get(id) ?? { compress: 'standard' as const, security: { mode: 'keep' as const } }
       const remote = engineFor(id)
       const { bytes, revision, name } = await remote.saveSnapshot(options)
+      let outputName = `${name}.pdf`
       if (isDesktop) {
         // Save in place when the document came from a PDF on disk; otherwise ask where.
         let path = paths.current.get(id)
@@ -1085,6 +1086,7 @@ export default function App() {
           paths.current.set(id, path)
           setRecent(addRecent(path))
         }
+        outputName = fileName(path)
       } else download(bytes, `${name}.pdf`)
       sessions.current.markSaved(id, revision)
       if (!sessions.current.dirty(id)) {
@@ -1099,7 +1101,7 @@ export default function App() {
       if (options.security.mode !== 'set') record({ action: 'save', options })
       // Signed documents are reloaded after an incremental save, so refresh their state.
       apply(await remote.state())
-      setStatus(isDesktop ? m.status.saved(`${name}.pdf`, kb(bytes.length)) : `Download prepared: ${name}.pdf (${kb(bytes.length)}).`)
+      setStatus(isDesktop ? m.status.saved(outputName, kb(bytes.length)) : `Download prepared: ${name}.pdf (${kb(bytes.length)}).`)
       return true
     } finally {
       savingDocuments.current.delete(id)
