@@ -15,7 +15,7 @@ async function savedName(bytes: Uint8Array) {
 
 async function beforeUnloadPrevented(page: Page) {
   return page.evaluate(() => {
-    const event = new BeforeUnloadEvent('beforeunload', { cancelable: true })
+    const event = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(event)
     return event.defaultPrevented
   })
