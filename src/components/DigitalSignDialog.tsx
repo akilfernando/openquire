@@ -106,10 +106,12 @@ export default function DigitalSignDialog({ page, signedBefore, fields, tsa, onS
   }
 
   const findCards = async () => {
+    const revision = privacyRevision()
     setError('')
     setBusy(m.digitalId.readingCards)
     try {
       const found = await tokenCertificates(module.trim())
+      if (revision !== privacyRevision()) return
       setCards(found)
       setCard(0)
       try {
