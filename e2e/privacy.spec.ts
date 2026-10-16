@@ -8,6 +8,44 @@ const privacyCode = transformSync(readFileSync(new URL('../src/privacy.ts', impo
   loader: 'ts', format: 'iife', globalName: 'privacyTest',
 }).code
 
+test('delayed credential hydration preserves a newer edit in the production UI', async ({ page }) => {
+  await page.route('**/models', (route) => route.fulfill({ json: { data: [] } }))
+  await page.goto('/')
+  await page.evaluate(async (code) => {
+    const { encryptSensitive } = new Function(`${code}; return privacyTest;`)()
+    localStorage.setItem('openquire.settings', JSON.stringify({
+      aiEnabled: true, aiProvider: 'anthropic', aiKey: await encryptSensitive('old-key'), aiProfile: '',
+    }))
+  }, privacyCode)
+  await page.addInitScript(() => {
+    const state = globalThis as unknown as { releaseDecryption: () => void; decryptionFinished: boolean }
+    const wait = new Promise<void>((resolve) => { state.releaseDecryption = resolve })
+    const decrypt = crypto.subtle.decrypt.bind(crypto.subtle)
+    crypto.subtle.decrypt = async (...args: Parameters<typeof decrypt>) => {
+      await wait
+      const result = await decrypt(...args)
+      state.decryptionFinished = true
+      return result
+    }
+  })
+  await page.reload()
+  await page.locator('button[aria-label="Settings"]:visible').first().click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('button', { name: 'AI assistant', exact: true }).click()
+  await settings.getByLabel('API key', { exact: true }).fill('new-key')
+  await settings.getByLabel('API key', { exact: true }).press('Tab')
+  await page.evaluate(() => (globalThis as unknown as { releaseDecryption: () => void }).releaseDecryption())
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { decryptionFinished: boolean }).decryptionFinished)).toBe(true)
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+  // Trigger a later save from current React state, rather than trusting an uncontrolled input's value.
+  await settings.getByRole('checkbox', { name: 'Disable all AI features', exact: true }).check()
+  await expect.poll(() => page.evaluate(async (code) => {
+    const { decryptSensitive } = new Function(`${code}; return privacyTest;`)()
+    const saved = JSON.parse(localStorage.getItem('openquire.settings') ?? '{}')
+    return saved.aiDisabled ? decryptSensitive(saved.aiKey) : ''
+  }, privacyCode)).toBe('new-key')
+})
+
 test('concurrent tabs encrypt with one persisted, non-extractable device key', async ({ page, context }) => {
   const other = await context.newPage()
   await Promise.all([page.goto('/'), other.goto('/')])

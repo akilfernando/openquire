@@ -175,7 +175,11 @@ export default function App() {
 
   // ---- settings and theme -------------------------------------------------------------
 
+  // A delayed callback from a pre-purge dialog must not submit its old snapshot
+  // as a new write. Completion of that same purge keeps this identity stable.
+  const settingsPrivacy = privacyRevision().replace(/:(purging|complete)$/, '')
   const setSettings = (s: Settings) => {
+    if (settingsPrivacy !== privacyRevision().replace(/:(purging|complete)$/, '')) return
     setSettingsState(s)
     void settingsWriter.current!.save(s).catch((error: unknown) => {
       const text = error instanceof Error ? error.message : 'Preferences could not be saved on this device.'
