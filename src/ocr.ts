@@ -41,16 +41,26 @@ export interface OcrOptions {
 
 export interface OcrResult {
   state: DocState | null
+  completed: number
+  skipped: number
+  stopped: boolean
   /** The language used. */
   lang: string
   /** A language that was detected but not used, because downloading it isn't allowed. */
   wanted?: string
 }
 
+export interface OcrControls {
+  /** Finish the current page, then skip remaining pages. */
+  signal?: AbortSignal
+  /** Publish each committed text layer, including before a later page fails. */
+  onState?: (state: DocState) => void
+}
+
 async function recognize(doc: number, pageId: number, lang: string, native: string[] | null): Promise<{ words: OcrWord[]; text: string }> {
   const scale = DPI / 72
   const bmp = await requestRender(pageId, scale, 2, undefined, doc).promise
-  if (!bmp) return { words: [], text: '' }
+  if (!bmp) throw new Error('The page could not be rendered for text recognition.')
   const canvas = document.createElement('canvas')
   canvas.width = bmp.width
   canvas.height = bmp.height
@@ -78,34 +88,47 @@ export async function recognizePages(
   onProgress: (done: number, total: number) => void,
   doc = activeDocument(),
   opts: OcrOptions = { lang: 'eng', allowDownload: false },
+  controls: OcrControls = {},
 ): Promise<OcrResult> {
   const engine = engineFor(doc)
+  const result: OcrResult = { state: null, lang: opts.lang === 'auto' ? 'eng' : opts.lang, completed: 0, skipped: pageIds.length, stopped: false }
+  const finish = () => {
+    result.skipped = pageIds.length - result.completed
+    result.stopped = result.skipped > 0 && !!controls.signal?.aborted
+    onProgress(result.completed, pageIds.length)
+    return result
+  }
+  if (controls.signal?.aborted) return finish()
   const installed = opts.native ? await nativeTools() : null
   const native = installed?.tesseract ? installed.tesseract_langs : null
-  const result: OcrResult = { state: null, lang: opts.lang === 'auto' ? 'eng' : opts.lang }
   // Languages installed with Tesseract need no download.
   const downloadable = (lang: string) => opts.allowDownload || !!native?.includes(lang)
   if (!downloadable(result.lang) && result.lang !== 'eng') {
     result.wanted = result.lang
     result.lang = 'eng'
   }
-  let first: OcrWord[] | null = null
-  if (opts.lang === 'auto' && pageIds.length) {
-    onProgress(0, pageIds.length)
-    const probe = await recognize(doc, pageIds[0], 'eng', native)
-    const detected = detectLanguage(probe.text)
-    if (detected && detected !== 'eng') {
-      if (downloadable(detected)) result.lang = detected
-      else result.wanted = detected
-    }
-    // English was right, so the first page is done.
-    if (result.lang === 'eng') first = probe.words
-  }
   for (const [i, id] of pageIds.entries()) {
+    if (controls.signal?.aborted) break
     onProgress(i, pageIds.length)
+    // Language probing belongs to the first page: a stop during probing still
+    // finishes that page in the selected language before reaching the boundary.
+    let first: OcrWord[] | null = null
+    if (i === 0 && opts.lang === 'auto') {
+      const probe = await recognize(doc, id, 'eng', native)
+      const detected = detectLanguage(probe.text)
+      if (detected && detected !== 'eng') {
+        if (downloadable(detected)) result.lang = detected
+        else result.wanted = detected
+      }
+      if (result.lang === 'eng') first = probe.words
+    }
     const words = i === 0 && first ? first : (await recognize(doc, id, result.lang, native)).words
-    if (words.length) result.state = await engine.addTextLayer(id, words)
+    if (words.length) {
+      result.state = await engine.addTextLayer(id, words)
+      controls.onState?.(result.state)
+    }
+    result.completed++
   }
-  onProgress(pageIds.length, pageIds.length)
-  return result
+  return finish()
 }
+

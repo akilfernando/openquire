@@ -138,6 +138,9 @@ export default function App() {
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [recoveryBusy, setRecoveryBusy] = useState(false)
   const [recoveryError, setRecoveryError] = useState('')
+  const ocrController = useRef<AbortController | null>(null)
+  const [ocrProgress, setOcrProgress] = useState('')
+  const [ocrStopping, setOcrStopping] = useState(false)
   const batchController = useRef<AbortController | null>(null)
   const [batchProgress, setBatchProgress] = useState('')
   const [batchStopping, setBatchStopping] = useState(false)
@@ -639,7 +642,10 @@ export default function App() {
   const runWorkflowHere = (wf: Workflow) => {
     setWorkflowsOpen(null)
     void run(m.busy.runningWorkflow, async () => {
-      const r = await runOnDocument(activeDocument(), wf, undefined, { lang: settings.ocrLang, allowDownload: settings.ocrDownload }, (p, c, d) => host.runCommand(p, c, d))
+      const r = await runOnDocument(activeDocument(), wf, undefined, { lang: settings.ocrLang, allowDownload: settings.ocrDownload }, (p, c, d) => host.runCommand(p, c, d), undefined, {
+        onOcrProgress: (done, total) => setBusy(`Text recognition: ${done} of ${total} pages processed`),
+        onState: apply,
+      })
       if (r.state) apply(r.state)
       if (r.bytes) download(r.bytes, `${docRef.current?.name ?? 'document'}.pdf`)
       setStatus([m.workflows.ran(wf.name), ...r.notes].join(' '))
@@ -1644,29 +1650,49 @@ export default function App() {
       })
     },
     pagesWithoutText: async () => (await engine.pagesWithoutText()).length,
-    ocr: (scope) =>
+    ocr: (scope) => {
+      if (blockingTabOperations.current || ocrController.current) return
+      const id = activeDocument()
+      const target = engineFor(id)
+      const controller = new AbortController()
+      ocrController.current = controller
+      setOcrStopping(false)
+      setOcrProgress('Preparing text recognition…')
       void run(m.busy.startingOcr, async () => {
-        const ids = scope === 'notext' ? await engine.pagesWithoutText() : scope === 'selected' ? [...selected] : doc!.pages.map((p) => p.id)
-        if (!ids.length) return setStatus(m.status.allHaveText)
-        let straightened = 0
-        if (settings.ocrStraighten) {
-          setBusy(m.busy.straightening)
-          const r = await engine.straighten(ids)
-          straightened = r.count
-          if (r.count) apply(r.state)
+        try {
+          const ids = scope === 'notext' ? await target.pagesWithoutText() : scope === 'selected' ? [...selected] : doc!.pages.map((p) => p.id)
+          if (!ids.length) return setStatus(m.status.allHaveText)
+          let straightened = 0
+          if (settings.ocrStraighten && !controller.signal.aborted) {
+            setBusy(m.busy.straightening)
+            setOcrProgress('Straightening pages before text recognition…')
+            const r = await target.straighten(ids)
+            straightened = r.count
+            if (r.count) apply(r.state)
+          }
+          const { recognizePages } = await import('./ocr')
+          const r = await recognizePages(ids, (done, total) => {
+            setBusy(m.busy.recognizing(Math.min(done + 1, total), total))
+            setOcrProgress(`${done} of ${total} pages processed`)
+          }, id, {
+            lang: settings.ocrLang, allowDownload: settings.ocrDownload, native: isDesktop && settings.nativeTools,
+          }, { signal: controller.signal, onState: apply })
+          const name = (code: string) => m.settings.languages[code] ?? code
+          setStatus([
+            r.stopped ? `Text recognition stopped: processed ${r.completed} of ${ids.length} pages; ${r.skipped} skipped. Completed text layers are retained.${straightened ? ` ${straightened} pages straightened.` : ''}`
+              : r.state ? m.status.recognized(r.completed, name(r.lang), straightened) : m.status.noTextFound,
+            r.wanted ? m.status.languageNotAllowed(name(r.wanted)) : '',
+          ].filter(Boolean).join('. '))
+          if (!r.stopped) record({ action: 'ocr', lang: settings.ocrLang, straighten: settings.ocrStraighten })
+        } catch (error) {
+          throw new Error(`Text recognition failed. Any completed text layers or page straightening are retained. ${error instanceof Error ? error.message : String(error)}`)
+        } finally {
+          ocrController.current = null
+          setOcrProgress('')
+          setOcrStopping(false)
         }
-        const { recognizePages } = await import('./ocr')
-        const r = await recognizePages(ids, (done, total) => setBusy(m.busy.recognizing(Math.min(done + 1, total), total)), activeDocument(), {
-          lang: settings.ocrLang, allowDownload: settings.ocrDownload, native: isDesktop && settings.nativeTools,
-        })
-        if (r.state) apply(r.state)
-        const name = (code: string) => m.settings.languages[code] ?? code
-        setStatus([
-          r.state ? m.status.recognized(ids.length, name(r.lang), straightened) : m.status.noTextFound,
-          r.wanted ? m.status.languageNotAllowed(name(r.wanted)) : '',
-        ].filter(Boolean).join('. '))
-        record({ action: 'ocr', lang: settings.ocrLang, straighten: settings.ocrStraighten })
-      }),
+      }, id)
+    },
     digitalSign: () => setDigitalSigning(true),
     setLabels: (style, prefix, start) => void run(m.busy.numbering, async () => apply(await engine.setPageLabels(labelPageId(), style, prefix, start))),
     designForm: () => setTool('field'),
@@ -1858,7 +1884,7 @@ export default function App() {
 
   const keys = useRef<(e: KeyboardEvent) => void>()
   keys.current = (e) => {
-    if (closePrompt || batchProgress || batchReport || (recoveryOpen && recoveries.length)) return
+    if (closePrompt || ocrProgress || batchProgress || batchReport || (recoveryOpen && recoveries.length)) return
     // The Hotkeys settings tab records presses itself.
     if ((e.target as Element).closest?.('[data-recording-hotkey]')) return
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as Element).tagName) || (e.target as HTMLElement).isContentEditable
@@ -2352,6 +2378,13 @@ export default function App() {
       />}
       {recoveryOpen && recoveries.length > 0 && <RecoveryDialog entries={recoveries} busy={recoveryBusy} error={recoveryError}
         onRestore={(id) => void restoreCheckpoint(id)} onDiscard={(id) => void discardCheckpoint(id)} onLater={() => setRecoveryOpen(false)} />}
+      {ocrProgress && <Modal title="Recognizing text" onClose={() => { ocrController.current?.abort(); setOcrStopping(true) }}>
+        <p role="status">{ocrProgress}</p>
+        <p>Stopping finishes the current page or page preparation, then skips remaining recognition. Completed changes stay in the document and can be saved or undone.</p>
+        <button disabled={ocrStopping} onClick={() => { ocrController.current?.abort(); setOcrStopping(true) }}>
+          {ocrStopping ? 'Stopping…' : 'Stop after this page'}
+        </button>
+      </Modal>}
       {batchProgress && <Modal title="Processing files" onClose={() => { batchController.current?.abort(); setBatchStopping(true) }}>
         <p role="status">{batchProgress}</p>
         <p>Stopping finishes the current file, then skips the rest. Completed outputs and a report are prepared as a download.</p>
@@ -2369,4 +2402,5 @@ export default function App() {
     </div>
   )
 }
+
 
