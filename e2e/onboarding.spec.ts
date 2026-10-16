@@ -22,7 +22,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       await expect.poll(() => page.evaluate(() => localStorage.getItem('openquire.onboarded'))).toBe('true')
       await openReport(page)
       await expect(dialog).toHaveCount(0)
-      await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
+      await page.locator('button[aria-label="Settings"]:visible').first().click()
       await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible()
     })
 
