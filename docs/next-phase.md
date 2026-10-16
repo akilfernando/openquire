@@ -4,13 +4,13 @@
 
 OpenQuire is an AGPL local-first PDF suite aiming to cover everyday Acrobat-style work while offering private on-device processing, reusable automation and extensibility. React presents a MuPDF WebAssembly engine through workers; Tauri supplies desktop integration; the Node CLI/library and MCP expose automation. Optional AI is explicitly opt-in. The native Rust CLI is a separate experimental subset, not a parity replacement.
 
-As checked on 16 October 2026, main is `74d5884`. PR #49 at `03a4741` contains the completed reliability implementation: saved revisions and close guards, safe desktop replacement, encrypted opt-in recovery, ordered private settings and purge, MCP output boundaries, truthful native failures, independent PDF output checks, batch progress/stop/reporting, and package smoke tests. Its six workflows pass: 181 unit tests, 64 browser tests, Rust tests, Node 20/22 installed consumers and three-platform archives/installers. One live TSA test is opt-in and skipped. These are candidate results, not evidence of a released build.
+On 16 October 2026, PR #49 at `03a4741` was merged into main as `ba894f5`. It contains the completed reliability implementation: saved revisions and close guards, safe desktop replacement, encrypted opt-in recovery, ordered private settings and purge, MCP output boundaries, truthful native failures, independent PDF output checks, batch progress/stop/reporting, and package smoke tests. Its six workflows pass: 181 unit tests, 64 browser tests, Rust tests, Node 20/22 installed consumers and three-platform archives/installers. One live TSA test is opt-in and skipped. These are candidate results, not evidence of a released build.
 
 Public npm latest was 1.0.2 in the registry audit; source CLI targets 1.0.3; app/Tauri/Rust manifests use 0.1.0. Historical roadmap milestones do not establish release identity or complete interoperability. Actual desktop dialogs, external-viewer trust acceptance and a representative human pilot remain unverified.
 
 ## Close the current phase
 
-1. Review and integrate the combined #49 candidate; use focused #40–43 and #45–48 as review context rather than merging overlapping changes independently.
+1. Completed: integrated #49 and closed the superseded focused #40–43 and #45–48 PRs. Their review context remains available.
 2. Verify CI and deployment on the resulting main commit. Close superseded focused PRs only after integration.
 3. Preserve the tested commit, workflow links and installer identities in the release record. Current CI artifacts have limited retention.
 4. Run the pilot below and fix release blockers before package/release publication. Code integration and release acceptance are separate statuses.
@@ -33,7 +33,7 @@ The native capability decision can be developed alongside canonical correctness,
 
 ## Pilot protocol
 
-Use synthetic or explicitly shareable files. Record OS/browser/viewer versions, source commit, fixture identity, exact steps, expected and actual behavior, output verification and a linked defect for every failure.
+Use the [pilot result template](pilot-results.md), initially marked NOT RUN. Use synthetic or explicitly shareable files. Record OS/browser/viewer versions, source commit, fixture identity, exact steps, expected and actual behavior, output verification and a linked defect for every failure.
 
 - Contract: open, annotate, edit, save, retain the download on mobile, reopen in a second viewer.
 - Form/signature: populate a rotated form, sign with a test identity, independently check appearance/integrity and trust; compare ordinary later edits with destructive redaction.

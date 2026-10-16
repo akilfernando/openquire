@@ -6,8 +6,8 @@ Each release has a theme, a short list of deliverables, and a test for when it's
 
 > **Status (16 October 2026):** the sections below preserve the original milestone plan.
 > Many features are implemented, but completion of every acceptance criterion has not
-> been established. The current reliability implementation is ready for review in
-> [PR #49](https://github.com/akilfernando/openquire/pull/49); it is not yet on main.
+> been established. The reliability implementation was integrated into main through
+> [PR #49](https://github.com/akilfernando/openquire/pull/49), merge commit `ba894f5`.
 > The npm registry audit reports public latest **1.0.2**, while CLI source targets
 > **1.0.3**. Desktop/viewer pilot acceptance remains open.
 >
