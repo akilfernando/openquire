@@ -10,6 +10,7 @@ Generated files live in temporary directories and are removed after the suite.
 | --- | --- | --- |
 | `contracts.ts:splitTextPdf` | One email split across PDF text operators; unreachable private-copy sentinel | Engine, Node CLI and MCP redaction; independent text extraction and decompressed indirect-object inspection |
 | `contracts.ts:embeddedTextPdf` | Subset embedded DejaVu Sans with Unicode mapping | Same redaction interfaces; Poppler confirms input and output semantics |
+| `contracts.ts:separateTextObjectsPdf` | Embedded font split across distinct BT/ET objects; adjacent, separate-column and separate-line layouts | Adjacent text matches terms/patterns and is removed through Engine/Node/MCP; unrelated columns and lines must not match |
 | `contracts.ts:signedIncrementalPdf` | Synthetic digital ID; signed base plus later annotation revision | OpenSSL verifies the input CMS signature; all redaction outputs must discard prior revisions |
 | `contracts.ts:rotatedFormPdf` | Page rotation 90 degrees; populated text widget | Save/reopen with pdf-lib checks rotation, value and appearance presence |
 | `invoice.ts:textPdf`, `scannedPdf` | Invoice source and image-only rendering | Existing OCR alignment/pixel and signature tests |
@@ -28,6 +29,6 @@ redaction and sanitization.
 
 The integrated suite also checks corrupt/protected input refusal through Engine,
 Node CLI and MCP, plus form filling followed by independently verified signing.
-Coverage still to add includes native CLI parity, embedded text spanning separate
-text objects, and extraction of the existing hidden-content/PDF-A builders into
+Coverage still to add includes native CLI parity, more complex text geometry,
+and extraction of the existing hidden-content/PDF-A builders into
 this shared directory. Existing sanitization/PDF-A tests remain in their suites.

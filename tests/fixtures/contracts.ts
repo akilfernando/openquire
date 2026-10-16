@@ -39,6 +39,7 @@ export async function separateTextObjectsPdf(layout: 'adjacent' | 'columns' | 'l
   const bytes = readFileSync(fileURLToPath(new URL('../../node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf', import.meta.url)))
   const font = await doc.embedFont(bytes, { subset: true })
   const page = doc.addPage([595, 842])
+  page.drawText('Contact', { x: 60, y: 700, size: 12, font })
   const x = 60
   const y = 760
   const size = 12
