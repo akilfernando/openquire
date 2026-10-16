@@ -67,3 +67,19 @@ configured browser project is Chromium only. Firefox/WebKit, complete dock/sideb
 thumbnail keyboard traversal, focus restoration and all theme/accent contrast
 combinations remain unmeasured. Real mobile and desktop native dialogs and external
 viewers remain NOT RUN in `pilot-results.md`.
+
+## Local validation
+
+The lockfile install, production build and canonical CLI build pass on Windows.
+The complete Chromium suite passed 70 tests; an additional protected-input
+cancellation regression passes in the focused import suite. Two import scheduling
+unit regressions pass. The full local unit run has 187 passes, five failures due
+to missing Poppler/OpenSSL executables, and six platform/opt-in/native/baseline
+skips. Independent PDF contracts therefore require the configured CI toolchain;
+they are not recorded as passing locally. Windows filesystem-link tests pass
+outside the restricted sandbox. Recovery test bundle URLs now use `fileURLToPath`
+so the full browser suite can run on Windows.
+
+`npm ci` reports eight dependency audit findings (four moderate, two high, two
+critical). Dependency remediation is separate from this lifecycle package; the
+lockfile is unchanged.

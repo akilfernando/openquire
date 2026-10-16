@@ -1021,14 +1021,16 @@ export default function App() {
       try {
         const results = await importFiles(files, {
           signal: controller.signal,
-          progress: (file, index) => setImportProgress(`File ${index + 1} of ${files.length}: ${file.name} — opening or converting`),
+          progress: (file, index) => setImportProgress(`File ${index + 1} of ${files.length}: ${file.name} — reading`),
           load: async (file, i) => {
+            const stage = (text: string) => setImportProgress(`File ${i + 1} of ${files.length}: ${file.name} — ${text}`)
             const converted = !/\.pdf$/i.test(file.name)
             let f = file
             let bytes = new Uint8Array(await f.arrayBuffer())
             // In the desktop app, an installed LibreOffice converts Office files more faithfully.
             const ext = f.name.split('.').pop()!.toLowerCase()
             if (isDesktop && settings.nativeTools && OFFICE_EXTENSIONS.includes(ext) && (await nativeTools()).libreoffice) {
+              stage('converting with LibreOffice')
               setBusy(m.busy.converting)
               bytes = await nativeConvert(bytes, ext)
               f = new File([bytes], f.name.replace(/\.[^.]+$/, '.pdf'))
@@ -1048,10 +1050,12 @@ export default function App() {
               }
             }
             if (append) {
+              stage('converting and adding pages')
               const s = await load((pw) => target.append(f.name, bytes.slice(), pw))
               if (s) apply(s)
               return !!s
             } else {
+              stage('opening or converting to PDF')
               const before = activeDocument()
               const opened = await inNewTab(() => load((pw) => engine.open(f.name, bytes.slice(), pw)), !converted)
               const path = filePaths?.[i]
