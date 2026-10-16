@@ -52,6 +52,14 @@ import { SettingsWriter } from './settings-storage'
 
 type Icon = ComponentType<LucideProps>
 
+// A stable component identity preserves the opener while dialogs update App.
+// Defining this inside App remounted its buttons and discarded keyboard focus.
+const IconButton = ({ Icon, label, hotkey, onClick, disabled, active }: { Icon: Icon; label: string; hotkey?: string; onClick: () => void; disabled?: boolean; active?: boolean }) => (
+  <button type="button" className={`clickable-icon${active ? ' is-active' : ''}`} aria-label={label} title={hotkey ? m.actions.withHotkey(label, hotkey) : label} disabled={disabled} onClick={onClick}>
+    <Icon size={20} />
+  </button>
+)
+
 type BuiltInTool = Exclude<Tool, `plugin:${string}`>
 const TOOL_ICONS: [BuiltInTool, Icon][][] = [
   [['select', MousePointer2], ['edittext', TextCursorInput], ['field', FormInput], ['link', Link2], ['erasegfx', SquareX]],
@@ -1955,11 +1963,6 @@ export default function App() {
     e.target.value = ''
   }
   const accept = 'application/pdf,image/*,.docx,.xlsx,.pptx,.epub,.html,.htm,.txt,.cbz,.fb2,.mobi'
-  const IconButton = ({ Icon, label, hotkey, onClick, disabled, active }: { Icon: Icon; label: string; hotkey?: string; onClick: () => void; disabled?: boolean; active?: boolean }) => (
-    <button type="button" className={`clickable-icon${active ? ' is-active' : ''}`} aria-label={label} title={hotkey ? m.actions.withHotkey(label, hotkey) : label} disabled={disabled} onClick={onClick}>
-      <Icon size={20} />
-    </button>
-  )
   const signedOk = doc && doc.signatures.length > 0 && doc.signatures.every((s) => s.valid)
 
   return (

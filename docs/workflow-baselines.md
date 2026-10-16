@@ -1,5 +1,10 @@
 # Import lifecycle and initial baselines
 
+Follow-up: [cross-browser checks and repeated browser measurements](browser-baselines.md)
+adds focused Firefox/WebKit coverage, a focus-return regression fix and Linux
+browser process-tree RSS sampling. The observations below describe the initial
+16 October run and retain its original limits.
+
 Measured on 16 October 2026 from main `2e4cefc` before the import changes (engine),
 and this work package (browser). No human pilot or release acceptance is implied.
 

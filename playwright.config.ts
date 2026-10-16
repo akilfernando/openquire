@@ -22,7 +22,16 @@ export default defineConfig({
     // Service workers would cache between tests; they're covered by a dedicated test.
     serviceWorkers: 'block',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } } },
+    ...(['firefox', 'webkit'] as const).map(name => ({
+      name,
+      // Focused engine, save/import and keyboard coverage before expanding the
+      // full Chromium suite. Touch-device emulation is not supported in Firefox.
+      testMatch: ['baselines.spec.ts', 'import-files.spec.ts', 'document-lifecycle.spec.ts', 'keyboard.spec.ts'],
+      use: { browserName: name, viewport: { width: 1440, height: 1000 } },
+    })),
+  ],
   webServer: {
     command: 'npx vite preview --port 4173 --strictPort',
     url: 'http://localhost:4173',
