@@ -2443,7 +2443,11 @@ export class Engine {
     }
     if (opts.compress !== 'none') doc.subsetFonts()
     const parts = compressOptions(opts.compress)
-    if (this.requiresFullRewrite) parts.push('garbage=deduplicate', 'clean')
+    if (this.requiresFullRewrite) {
+      // MuPDF rejects duplicate options instead of accepting the last one.
+      for (let i = parts.length - 1; i >= 0; i--) if (parts[i].startsWith('garbage=') || parts[i] === 'clean') parts.splice(i, 1)
+      parts.push('garbage=deduplicate', 'clean')
+    }
     if (opts.security.mode === 'none') parts.push('encrypt=none')
     if (opts.security.mode === 'set') {
       const s = opts.security

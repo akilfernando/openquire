@@ -9,7 +9,7 @@ Generated files live in temporary directories and are removed after the suite.
 | Builder | Properties | Consumers and semantic checks |
 | --- | --- | --- |
 | `contracts.ts:splitTextPdf` | One email split across PDF text operators; unreachable private-copy sentinel | Engine, Node CLI and MCP redaction; independent text extraction and decompressed indirect-object inspection |
-| `contracts.ts:embeddedTextPdf` | Subset embedded DejaVu Sans; contiguous text across separate operators | Same redaction interfaces; Poppler confirms input and output semantics |
+| `contracts.ts:embeddedTextPdf` | Subset embedded DejaVu Sans with Unicode mapping | Same redaction interfaces; Poppler confirms input and output semantics |
 | `contracts.ts:signedIncrementalPdf` | Synthetic digital ID; signed base plus later annotation revision | OpenSSL verifies the input CMS signature; all redaction outputs must discard prior revisions |
 | `contracts.ts:rotatedFormPdf` | Page rotation 90 degrees; populated text widget | Save/reopen with pdf-lib checks rotation, value and appearance presence |
 | `invoice.ts:textPdf`, `scannedPdf` | Invoice source and image-only rendering | Existing OCR alignment/pixel and signature tests |
