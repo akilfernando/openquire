@@ -5,13 +5,14 @@ import { m } from '../i18n'
 
 interface Props {
   title?: string
+  labelledBy?: string
   onClose?: () => void
   className?: string
   children: ReactNode
 }
 
 /** Obsidian-style modal: centered card, title, close button, Esc and backdrop to dismiss. */
-export default function Modal({ title, onClose, className = '', children }: Props) {
+export default function Modal({ title, labelledBy, onClose, className = '', children }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   useFocusTrap(ref)
   useEffect(() => {
@@ -29,7 +30,7 @@ export default function Modal({ title, onClose, className = '', children }: Prop
   return (
     <div className="modal-container">
       <div className="modal-bg" onPointerDown={() => onClose?.()} />
-      <div ref={ref} className={`modal ${className}`} role="dialog" aria-modal="true" aria-label={title}>
+      <div ref={ref} className={`modal ${className}`} role="dialog" aria-modal="true" aria-label={title} aria-labelledby={labelledBy}>
         {onClose && (
           <button className="clickable-icon modal-close" aria-label={m.actions.close} onClick={onClose}>
             <X size={20} />

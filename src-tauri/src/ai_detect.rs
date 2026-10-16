@@ -85,7 +85,7 @@ fn is_claude_installed() -> (bool, Option<PathBuf>, bool) {
     #[cfg(windows)]
     {
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let exe = PathBuf::from(local).join("Programs").join("Claude").join("Claude.exe");
+            let exe = PathBuf::from(&local).join("Programs").join("Claude").join("Claude.exe");
             if exe.exists() {
                 return (true, configs.first().cloned(), false);
             }
