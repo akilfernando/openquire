@@ -33,7 +33,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Show pages, properties, signatures, tags and PDF/A status")]
+    #[command(about = "Show pages and properties; unsupported checks are reported as unknown")]
     Info(PathArgs),
 
     #[command(about = "Find and permanently remove text")]
@@ -45,25 +45,25 @@ enum Commands {
     #[command(about = "Sign with a digital ID")]
     Sign(SignArgs),
 
-    #[command(about = "Run a workflow saved from the app on each file")]
+    #[command(about = "Run metadata-only workflows (setMeta); other steps unavailable in the native CLI")]
     Run(RunArgs),
 
     #[command(about = "Combine files into one: openquire merge a.pdf b.pdf -o all.pdf")]
     Merge(MergeArgs),
 
-    #[command(about = "Save smaller files: --level standard|medium|strong")]
+    #[command(about = "Compression (unavailable in the native CLI)")]
     Compress(CompressArgs),
 
-    #[command(about = "Save PDF/A copies: --part 2|3")]
+    #[command(about = "PDF/A conversion (unavailable in the native CLI)")]
     Pdfa(PdfaArgs),
 
-    #[command(about = "Tag for accessibility: --lang <BCP 47 code>")]
+    #[command(about = "Accessibility tagging (unavailable in the native CLI)")]
     Tag(TagArgs),
 
-    #[command(about = "Recognize text on pages without text")]
+    #[command(about = "OCR (unavailable in the native CLI)")]
     Ocr(OcrArgs),
 
-    #[command(about = "Convert: --to docx|xlsx|txt|html")]
+    #[command(about = "Export extracted text: --to txt|html (Office formats unavailable)")]
     Export(ExportArgs),
 }
 
@@ -180,7 +180,7 @@ struct ExportArgs {
     #[arg(help = "Files or folders to process")]
     paths: Vec<PathBuf>,
 
-    #[arg(long = "to", help = "docx|xlsx|txt|html")]
+    #[arg(long = "to", help = "txt|html; docx and xlsx are unavailable in the native CLI")]
     to: Option<String>,
 }
 
@@ -239,6 +239,23 @@ fn output_path(input: &Path, suffix: &str, out: Option<&Path>, many: bool, ext: 
             }
         }
     }
+}
+
+fn unavailable(operation: &str) -> ExitCode {
+    eprintln!("{operation} is not supported by the native CLI. No files were written. See the Node CLI or desktop app for these capabilities.");
+    ExitCode::from(2)
+}
+
+fn text_html(text: &str) -> String {
+    let escaped = text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;");
+    format!(
+        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Extracted PDF text</title></head><body><pre>{escaped}</pre></body></html>\n"
+    )
 }
 
 fn main() -> ExitCode {
@@ -315,10 +332,10 @@ fn main() -> ExitCode {
                             if let Some(k) = &info.metadata.keywords {
                                 println!("  keywords: {k}");
                             }
-                            println!("  signatures: none");
-                            println!("  tagged: no");
-                            println!("  PDF/A: no");
-                            println!("  form fields: 0, comments: 0");
+                            println!("  signatures: unknown (not inspected by the native CLI)");
+                            println!("  tagged: unknown (not inspected by the native CLI)");
+                            println!("  PDF/A: unknown (not validated by the native CLI)");
+                            println!("  form fields: unknown, comments: unknown (not inspected by the native CLI)");
                         }
                         Err(e) => {
                             eprintln!("{}: {}", file.display(), e);
@@ -478,6 +495,9 @@ fn main() -> ExitCode {
         }
 
         Commands::Sign(args) => {
+            if args.timestamp.is_some() {
+                return unavailable("Timestamped signing");
+            }
             let files = match collect_pdf_files(&args.paths, cli.recursive) {
                 Ok(f) => f,
                 Err((msg, code)) => {
@@ -555,6 +575,19 @@ fn main() -> ExitCode {
                 }
             };
 
+            // Validate every step before processing any file. The native engine only
+            // implements this subset; silently skipping a step produces misleading output.
+            if workflow.version != 1 {
+                eprintln!("Unsupported workflow version: {}", workflow.version);
+                return ExitCode::from(2);
+            }
+            for (index, step) in workflow.steps.iter().enumerate() {
+                match step {
+                    WorkflowStep::SetMeta { .. } => {}
+                    _ => return unavailable(&format!("Workflow step {}", index + 1)),
+                }
+            }
+
             let files = match collect_pdf_files(&args.paths, cli.recursive) {
                 Ok(f) => f,
                 Err((msg, code)) => {
@@ -568,33 +601,12 @@ fn main() -> ExitCode {
                 match fs::read(file) {
                     Ok(bytes) => match PdfDocument::open(file.display().to_string(), &bytes) {
                         Ok(mut pdf) => {
-                            let mut marked_patterns = Vec::new();
-                            let mut marked_terms = Vec::new();
-
                             for step in &workflow.steps {
                                 match step {
-                                    WorkflowStep::MarkPatterns { patterns } => {
-                                        for p in patterns {
-                                            if let Ok(r) = Regex::new(resolve_pattern(p)) {
-                                                marked_patterns.push(r);
-                                            }
-                                        }
-                                    }
-                                    WorkflowStep::MarkTerms { terms } => {
-                                        marked_terms.extend(terms.iter().cloned());
-                                    }
-                                    WorkflowStep::ApplyRedactions => {
-                                        pdf.redact(&marked_patterns, &marked_terms);
-                                        marked_patterns.clear();
-                                        marked_terms.clear();
-                                    }
                                     WorkflowStep::SetMeta { meta } => {
                                         pdf.set_metadata(meta);
                                     }
-                                    WorkflowStep::PdfA { part } => {
-                                        pdf.set_pdfa_part(*part);
-                                    }
-                                    _ => {}
+                                    _ => unreachable!("unsupported workflow steps rejected before processing"),
                                 }
                             }
 
@@ -705,105 +717,24 @@ fn main() -> ExitCode {
             say(&format!("Merged {} files into {}", files.len(), out_file.display()));
         }
 
-        Commands::Compress(args) => {
-            let files = match collect_pdf_files(&args.paths, cli.recursive) {
-                Ok(f) => f,
-                Err((msg, code)) => {
-                    eprintln!("{msg}");
-                    return ExitCode::from(code);
-                }
-            };
-            let many = files.len() > 1;
-            for file in &files {
-                match fs::read(file) {
-                    Ok(bytes) => match PdfDocument::open(file.display().to_string(), &bytes) {
-                        Ok(mut pdf) => {
-                            let before = bytes.len();
-                            let saved = match pdf.save() {
-                                Ok(b) => b,
-                                Err(e) => {
-                                    eprintln!("{}: {}", file.display(), e);
-                                    failed += 1;
-                                    continue;
-                                }
-                            };
-                            let out_path = output_path(file, "compressed", cli.out.as_deref(), many, "pdf");
-                            let _ = fs::write(&out_path, &saved);
-                            say(&format!(
-                                "{}: {} KB to {} KB",
-                                out_path.display(),
-                                before / 1024,
-                                saved.len() / 1024
-                            ));
-                        }
-                        Err(e) => {
-                            eprintln!("{}: {}", file.display(), e);
-                            failed += 1;
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("{}: {}", file.display(), e);
-                        failed += 1;
-                    }
-                }
-            }
-        }
-
-        Commands::Pdfa(args) => {
-            let files = match collect_pdf_files(&args.paths, cli.recursive) {
-                Ok(f) => f,
-                Err((msg, code)) => {
-                    eprintln!("{msg}");
-                    return ExitCode::from(code);
-                }
-            };
-            let many = files.len() > 1;
-            for file in &files {
-                let out_path = output_path(file, &format!("pdfa{}", args.part), cli.out.as_deref(), many, "pdf");
-                say(&format!("{}: PDF/A-{}b copy saved", out_path.display(), args.part));
-            }
-        }
-
-        Commands::Tag(args) => {
-            let files = match collect_pdf_files(&args.paths, cli.recursive) {
-                Ok(f) => f,
-                Err((msg, code)) => {
-                    eprintln!("{msg}");
-                    return ExitCode::from(code);
-                }
-            };
-            let many = files.len() > 1;
-            for file in &files {
-                let out_path = output_path(file, "tagged", cli.out.as_deref(), many, "pdf");
-                say(&format!("{}: tagged ({})", out_path.display(), args.lang));
-            }
-        }
-
-        Commands::Ocr(args) => {
-            let files = match collect_pdf_files(&args.paths, cli.recursive) {
-                Ok(f) => f,
-                Err((msg, code)) => {
-                    eprintln!("{msg}");
-                    return ExitCode::from(code);
-                }
-            };
-            let many = files.len() > 1;
-            for file in &files {
-                let out_path = output_path(file, "ocr", cli.out.as_deref(), many, "pdf");
-                say(&format!("{}: recognized text on 1 pages ({})", out_path.display(), args.lang));
-            }
-        }
+        Commands::Compress(_) => return unavailable("Compression"),
+        Commands::Pdfa(_) => return unavailable("PDF/A conversion"),
+        Commands::Tag(_) => return unavailable("Accessibility tagging"),
+        Commands::Ocr(_) => return unavailable("OCR"),
 
         Commands::Export(args) => {
             let to = match args.to {
                 Some(t) => t,
                 None => {
-                    eprintln!("Choose a format with --to docx, xlsx, txt or html.");
+                    eprintln!("Choose a format with --to txt or html.");
                     return ExitCode::from(2);
                 }
             };
-            if !["docx", "xlsx", "txt", "html"].contains(&to.as_str()) {
-                eprintln!("Choose a format with --to docx, xlsx, txt or html.");
+            if ["docx", "xlsx"].contains(&to.as_str()) {
+                return unavailable("Office export");
+            }
+            if !["txt", "html"].contains(&to.as_str()) {
+                eprintln!("Choose a format with --to txt or html.");
                 return ExitCode::from(2);
             }
             let files = match collect_pdf_files(&args.paths, cli.recursive) {
@@ -818,9 +749,22 @@ fn main() -> ExitCode {
                 match fs::read(file) {
                     Ok(bytes) => match PdfDocument::open(file.display().to_string(), &bytes) {
                         Ok(pdf) => {
-                            let text = pdf.extract_text();
+                            let pages: Vec<u32> = pdf.doc.get_pages().keys().copied().collect();
+                            let text = match pdf.doc.extract_text(&pages) {
+                                Ok(text) => text,
+                                Err(error) => {
+                                    eprintln!("{}: text extraction failed: {}", file.display(), error);
+                                    failed += 1;
+                                    continue;
+                                }
+                            };
+                            let content = if to == "html" { text_html(&text) } else { text };
                             let out_path = output_path(file, "export", cli.out.as_deref(), many, &to);
-                            let _ = fs::write(&out_path, text.as_bytes());
+                            if let Err(error) = fs::write(&out_path, content.as_bytes()) {
+                                eprintln!("{}: {}", out_path.display(), error);
+                                failed += 1;
+                                continue;
+                            }
                             say(&format!("{}", out_path.display()));
                         }
                         Err(e) => {
@@ -843,3 +787,4 @@ fn main() -> ExitCode {
         ExitCode::from(0)
     }
 }
+

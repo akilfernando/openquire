@@ -12,7 +12,7 @@ export class EngineError extends Error {
 }
 
 const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
-const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>()
+const pending = new Map<number, { doc: number; method: string; resolve: (v: unknown) => void; reject: (e: unknown) => void }>()
 let nextId = 1
 let markReady: () => void
 const ready = new Promise<void>((r) => (markReady = r))
@@ -35,7 +35,18 @@ worker.onmessage = ({ data }) => {
   if (!p) return
   pending.delete(data.id)
   if (data.error) p.reject(new EngineError(data.error.name, data.error.message, data.error.file, data.error.retry))
-  else p.resolve(data.result)
+  else {
+    // Identify document states at the transport boundary; the Node library's
+    // core remains independent of workspace tab ids.
+    const identify = (value: unknown) => {
+      if (!value || typeof value !== 'object') return
+      const state = value as { revision?: unknown; pages?: unknown; documentId?: number }
+      if (typeof state.revision === 'string' && Array.isArray(state.pages)) state.documentId = p.doc
+    }
+    identify(data.result)
+    identify(data.result?.state)
+    p.resolve(data.result)
+  }
 }
 
 async function call(doc: number, method: string, args: unknown[]): Promise<unknown> {
@@ -43,7 +54,7 @@ async function call(doc: number, method: string, args: unknown[]): Promise<unkno
   const id = nextId++
   const transfer = args.filter((a): a is Uint8Array => a instanceof Uint8Array).map((a) => a.buffer)
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject })
+    pending.set(id, { doc, method, resolve, reject })
     worker.postMessage({ id, doc, method, args } satisfies Request, transfer)
   })
 }
@@ -56,6 +67,12 @@ let nextDoc = 2
 
 /** The id of the document `engine` currently talks to. */
 export const activeDocument = () => active
+
+/** Pending non-render work must finish before discarding its document. */
+export function hasPendingDocumentWork(doc?: number): boolean {
+  return [...pending.values()].some((request) =>
+    (doc === undefined || request.doc === doc) && !['render', 'setAuthor', 'closeDocument'].includes(request.method))
+}
 
 /** Makes `engine` (and renders that don't name a document) talk to another document. */
 export function setActiveDocument(doc: number) {
@@ -141,3 +158,4 @@ export function requestRender(pageId: number, scale: number, priority: number, s
   void pump()
   return { promise, cancel: () => job.cancel() }
 }
+

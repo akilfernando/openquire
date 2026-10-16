@@ -217,7 +217,7 @@ export function registerOpenQuireTools(server: McpServer, options: McpToolOption
             }
           }
           const savedBytes = engine.save({ compress: 'medium', security: { mode: 'keep' } })
-          writeFileSync(out, savedBytes)
+          writeFileSync(out, savedBytes, { flag: allowOverwrite || options.allowOverwrite ? 'w' : 'wx' })
           return filledList
         })
         return {
@@ -275,7 +275,7 @@ export function registerOpenQuireTools(server: McpServer, options: McpToolOption
           }
           const { count } = engine.applyRedactions()
           const savedBytes = engine.save({ compress: 'medium', security: { mode: 'keep' } })
-          writeFileSync(out, savedBytes)
+          writeFileSync(out, savedBytes, { flag: allowOverwrite || options.allowOverwrite ? 'w' : 'wx' })
           return { markedMatches: marked, permanentlyRedacted: count }
         })
         return {
@@ -328,7 +328,7 @@ export function registerOpenQuireTools(server: McpServer, options: McpToolOption
             engine.deletePages(pageIds)
           }
           const savedBytes = engine.save({ compress: 'medium', security: { mode: 'keep' } })
-          writeFileSync(out, savedBytes)
+          writeFileSync(out, savedBytes, { flag: allowOverwrite || options.allowOverwrite ? 'w' : 'wx' })
           return { originalPageCount: state.pages.length, newPageCount: engine.state().pages.length }
         })
         return {
@@ -458,7 +458,7 @@ export function registerOpenQuireTools(server: McpServer, options: McpToolOption
               airGapped,
             })
             const savedBytes = engine.save({ compress: 'medium', security: { mode: 'keep' } })
-            writeFileSync(out, savedBytes)
+            writeFileSync(out, savedBytes, { flag: allowOverwrite || options.allowOverwrite ? 'w' : 'wx' })
           })
           return {
             content: [
@@ -509,7 +509,7 @@ export function registerOpenQuireTools(server: McpServer, options: McpToolOption
 
         if (outputPath) {
           const out = resolveOutputPath(filePath, outputPath, 'markdown', allowedDirs, allowOverwrite || options.allowOverwrite, '.md')
-          writeFileSync(out, md, 'utf8')
+          writeFileSync(out, md, { encoding: 'utf8', flag: allowOverwrite || options.allowOverwrite ? 'w' : 'wx' })
           return {
             content: [
               {
@@ -527,4 +527,5 @@ export function registerOpenQuireTools(server: McpServer, options: McpToolOption
     }
   )
 }
+
 

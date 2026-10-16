@@ -1,8 +1,9 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as mupdf from 'mupdf'
+import { Engine } from '../src/engine/core'
 import { createOpenQuireMcpServer } from '../cli/src/mcp/server'
 import { SecurityError, validatePath } from '../cli/src/mcp/security'
 
@@ -174,5 +175,37 @@ describe('openquire mcp server', () => {
     expect(outJson.status).toBe('success')
     expect(readFileSync(outPath, 'utf8')).toContain('alice@example.com')
   })
+  it('does not overwrite a file created after output validation', async () => {
+    const outPath = join(tempDir, 'racing-output.pdf')
+    const server = createOpenQuireMcpServer({ allowedDirs: [tempDir] })
+    // @ts-expect-error test handler invocation
+    const tool = server._registeredTools['openquire_organize_pages']
+    const save = Engine.prototype.save
+    const spy = vi.spyOn(Engine.prototype, 'save').mockImplementationOnce(function (this: Engine, ...args: Parameters<Engine['save']>) {
+      writeFileSync(outPath, 'created by another writer')
+      return save.apply(this, args)
+    })
+    try {
+      const result = await tool.handler({ filePath: samplePdfPath, outputPath: outPath, rotations: [{ page: 1, degrees: 90 }] })
+      expect(result.isError).toBe(true)
+      expect(result.content[0].text).toContain('EEXIST')
+      expect(readFileSync(outPath, 'utf8')).toBe('created by another writer')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('still allows explicitly requested overwrites', async () => {
+    const outPath = join(tempDir, 'overwrite-output.pdf')
+    writeFileSync(outPath, 'replace me')
+    const server = createOpenQuireMcpServer({ allowedDirs: [tempDir] })
+    // @ts-expect-error test handler invocation
+    const tool = server._registeredTools['openquire_organize_pages']
+    const result = await tool.handler({ filePath: samplePdfPath, outputPath: outPath, allowOverwrite: true, rotations: [{ page: 1, degrees: 90 }] })
+    expect(result.isError).toBeFalsy()
+    expect(readFileSync(outPath, 'utf8')).toMatch(/^%PDF-/)
+  })
+
 })
+
 

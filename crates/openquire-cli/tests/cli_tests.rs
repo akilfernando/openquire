@@ -5,32 +5,8 @@ use std::process::Command;
 use tempfile::tempdir;
 
 fn binary_path() -> std::path::PathBuf {
-    let mut path = std::env::current_exe().unwrap();
-    path.pop(); // deps
-    if path.ends_with("deps") {
-        path.pop();
-    }
-    path.push("openquire");
-    if !path.exists() {
-        // Fallback to release or debug binary
-        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        p.pop();
-        p.pop();
-        p.push("target");
-        p.push("release");
-        p.push("openquire");
-        if p.exists() {
-            return p;
-        }
-        let mut d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        d.pop();
-        d.pop();
-        d.push("target");
-        d.push("debug");
-        d.push("openquire");
-        return d;
-    }
-    path
+    // Cargo supplies the binary built for this test invocation, including .exe on Windows.
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_openquire"))
 }
 
 fn create_pdf(text: &str) -> Vec<u8> {
@@ -44,6 +20,7 @@ fn create_pdf(text: &str) -> Vec<u8> {
     font_dict.set("Type", "Font");
     font_dict.set("Subtype", "Type1");
     font_dict.set("BaseFont", "Helvetica");
+    font_dict.set("Encoding", "WinAnsiEncoding");
     let font_id = doc.add_object(Object::Dictionary(font_dict));
 
     let content_ops = vec![
@@ -229,3 +206,239 @@ fn test_cli_sign() {
     let signed_file = dir.path().join("contract-signed.pdf");
     assert!(signed_file.exists());
 }
+
+#[test]
+fn unsupported_commands_leave_inputs_and_outputs_untouched() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    let original = create_pdf("Keep this document unchanged.");
+    fs::write(&input, &original).unwrap();
+
+    for command in ["pdfa", "tag", "ocr", "compress"] {
+        let destination = dir.path().join(command).join("output.pdf");
+        let output = Command::new(binary_path())
+            .arg(command).arg(&input).arg("-o").arg(&destination)
+            .output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{command}");
+        assert!(output.stdout.is_empty(), "{command}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("not supported"));
+        assert!(!destination.parent().unwrap().exists(), "{command}");
+        assert_eq!(fs::read(&input).unwrap(), original);
+    }
+
+    // Refusing an operation must also preserve an existing destination.
+    let output = Command::new(binary_path())
+        .arg("pdfa").arg(&input).arg("-o").arg(&input)
+        .output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(fs::read(&input).unwrap(), original);
+}
+
+#[test]
+fn office_exports_fail_without_creating_fake_office_files() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    fs::write(&input, create_pdf("Document text")).unwrap();
+    for format in ["docx", "xlsx"] {
+        let destination = dir.path().join(format).join(format!("output.{format}"));
+        let output = Command::new(binary_path())
+            .arg("export").arg(&input).args(["--to", format, "-o"])
+            .arg(&destination).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("not supported"));
+        assert!(!destination.parent().unwrap().exists());
+    }
+}
+
+#[test]
+fn text_and_html_exports_contain_extracted_text_in_the_correct_format() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    let text = "<script>alert('x')</script> & \"quoted\"";
+    fs::write(&input, create_pdf(text)).unwrap();
+
+    for format in ["txt", "html"] {
+        let destination = dir.path().join(format!("output.{format}"));
+        let output = Command::new(binary_path())
+            .arg("export").arg(&input).args(["--to", format, "-o"])
+            .arg(&destination).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let exported = fs::read_to_string(&destination).unwrap();
+        if format == "txt" {
+            assert!(exported.contains(text), "{exported:?}");
+        } else {
+            assert!(exported.starts_with("<!doctype html>"));
+            assert!(exported.contains("<meta charset=\"utf-8\">"));
+            assert!(exported.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; &quot;quoted&quot;"), "{exported:?}");
+            assert!(!exported.contains("<script>"));
+            assert!(exported.contains("</pre></body></html>"));
+        }
+    }
+}
+
+#[test]
+fn export_write_failures_return_nonzero_without_claiming_success() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    fs::write(&input, create_pdf("Document text")).unwrap();
+    // A file used as a parent fails reliably even under root and on Windows.
+    let blocked = dir.path().join("blocked");
+    fs::write(&blocked, b"preserve me").unwrap();
+    for format in ["txt", "html"] {
+        let destination = blocked.join(format!("output.{format}"));
+        let output = Command::new(binary_path())
+            .arg("export").arg(&input).args(["--to", format, "-o"])
+            .arg(&destination).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.is_empty());
+        assert!(!destination.exists());
+        assert_eq!(fs::read(&blocked).unwrap(), b"preserve me");
+    }
+}
+
+#[test]
+fn workflows_reject_unsupported_steps_before_writing_any_output() {
+    use serde_json::json;
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    let original = create_pdf("Original document");
+    fs::write(&input, &original).unwrap();
+    let workflow_path = dir.path().join("workflow.json");
+    let destination = dir.path().join("output").join("result.pdf");
+    for step in [
+        json!({"action": "pdfa", "part": 2}),
+        json!({"action": "ocr"}),
+        json!({"action": "rotate", "pages": "all", "delta": 90}),
+        json!({"action": "deletePages", "pages": "1"}),
+        json!({"action": "stamp", "pages": "all", "stamp": {
+            "template": "Reviewed", "position": "bc", "size": 10
+        }}),
+        json!({"action": "plugin", "plugin": "example", "command": "run"}),
+        json!({"action": "future-operation"}),
+        json!({"action": "markPatterns", "patterns": ["email"]}),
+        json!({"action": "markTerms", "terms": ["Original"]}),
+        json!({"action": "applyRedactions"}),
+    ] {
+        let workflow = json!({
+            "format": "openquire-workflow", "version": 1, "name": "Review",
+            "steps": [{"action": "setMeta", "meta": {"title": "Changed"}}, step.clone()]
+        });
+        fs::write(&workflow_path, workflow.to_string()).unwrap();
+        let output = Command::new(binary_path())
+            .arg("run").arg(&workflow_path).arg(&input).arg("-o").arg(&destination)
+            .output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{workflow}");
+        assert!(output.stdout.is_empty());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("Workflow step 2 is not supported"), "{error}");
+        assert!(!destination.parent().unwrap().exists());
+        assert_eq!(fs::read(&input).unwrap(), original);
+    }
+}
+
+#[test]
+fn supported_workflow_still_updates_metadata() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    fs::write(&input, create_pdf("Document text")).unwrap();
+    let workflow = dir.path().join("workflow.json");
+    fs::write(&workflow, r#"{
+        "format":"openquire-workflow","version":1,"name":"Review",
+        "steps":[{"action":"setMeta","meta":{"title":"Reviewed"}}]
+    }"#).unwrap();
+    let destination = dir.path().join("result.pdf");
+    let output = Command::new(binary_path())
+        .arg("run").arg(&workflow).arg(&input).arg("-o").arg(&destination)
+        .output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    let bytes = fs::read(&destination).unwrap();
+    let document = PdfDocument::open("result.pdf".to_string(), &bytes).unwrap();
+    assert_eq!(document.get_metadata().title.as_deref(), Some("Reviewed"));
+    assert!(document.extract_text().contains("Document text"));
+}
+
+#[test]
+fn unsupported_signature_timestamp_does_not_write_output() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    fs::write(&input, create_pdf("Document text")).unwrap();
+    let destination = dir.path().join("signed.pdf");
+    let output = Command::new(binary_path())
+        .arg("sign").arg(&input).args(["--timestamp", "https://example.invalid/tsa", "-o"])
+        .arg(&destination).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Timestamped signing"));
+    assert!(output.stdout.is_empty());
+    assert!(!destination.exists());
+}
+
+#[test]
+fn info_reports_unimplemented_checks_as_unknown() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    fs::write(&input, create_pdf("Document text")).unwrap();
+    let output = Command::new(binary_path()).arg("info").arg(&input).output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("pages: 1"));
+    for field in ["signatures", "tagged", "PDF/A", "form fields", "comments"] {
+        assert!(text.contains(&format!("{field}: unknown")), "{text}");
+    }
+}
+
+#[test]
+fn future_workflow_versions_fail_before_creating_output() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    fs::write(&input, create_pdf("Document text")).unwrap();
+    let workflow = dir.path().join("workflow.json");
+    fs::write(&workflow, r#"{
+        "format":"openquire-workflow","version":2,"name":"Future",
+        "steps":[{"action":"setMeta","meta":{"title":"Changed"}}]
+    }"#).unwrap();
+    let destination = dir.path().join("output").join("result.pdf");
+    let output = Command::new(binary_path())
+        .arg("run").arg(&workflow).arg(&input).arg("-o").arg(&destination)
+        .output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Unsupported workflow version: 2"));
+    assert!(output.stdout.is_empty());
+    assert!(!destination.parent().unwrap().exists());
+}
+
+#[test]
+fn mixed_redaction_workflows_fail_before_writing() {
+    use serde_json::json;
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("input.pdf");
+    let original = create_pdf("Secret contact: test@example.com");
+    fs::write(&input, &original).unwrap();
+    let workflow_path = dir.path().join("workflow.json");
+    let destination = dir.path().join("output").join("result.pdf");
+    for steps in [
+        json!([{"action": "markTerms", "terms": ["Secret"]}]),
+        json!([{"action": "markPatterns", "patterns": ["email"]}]),
+        json!([
+            {"action": "markTerms", "terms": ["Secret"]},
+            {"action": "applyRedactions"},
+            {"action": "setMeta", "meta": {"title": "Changed"}},
+            {"action": "markPatterns", "patterns": ["email"]}
+        ]),
+    ] {
+        let workflow = json!({
+            "format": "openquire-workflow", "version": 1, "name": "Redact", "steps": steps
+        });
+        fs::write(&workflow_path, workflow.to_string()).unwrap();
+        let output = Command::new(binary_path())
+            .arg("run").arg(&workflow_path).arg(&input).arg("-o").arg(&destination)
+            .output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{workflow}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Workflow step 1 is not supported"));
+        assert!(output.stdout.is_empty());
+        assert!(!destination.parent().unwrap().exists());
+        assert_eq!(fs::read(&input).unwrap(), original);
+    }
+}
+

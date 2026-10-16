@@ -1,0 +1,26 @@
+name: Desktop file replacement
+
+on:
+  pull_request:
+    paths: ['src-tauri/src/file_save*.rs', 'src-tauri/src/lib.rs', '.github/workflows/file-save.yml']
+  push:
+    branches: [main]
+    paths: ['src-tauri/src/file_save*.rs', 'src-tauri/src/lib.rs', '.github/workflows/file-save.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  filesystem:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # This module uses std only, so exercise real OS replacement semantics
+      # without requiring the desktop webview libraries in this focused job.
+      - run: rustc --edition=2021 --test src-tauri/src/file_save.rs -o file-save-tests.exe
+      - run: ./file-save-tests.exe --nocapture

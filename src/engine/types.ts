@@ -111,6 +111,10 @@ export interface SignatureInfo {
 
 export interface DocState {
   name: string
+  /** Content identity, stable through reads and undo back to a saved step. */
+  revision: string
+  /** Attached by the worker client so late replies cannot update a different tab. */
+  documentId?: number
   pages: PageInfo[]
   canUndo: boolean
   canRedo: boolean
@@ -277,3 +281,4 @@ export interface SanitizeOptions {
 }
 
 export type SanitizeReport = Record<'metadata' | 'attachments' | 'scripts' | 'comments' | 'links' | 'bookmarks' | 'formFields' | 'hiddenText' | 'hiddenLayers' | 'signatures', number>
+

@@ -77,6 +77,7 @@ self.onmessage = async ({ data }: MessageEvent<Request | { callbackReply: number
     }
     const transfer: Transferable[] = []
     if (result instanceof Uint8Array) transfer.push(result.buffer)
+    else if (method === 'saveSnapshot' && result && typeof result === 'object' && 'bytes' in result && result.bytes instanceof Uint8Array) transfer.push(result.bytes.buffer)
     self.postMessage({ id, result }, transfer)
   } catch (e) {
     const err = e as Error
@@ -90,3 +91,4 @@ self.onmessage = async ({ data }: MessageEvent<Request | { callbackReply: number
 // Messages that arrive while MuPDF's WebAssembly is still loading can be dropped, so the
 // client waits for this before sending anything.
 self.postMessage({ ready: true })
+

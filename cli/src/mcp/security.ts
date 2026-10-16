@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs'
-import { basename, dirname, extname, join, resolve } from 'node:path'
+import { lstatSync, realpathSync } from 'node:fs'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 export class SecurityError extends Error {
   constructor(message: string) {
@@ -21,32 +21,89 @@ export function normalizePath(p: string): string {
   return p
 }
 
-/**
- * Validates that target path is within one of the allowed directories.
- * Defaults to current working directory if allowedDirs is empty.
- */
-export function validatePath(filePath: string, allowedDirs: string[] = []): string {
-  const abs = resolve(normalizePath(filePath))
-  const roots = (allowedDirs.length > 0 ? allowedDirs : [process.cwd()]).map((d) => resolve(normalizePath(d)))
+function isWithin(target: string, root: string): boolean {
+  const rel = relative(root, target)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
 
-  const isAllowed = roots.some((root) => abs === root || abs.startsWith(root + '/'))
-  if (!isAllowed) {
+function permittedRoots(allowedDirs: string[]): string[] {
+  return (allowedDirs.length > 0 ? allowedDirs : [process.cwd()]).map((d) => resolve(normalizePath(d)))
+}
+
+function canonical(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    throw new SecurityError(`Cannot resolve path: "${path}". It must exist and be accessible.`)
+  }
+}
+
+function canonicalRoots(roots: string[]): string[] {
+  return roots.flatMap((root) => {
+    try {
+      return [realpathSync(root)]
+    } catch {
+      // A missing or inaccessible root grants no access, but must not disable
+      // a different explicitly permitted directory that is still available.
+      return []
+    }
+  })
+}
+
+function assertAllowed(target: string, roots: string[]): void {
+  if (!roots.some((root) => isWithin(target, root))) {
     throw new SecurityError(
-      `Access denied: "${filePath}" is outside permitted directories (${roots.join(', ')}). Use --allow-dir to permit additional paths.`
+      `Access denied: "${target}" is outside permitted directories (${roots.join(', ')}). Use --allow-dir to permit additional paths.`
     )
   }
+}
 
-  if (!existsSync(abs)) {
-    throw new SecurityError(`File not found: "${filePath}"`)
+// Unlike existsSync, lstat sees dangling symlinks, which must never be treated as
+// an available output filename. Permission and malformed-path errors fail closed.
+function entryExists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw new SecurityError(`Cannot inspect path: "${path}".`)
   }
+}
 
-  return abs
+/** Resolve links in an output's existing ancestors, even when its leaf is new. */
+function canonicalOutput(target: string): string {
+  const missing: string[] = []
+  let ancestor = target
+  while (!entryExists(ancestor)) {
+    missing.unshift(basename(ancestor))
+    const parent = dirname(ancestor)
+    if (parent === ancestor) throw new SecurityError(`Cannot resolve output: "${target}".`)
+    ancestor = parent
+  }
+  return resolve(canonical(ancestor), ...missing)
 }
 
 /**
- * Resolves a safe output path.
- * If outputPath is provided, validates that it falls within allowedDirs.
- * If not provided, generates a non-destructive filename (e.g. document-filled.pdf).
+ * Validate both the requested path and its real destination against allowed
+ * directories. Return the real path so callers do not reopen the original alias.
+ * Defaults to the current working directory if allowedDirs is empty.
+ */
+export function validatePath(filePath: string, allowedDirs: string[] = []): string {
+  const abs = resolve(normalizePath(filePath))
+  const roots = permittedRoots(allowedDirs)
+  assertAllowed(abs, roots)
+  if (!entryExists(abs)) throw new SecurityError(`File not found: "${filePath}"`)
+  const real = canonical(abs)
+  assertAllowed(real, canonicalRoots(roots))
+  return real
+}
+
+/**
+ * Resolve explicit and generated outputs against the same directory policy.
+ * Callers must use exclusive creation when allowOverwrite is false: validation
+ * does not reserve a filename. These path checks are not a defense against an
+ * adversary concurrently changing the filesystem during I/O (including a leaf
+ * symlink when overwriting is explicitly enabled).
  */
 export function resolveOutputPath(
   inputPath: string,
@@ -56,31 +113,28 @@ export function resolveOutputPath(
   allowOverwrite = false,
   extension?: string
 ): string {
-  const normInput = normalizePath(inputPath)
-  const roots = (allowedDirs.length > 0 ? allowedDirs : [process.cwd()]).map((d) => resolve(normalizePath(d)))
+  const normInput = resolve(normalizePath(inputPath))
+  const roots = permittedRoots(allowedDirs)
+  const dir = dirname(normInput)
+  const base = basename(normInput, extname(normInput))
+  const ext = extension ?? (extname(normInput) || '.pdf')
+  let target = outputPath ? resolve(normalizePath(outputPath)) : join(dir, `${base}-${suffix}${ext}`)
 
-  let target: string
-  if (outputPath) {
-    target = resolve(normalizePath(outputPath))
-    const isAllowed = roots.some((root) => target === root || target.startsWith(root + '/'))
-    if (!isAllowed) {
-      throw new SecurityError(`Access denied for output: "${outputPath}" is outside permitted directories.`)
+  assertAllowed(target, roots)
+  if (!outputPath && !allowOverwrite) {
+    let counter = 1
+    while (entryExists(target)) {
+      target = join(dir, `${base}-${suffix}-${counter++}${ext}`)
     }
-    if (!allowOverwrite && existsSync(target)) {
-      throw new SecurityError(
-        `Output file "${outputPath}" already exists. Set allowOverwrite or choose another path to prevent data loss.`
-      )
-    }
-  } else {
-    const dir = dirname(normInput)
-    const base = basename(normInput, extname(normInput))
-    const ext = extension ?? (extname(normInput) || '.pdf')
-    target = join(dir, `${base}-${suffix}${ext}`)
-    // If generated default exists, append timestamp or incremental counter to ensure non-destructive behavior
-    if (existsSync(target) && !allowOverwrite) {
-      target = join(dir, `${base}-${suffix}-${Date.now()}${ext}`)
-    }
+    assertAllowed(target, roots)
   }
 
-  return target
+  const real = canonicalOutput(target)
+  assertAllowed(real, canonicalRoots(roots))
+  if (!allowOverwrite && entryExists(real)) {
+    throw new SecurityError(
+      `Output file "${target}" already exists. Set allowOverwrite or choose another path to prevent data loss.`
+    )
+  }
+  return real
 }

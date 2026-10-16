@@ -5,6 +5,7 @@
 //! the operating system: on the command line, through file associations, or in a second launch.
 
 mod ai_detect;
+mod file_save;
 mod tools;
 
 use std::path::Path;
@@ -40,22 +41,18 @@ fn read_file(path: String) -> Result<Response, String> {
 /// Writes raw bytes to the path in the percent-encoded "path" header, via a temporary file so a
 /// failed write never leaves a half-written document.
 #[tauri::command]
-fn write_file(request: Request) -> Result<(), String> {
+async fn write_file(request: Request<'_>) -> Result<(), String> {
     let encoded = request
         .headers()
         .get("path")
         .and_then(|v| v.to_str().ok())
         .ok_or("No file path was given")?;
     let path = percent_decode_str(encoded).decode_utf8().map_err(|e| e.to_string())?.to_string();
-    let InvokeBody::Raw(bytes) = request.body() else {
-        return Err("Expected the file's bytes".into());
-    };
-    let tmp = format!("{path}.openquire-saving");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        e.to_string()
-    })
+    let bytes = raw_body(&request)?;
+    tauri::async_runtime::spawn_blocking(move || file_save::write_atomic(Path::new(&path), &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 /// Files opened from the operating system that the web app hasn't collected yet.
@@ -175,3 +172,4 @@ pub fn run() {
             }
         });
 }
+

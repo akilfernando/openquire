@@ -47,10 +47,11 @@ export interface RunResult {
 /** Runs a plugin command on a given document, for workflow steps from plugins. */
 export type PluginRunner = (plugin: string, command: string, doc: number) => Promise<unknown>
 
-export async function runOnDocument(doc: number, wf: Workflow, bates: number | undefined, ocr: OcrOptions, plugins?: PluginRunner): Promise<RunResult> {
+export async function runOnDocument(doc: number, wf: Workflow, bates: number | undefined, ocr: OcrOptions, plugins?: PluginRunner, onStep?: (step: number, total: number) => void): Promise<RunResult> {
   const engine = engineFor(doc)
   const result: RunResult = { state: null, bates, notes: [] }
-  for (const step of wf.steps) {
+  for (const [index, step] of wf.steps.entries()) {
+    onStep?.(index + 1, wf.steps.length)
     if (step.action === 'ocr') {
       const ids = await engine.pagesWithoutText()
       if (!ids.length) continue
@@ -78,25 +79,37 @@ export interface BatchResult {
   zip: Uint8Array
   done: number
   failed: { name: string; error: string }[]
+  cancelled: boolean
+  skipped: string[]
+}
+
+export interface BatchControls {
+  signal?: AbortSignal
+  onStage?: (name: string, stage: string) => void
 }
 
 /**
  * Runs a workflow on each file in turn and collects the results in a zip, with a report of any
  * files that failed. Bates numbering continues from one file to the next.
  */
-export async function runBatch(files: File[], wf: Workflow, ocr: OcrOptions, onProgress: (done: number, total: number, name: string) => void, plugins?: PluginRunner): Promise<BatchResult> {
+export async function runBatch(files: File[], wf: Workflow, ocr: OcrOptions, onProgress: (done: number, total: number, name: string) => void, plugins?: PluginRunner, controls: BatchControls = {}): Promise<BatchResult> {
   const out: Record<string, Uint8Array> = {}
   const failed: BatchResult['failed'] = []
   let bates: number | undefined
   const used = new Set<string>()
+  const skipped: string[] = []
   for (const [i, file] of files.entries()) {
+    // Finish the current document before stopping: never publish a half-run output.
+    if (controls.signal?.aborted) { skipped.push(...files.slice(i).map((entry) => entry.name)); break }
     onProgress(i, files.length, file.name)
+    controls.onStage?.(file.name, 'Opening')
     const doc = newDocument()
     try {
       const engine = engineFor(doc)
       const state = await engine.open(file.name, new Uint8Array(await file.arrayBuffer()))
-      const r = await runOnDocument(doc, wf, bates, ocr, plugins)
+      const r = await runOnDocument(doc, wf, bates, ocr, plugins, (step, total) => controls.onStage?.(file.name, `Step ${step} of ${total}`))
       bates = r.bates
+      controls.onStage?.(file.name, 'Preparing output')
       const bytes = r.bytes ?? (await engine.save({ compress: 'standard', security: { mode: 'keep' } }))
       // Two inputs with the same name would otherwise overwrite each other in the zip.
       let name = `${state.name}.pdf`
@@ -107,10 +120,16 @@ export async function runBatch(files: File[], wf: Workflow, ocr: OcrOptions, onP
       const err = e as Error
       failed.push({ name: file.name, error: err.name === 'PasswordError' ? 'The file is password protected.' : err.message })
     } finally {
-      void closeDocument(doc)
+      await closeDocument(doc)
     }
   }
   onProgress(files.length, files.length, '')
   if (failed.length) out['failed.txt'] = new TextEncoder().encode(failed.map((f) => `${f.name}: ${f.error}`).join('\n') + '\n')
-  return { zip: zipSync(out, { level: 0 }), done: files.length - failed.length, failed }
+  const done = used.size
+  const cancelled = !!controls.signal?.aborted
+  out['batch-report.json'] = new TextEncoder().encode(JSON.stringify({
+    workflow: wf.name, total: files.length, done, failed, cancelled, skipped,
+    outputs: Object.keys(out).filter((name) => name.endsWith('.pdf')),
+  }, null, 2))
+  return { zip: zipSync(out, { level: 0 }), done, failed, cancelled, skipped }
 }
