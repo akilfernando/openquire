@@ -20,6 +20,7 @@ fn create_pdf(text: &str) -> Vec<u8> {
     font_dict.set("Type", "Font");
     font_dict.set("Subtype", "Type1");
     font_dict.set("BaseFont", "Helvetica");
+    font_dict.set("Encoding", "WinAnsiEncoding");
     let font_id = doc.add_object(Object::Dictionary(font_dict));
 
     let content_ops = vec![
@@ -265,11 +266,11 @@ fn text_and_html_exports_contain_extracted_text_in_the_correct_format() {
         assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
         let exported = fs::read_to_string(&destination).unwrap();
         if format == "txt" {
-            assert!(exported.contains(text));
+            assert!(exported.contains(text), "{exported:?}");
         } else {
             assert!(exported.starts_with("<!doctype html>"));
             assert!(exported.contains("<meta charset=\"utf-8\">"));
-            assert!(exported.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; &quot;quoted&quot;"));
+            assert!(exported.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; &quot;quoted&quot;"), "{exported:?}");
             assert!(!exported.contains("<script>"));
             assert!(exported.contains("</pre></body></html>"));
         }
