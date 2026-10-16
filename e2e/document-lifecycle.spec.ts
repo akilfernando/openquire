@@ -13,6 +13,14 @@ async function savedName(bytes: Uint8Array) {
   return (await PDFDocument.load(bytes)).getForm().getTextField('full_name').getText()
 }
 
+async function beforeUnloadPrevented(page: Page) {
+  return page.evaluate(() => {
+    const event = new BeforeUnloadEvent('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })
+}
+
 // Delay only delivery of the save response, after the worker captured its bytes.
 // This keeps the real engine and UI in use while making the race deterministic.
 async function delaySaveResponses(page: Page) {
@@ -121,4 +129,38 @@ test('a failed download leaves the document open and dirty', async ({ page }) =>
   await expect(page.locator('.status-bar')).toContainText('Injected output failure')
   await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toBeVisible()
   await expect(page.locator('.widget.text')).toHaveValue('Keep this edit')
+})
+
+test('beforeunload is prevented for dirty documents and allowed at the saved revision', async ({ page }) => {
+  await openReport(page)
+  expect(await beforeUnloadPrevented(page)).toBe(false)
+
+  await editName(page, 'Saved revision')
+  expect(await beforeUnloadPrevented(page)).toBe(true)
+
+  const download = page.waitForEvent('download')
+  await page.keyboard.press('Control+s')
+  await download
+  await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toHaveCount(0)
+  expect(await beforeUnloadPrevented(page)).toBe(false)
+})
+
+test('undo back to the saved revision clears the dirty marker and redo restores it', async ({ page }) => {
+  await openReport(page)
+  await editName(page, 'Saved revision')
+
+  const download = page.waitForEvent('download')
+  await page.keyboard.press('Control+s')
+  await download
+  await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toHaveCount(0)
+
+  await editName(page, 'Later revision')
+  await page.locator('.status-bar').click()
+  await page.keyboard.press('Control+z')
+  await expect(page.locator('.widget.text')).toHaveValue('Saved revision')
+  await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toHaveCount(0)
+
+  await page.keyboard.press('Control+y')
+  await expect(page.locator('.widget.text')).toHaveValue('Later revision')
+  await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toBeVisible()
 })
