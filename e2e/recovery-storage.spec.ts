@@ -264,3 +264,80 @@ test('purging through the privacy module deletes both key and recovery stores', 
   expect(result.before.stores).toEqual(['keys', 'recovery'])
   expect(result.storesAfter).toEqual([])
 })
+
+test('listing removes expired checkpoints from the IndexedDB store', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async (code) => {
+    const { setRecoveryConsent, writeRecovery, listRecovery } = new Function(`${code}; return recoveryTest;`)()
+    setRecoveryConsent(true)
+    await writeRecovery('doc-1', { name: 'Expired report', revision: 'r1', bytes: new Uint8Array([1, 2]) }, () => true)
+
+    await new Promise<void>((resolve, reject) => {
+      // Open without a version to match the production vault schema.
+      const request = indexedDB.open('openquire_vault')
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => {
+        const db = request.result
+        const tx = db.transaction('recovery', 'readwrite')
+        const store = tx.objectStore('recovery')
+        const get = store.get('doc-1')
+        get.onerror = () => reject(get.error)
+        get.onsuccess = () => {
+          const record = get.result
+          record.updated = Date.now() - 8 * 24 * 60 * 60 * 1000
+          store.put(record, 'doc-1')
+        }
+        tx.oncomplete = () => { db.close(); resolve() }
+        tx.onerror = () => reject(tx.error)
+      }
+    })
+
+    const entries = await listRecovery()
+    const remaining = await new Promise<number>((resolve, reject) => {
+      const request = indexedDB.open('openquire_vault')
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => {
+        const db = request.result
+        const tx = db.transaction('recovery', 'readonly')
+        const count = tx.objectStore('recovery').count()
+        tx.oncomplete = () => { db.close(); resolve(count.result) }
+        tx.onerror = () => reject(tx.error)
+      }
+    })
+    return { entries, remaining }
+  }, recoveryCode)
+
+  expect(result.entries).toEqual([])
+  expect(result.remaining).toBe(0)
+})
+
+test('a quota error during replacement rejects and preserves the previous checkpoint', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async (code) => {
+    const { setRecoveryConsent, writeRecovery, readRecovery } = new Function(`${code}; return recoveryTest;`)()
+    setRecoveryConsent(true)
+    await writeRecovery('doc-1', { name: 'Original', revision: 'r1', bytes: new Uint8Array([3, 4, 5]) }, () => true)
+
+    const originalPut = IDBObjectStore.prototype.put
+    IDBObjectStore.prototype.put = function (...args: Parameters<typeof originalPut>) {
+      throw new DOMException('Injected quota failure', 'QuotaExceededError')
+    } as typeof originalPut
+    let error = ''
+    let errorName = ''
+    try {
+      await writeRecovery('doc-1', { name: 'Replacement', revision: 'r2', bytes: new Uint8Array([8, 9]) }, () => true)
+    } catch (caught) {
+      error = (caught as Error).message
+      errorName = (caught as DOMException).name
+    } finally {
+      IDBObjectStore.prototype.put = originalPut
+    }
+
+    const previous = await readRecovery('doc-1')
+    return { error, errorName, name: previous.name, revision: previous.revision, bytes: Array.from(previous.bytes) }
+  }, recoveryCode)
+
+  expect(result.error).toContain('Injected quota failure')
+  expect(result.errorName).toBe('QuotaExceededError')
+  expect(result).toMatchObject({ name: 'Original', revision: 'r1', bytes: [3, 4, 5] })
+})

@@ -20,7 +20,7 @@ function consent(): string {
   try { return localStorage.getItem(RECOVERY_CONSENT_KEY) ?? '' } catch { return '' }
 }
 
-async function transaction<T>(mode: IDBTransactionMode, revision: string, work: (store: IDBObjectStore, done: (value: T) => void) => void): Promise<T> {
+async function transaction<T>(mode: IDBTransactionMode, revision: string, work: (store: IDBObjectStore, done: (value: T) => void, fail: (error: unknown) => void) => void): Promise<T> {
   const db = await openPrivateDb(revision)
   try {
     return await new Promise<T>((resolve, reject) => {
@@ -29,8 +29,9 @@ async function transaction<T>(mode: IDBTransactionMode, revision: string, work: 
       tx.oncomplete = () => resolve(value)
       tx.onerror = () => reject(tx.error ?? new Error('Recovery storage failed.'))
       tx.onabort = () => reject(tx.error ?? new Error('Recovery storage was interrupted.'))
-      try { work(tx.objectStore(STORE), (result) => { value = result }) }
-      catch (error) { tx.abort(); reject(error) }
+      const fail = (error: unknown) => { tx.abort(); reject(error) }
+      try { work(tx.objectStore(STORE), (result) => { value = result }, fail) }
+      catch (error) { fail(error) }
     })
   } finally { db.close() }
 }
@@ -63,9 +64,10 @@ export async function writeRecovery(id: string, snapshot: RecoverySnapshot, vali
   try { encrypted = await encryptPrivateBytes(packed, `openquire-recovery:${id}`, revision) }
   finally { packed.fill(0) }
   if (!current(epoch, revision) || consent() !== permission || !valid()) return false
-  return transaction<boolean>('readwrite', revision, (store, done) => {
+  return transaction<boolean>('readwrite', revision, (store, done, fail) => {
     const request = store.getAll()
     request.onsuccess = () => {
+      try {
       if (!current(epoch, revision) || consent() !== permission || !valid()) { done(false); return }
       const replacement: Record = { id, updated: Date.now(), encrypted }
       const remaining = (request.result as Record[]).filter((record) => record.id !== id && !expired(record)).sort((a, b) => b.updated - a.updated)
@@ -80,6 +82,7 @@ export async function writeRecovery(id: string, snapshot: RecoverySnapshot, vali
       for (const record of request.result as Record[]) if (!ids.has(record.id)) store.delete(record.id)
       store.put(replacement, id)
       done(true)
+      } catch (error) { fail(error) }
     }
   })
 }

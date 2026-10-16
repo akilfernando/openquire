@@ -2350,7 +2350,7 @@ export default function App() {
       />}
       {recoveryOpen && recoveries.length > 0 && <RecoveryDialog entries={recoveries} busy={recoveryBusy} error={recoveryError}
         onRestore={(id) => void restoreCheckpoint(id)} onDiscard={(id) => void discardCheckpoint(id)} onLater={() => setRecoveryOpen(false)} />}
-      {batchProgress && <Modal title="Processing files" onClose={() => {}}>
+      {batchProgress && <Modal title="Processing files" onClose={() => { batchController.current?.abort(); setBatchStopping(true) }}>
         <p role="status">{batchProgress}</p>
         <p>Stopping finishes the current file, then skips the rest. Completed outputs and a report are prepared as a download.</p>
         <button disabled={batchStopping} onClick={() => { batchController.current?.abort(); setBatchStopping(true) }}>

@@ -64,6 +64,10 @@ version and distribution integrity. Its successful result is required to state
 publication status; an open issue or an inaccessible web page is not evidence
 that the package is unpublished. No package publication is performed by this PR.
 
+The [registry audit on 16 October 2026](https://github.com/akilfernando/openquire/actions/runs/38883315921)
+reported public `latest` as **1.0.2**, while the source manifest targets **1.0.3**.
+Installing `openquire@latest` therefore does not install this development branch.
+
 ## Final pilot and release gates
 
 - [ ] Integrated full CI, tarball consumer smoke, all platform builds and filesystem checks pass on the intended merge commit.

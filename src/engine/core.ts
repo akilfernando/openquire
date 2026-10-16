@@ -2378,7 +2378,7 @@ export class Engine {
   setTrustedCertificates(pems: string[]) {
     this.trusted = pems
     this.anchorCache = null
-    if (this.doc && this.signatures.length) this.signatures = verifySignatures(this.bytes, this.d, this.anchors())
+    if (this.doc && this.signatures.length && !this.requiresFullRewrite) this.signatures = verifySignatures(this.bytes, this.d, this.anchors())
     return this.doc ? this.state() : null
   }
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Engine } from '../src/engine/core'
+import { createDigitalId } from '../src/engine/signing'
+import { PDFDocument, PDFDict, PDFName, PDFString } from 'pdf-lib'
 
 const saveOptions = { compress: 'none' as const, security: { mode: 'keep' as const } }
 
@@ -10,6 +12,27 @@ function blank() {
 }
 
 describe('document content revisions', () => {
+  it('does not reuse a signed save from a discarded branch at the same journal position', async () => {
+    const { engine } = blank()
+    const p12 = await createDigitalId({ name: 'Revision signer', password: 'fixture-only' })
+    await engine.sign({ p12, password: 'fixture-only', pageId: null })
+    const id = engine.pageIds()[0]
+    const annotate = (text: string) => engine.addAnnot(id, { type: 'Text', at: [10, 10], text, color: [1, 1, 0] })
+    annotate('Discarded branch')
+    const first = engine.saveSnapshot(saveOptions)
+    engine.undo()
+    annotate('Current branch')
+    const second = engine.saveSnapshot(saveOptions)
+    expect(second.revision).not.toBe(first.revision)
+    const parsed = await PDFDocument.load(second.bytes)
+    const contents = (parsed.getPages()[0].node.Annots()?.asArray() ?? []).map((ref) => {
+      const value = parsed.context.lookup(ref, PDFDict).get(PDFName.of('Contents'))
+      return value instanceof PDFString ? value.decodeText() : ''
+    })
+    expect(contents).toContain('Current branch')
+    expect(contents).not.toContain('Discarded branch')
+    engine.close()
+  })
   it('keeps reads stable and follows edits, undo, redo, and divergent branches', () => {
     const { engine, state } = blank()
     const initial = state.revision

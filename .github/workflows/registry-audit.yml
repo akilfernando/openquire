@@ -17,3 +17,5 @@ jobs:
       - name: Record source component versions
         run: |
           node -e "for (const path of ['package.json', 'cli/package.json', 'src-tauri/tauri.conf.json']) { const v = require('./' + path); console.log(path + ': ' + v.version) }"
+      - name: Read all published versions
+        run: npm view openquire versions --json
