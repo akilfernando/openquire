@@ -33,8 +33,11 @@ import { WHILE_TYPING, commandFor, comboOf, displayCombo, effectiveHotkeys } fro
 import { OFFICE_EXTENSIONS, addRecent, fileName, isDesktop, nativeConvert, nativeTools, pickFiles, readPath, recentFiles, removeRecent, saveAs, tokenSign, watchOpenedFiles, writePath, type TokenKey } from './native'
 import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } from './workflows'
 import SignatureDialog from './components/SignatureDialog'
+import UnsavedDialog from './components/UnsavedDialog'
+import { DocumentSessions } from './document-sessions'
+import { watchWindowClose, closeNativeWindow } from './native'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
-import { EngineError, setTokenSigner, activeDocument, requestRender, closeDocument, engine, engineFor, newDocument, setActiveDocument } from './engine/client'
+import { EngineError, setTokenSigner, activeDocument, requestRender, closeDocument, engine, engineFor, newDocument, setActiveDocument, hasPendingDocumentWork } from './engine/client'
 import { parseRanges } from './engine/ranges'
 import { rgbOf, type DocState, type FieldKind, type LinkInfo, type Point, type Quad, type Rect, type WidgetInfo, type SaveOptions, type SearchHit, type StampSpec } from './engine/types'
 import { arrowNavigate } from './focus'
@@ -112,6 +115,15 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(!narrowQuery.matches && (saved.rightOpen ?? true))
   const [commentFocus, setCommentFocus] = useState<number | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const sessions = useRef(new DocumentSessions())
+  const pendingOperations = useRef(new Map<number, number>())
+  const blockingTabOperations = useRef(0)
+  const savingDocuments = useRef(new Set<number>())
+  const nativeCloseAllowed = useRef(false)
+  const [, setSessionTick] = useState(0)
+  const [closePrompt, setClosePrompt] = useState<{ id: number } | { window: true } | null>(null)
+  const [closingSave, setClosingSave] = useState(false)
+  const [closingError, setClosingError] = useState('')
   const [status, setStatus] = useState('')
   const [statusError, setStatusError] = useState('')
   const [signing, setSigning] = useState(false)
@@ -134,7 +146,12 @@ export default function App() {
   settingsWriter.current ??= new SettingsWriter<Settings>({ initial: settings })
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
   const [pwPrompt, setPwPrompt] = useState<{ file: string; retry: boolean; resolve: (p: string | null) => void } | null>(null)
-  const [saveOpts, setSaveOpts] = useState<SaveOptions>({ compress: 'standard', security: { mode: 'keep' } })
+  const [saveOpts, setSaveOptsState] = useState<SaveOptions>({ compress: 'standard', security: { mode: 'keep' } })
+  const saveOptions = useRef(new Map<number, SaveOptions>())
+  const setSaveOpts = (options: SaveOptions) => {
+    saveOptions.current.set(activeDocument(), options)
+    setSaveOptsState(options)
+  }
   const [findOpen, setFindOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<SearchHit[] | null>(null)
@@ -351,7 +368,9 @@ export default function App() {
 
   // ---- engine plumbing ----------------------------------------------------------------
 
-  const run = useCallback(async (label: string, fn: () => Promise<void>) => {
+  const run = useCallback(async (label: string, fn: () => Promise<void>, id = activeDocument()) => {
+    pendingOperations.current.set(id, (pendingOperations.current.get(id) ?? 0) + 1)
+    if (label !== m.busy.saving) blockingTabOperations.current++
     setBusy(label)
     setStatus('')
     try {
@@ -362,12 +381,22 @@ export default function App() {
       setStatus(text)
       setStatusError(text)
     } finally {
-      setBusy(null)
+      const left = (pendingOperations.current.get(id) ?? 1) - 1
+      if (left) pendingOperations.current.set(id, left)
+      else pendingOperations.current.delete(id)
+      if (label !== m.busy.saving) blockingTabOperations.current--
+      if (!pendingOperations.current.size) setBusy(null)
     }
   }, [])
 
   /** Applies a state returned by the engine, dropping selections that no longer exist. */
   const apply = useCallback((s: DocState) => {
+    const id = s.documentId ?? activeDocument()
+    if (!sessions.current.has(id)) return
+    sessions.current.update(id, s.revision)
+    setTabs((tabs) => tabs.map((tab) => tab.id === id ? { ...tab, name: s.name } : tab))
+    setSessionTick((tick) => tick + 1)
+    if (id !== activeDocument()) return
     setDoc(s)
     // Any change to the document makes a comparison out of date.
     setComparison(null)
@@ -404,7 +433,7 @@ export default function App() {
   }
 
   /** Loads a document into a new tab, or returns to the previous tab if loading fails or is cancelled. */
-  const inNewTab = async (load: () => Promise<DocState | null>) => {
+  const inNewTab = async (load: () => Promise<DocState | null>, alreadySaved = true) => {
     const prev = activeDocument()
     const id = newDocument()
     setActiveDocument(id)
@@ -425,6 +454,7 @@ export default function App() {
     setActiveDocument(prev)
     stashView()
     setActiveDocument(id)
+    sessions.current.open(id, s.revision, alreadySaved)
     setTabs((t) => [...t, { id, name: s.name }])
     setActive(id)
     resetView()
@@ -438,12 +468,17 @@ export default function App() {
     })
   }
 
-  const switchTab = (id: number) =>
-    run(m.busy.opening, async () => {
+  const switchTab = (id: number) => {
+    if (blockingTabOperations.current) {
+      setStatus('Wait for the current document operation to finish before switching tabs.')
+      return Promise.resolve()
+    }
+    return run(m.busy.opening, async () => {
       if (id === activeDocument() && docRef.current) return
       stashView()
       setActiveDocument(id)
       setActive(id)
+      setSaveOpts(saveOptions.current.get(id) ?? { compress: 'standard', security: { mode: 'keep' } })
       setSide((sp) => (sp?.id === id ? null : sp))
       resetView()
       apply(await engine.state())
@@ -452,13 +487,17 @@ export default function App() {
         setZoom(v.zoom)
         requestAnimationFrame(() => mainRef.current?.scrollTo(0, v.scroll))
       }
-    })
+    }, id)
+  }
 
-  const closeTab = (id: number) => {
+  const removeTab = (id: number) => {
     const index = tabs.findIndex((t) => t.id === id)
     const rest = tabs.filter((t) => t.id !== id)
     setTabs(rest)
     views.current.delete(id)
+    paths.current.delete(id)
+    saveOptions.current.delete(id)
+    sessions.current.close(id)
     setSide((sp) => (sp?.id === id ? null : sp))
     if (id === activeDocument()) {
       if (rest.length) void switchTab(rest[Math.max(0, index - 1)].id)
@@ -470,6 +509,21 @@ export default function App() {
       }
     }
     void closeDocument(id)
+  }
+
+  const documentWorking = (id?: number) =>
+    (id === undefined ? pendingOperations.current.size > 0 || savingDocuments.current.size > 0
+      : !!pendingOperations.current.get(id) || savingDocuments.current.has(id)) || hasPendingDocumentWork(id)
+
+  const closeTab = (id: number) => {
+    if (documentWorking(id)) {
+      setStatus('Wait for this document operation to finish before closing.')
+      return
+    }
+    if (sessions.current.dirty(id)) {
+      setClosingError('')
+      setClosePrompt({ id })
+    } else removeTab(id)
   }
 
   const openSide = (id: number) =>
@@ -950,29 +1004,104 @@ export default function App() {
     // Registered once at startup.
   }, [])
 
-  const newBlank = () => run(m.busy.creating, () => inNewTab(() => engine.newBlank()))
+  const newBlank = () => run(m.busy.creating, () => inNewTab(() => engine.newBlank(), false))
 
-  const save = () =>
-    run(m.busy.saving, async () => {
-      const bytes = await engine.save(saveOpts)
+  const saveDocument = async (id: number): Promise<boolean> => {
+    if (!sessions.current.has(id) || savingDocuments.current.has(id)) return false
+    savingDocuments.current.add(id)
+    try {
+      const options = saveOptions.current.get(id) ?? { compress: 'standard' as const, security: { mode: 'keep' as const } }
+      const remote = engineFor(id)
+      const { bytes, revision, name } = await remote.saveSnapshot(options)
       if (isDesktop) {
         // Save in place when the document came from a PDF on disk; otherwise ask where.
-        const id = activeDocument()
         let path = paths.current.get(id)
         if (path && /\.pdf$/i.test(path)) await writePath(path, bytes)
         else {
-          path = (await saveAs(`${docRef.current!.name}.pdf`, bytes)) ?? undefined
-          if (!path) return
+          path = (await saveAs(`${name}.pdf`, bytes)) ?? undefined
+          if (!path) return false
           paths.current.set(id, path)
           setRecent(addRecent(path))
         }
-      } else download(bytes, `${docRef.current!.name}.pdf`)
+      } else download(bytes, `${name}.pdf`)
+      sessions.current.markSaved(id, revision)
+      setSessionTick((tick) => tick + 1)
       // Passwords aren't recorded: a shared workflow file would reveal them.
-      if (saveOpts.security.mode !== 'set') record({ action: 'save', options: saveOpts })
+      if (options.security.mode !== 'set') record({ action: 'save', options })
       // Signed documents are reloaded after an incremental save, so refresh their state.
-      if (docRef.current!.signatures.length) apply(await engine.state())
-      setStatus(m.status.saved(`${docRef.current!.name}.pdf`, kb(bytes.length)))
+      apply(await remote.state())
+      setStatus(isDesktop ? m.status.saved(`${name}.pdf`, kb(bytes.length)) : `Download prepared: ${name}.pdf (${kb(bytes.length)}).`)
+      return true
+    } finally {
+      savingDocuments.current.delete(id)
+    }
+  }
+
+  const save = () => {
+    const id = activeDocument()
+    return run(m.busy.saving, async () => { await saveDocument(id) }, id)
+  }
+
+  const finishClose = async (saveFirst: boolean) => {
+    if (!closePrompt || closingSave) return
+    setClosingError('')
+    const ids = 'id' in closePrompt ? [closePrompt.id] : sessions.current.dirtyIds()
+    if (ids.some((id) => documentWorking(id))) {
+      setClosingError('Wait for the document operation to finish, then try again.')
+      return
+    }
+    setClosingSave(true)
+    try {
+      if (saveFirst) {
+        for (const id of ids) {
+          if (!await saveDocument(id)) return
+          if (sessions.current.dirty(id)) {
+            setClosingError('More changes were made while saving. Save again or keep editing.')
+            return
+          }
+        }
+      }
+      if (saveFirst && 'window' in closePrompt && sessions.current.dirtyIds().length) {
+        setClosingError('More changes were made while saving. Save again or keep editing.')
+        return
+      }
+      if ('id' in closePrompt) removeTab(closePrompt.id)
+      else {
+        nativeCloseAllowed.current = true
+        try { await closeNativeWindow() }
+        catch (error) { nativeCloseAllowed.current = false; throw error }
+      }
+      setClosePrompt(null)
+    } catch (error) {
+      setClosingError(error instanceof Error ? error.message : 'The document could not be saved. It remains open.')
+    } finally {
+      setClosingSave(false)
+    }
+  }
+
+  useEffect(() => {
+    const needsGuard = () => sessions.current.dirtyIds().length > 0 || documentWorking()
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (nativeCloseAllowed.current) return
+      if (!needsGuard()) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    if (isDesktop) void watchWindowClose(
+      () => !nativeCloseAllowed.current && needsGuard(),
+      () => {
+        if (documentWorking()) setStatus('Wait for the document operation to finish before closing the window.')
+        else { setClosingError(''); setClosePrompt({ window: true }) }
+      }
+    ).then((stop) => { if (disposed) stop(); else unlisten = stop }).catch((error: unknown) => {
+      const text = `Window close protection could not start: ${error instanceof Error ? error.message : String(error)}`
+      setStatus(text); setStatusError(text)
     })
+    return () => { disposed = true; unlisten?.(); window.removeEventListener('beforeunload', beforeUnload) }
+  }, [])
 
   const closeDoc = () => closeTab(activeDocument())
 
@@ -1567,6 +1696,7 @@ export default function App() {
 
   const keys = useRef<(e: KeyboardEvent) => void>()
   keys.current = (e) => {
+    if (closePrompt) return
     // The Hotkeys settings tab records presses itself.
     if ((e.target as Element).closest?.('[data-recording-hotkey]')) return
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as Element).tagName) || (e.target as HTMLElement).isContentEditable
@@ -1620,6 +1750,7 @@ export default function App() {
       style={{ ['--accent-h' as string]: settings.accentHue }}
       onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
       onDrop={(e) => {
+        if (closePrompt) { e.preventDefault(); return }
         if (!e.dataTransfer.files.length) return
         e.preventDefault()
         void openFiles([...e.dataTransfer.files], !!doc)
@@ -1698,6 +1829,7 @@ export default function App() {
                 <button aria-current={isActive ? 'page' : undefined} className="tab-title" onClick={() => void switchTab(t.id)}>
                   <FileText size={16} className="faint" />
                   <span className="label">{name}</span>
+                  {sessions.current.dirty(t.id) && <span aria-label="Unsaved changes" title="Unsaved changes">●</span>}
                 </button>
                 {!isActive && (
                   <button className="clickable-icon tab-side" aria-label={m.workspace.openToSide(name)} title={m.workspace.openToSideShort} onClick={() => void openSide(t.id)}>
@@ -1953,6 +2085,7 @@ export default function App() {
       </div>
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
+
       {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onPurge={purgePrivateData} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
         plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} onOpenWizard={() => setShowOnboarding(true)} />}
       {showOnboarding && (
@@ -2049,7 +2182,12 @@ export default function App() {
       )}
       {consent && <AiConsentDialog host={consent.host} items={consent.items} onAnswer={consent.answer} />}
       {pwPrompt && <PasswordDialog file={pwPrompt.file} retry={pwPrompt.retry} onDone={pwPrompt.resolve} />}
-      {busy && <div className="busy" />}
+      {busy && blockingTabOperations.current > 0 && <div className="busy" />}
+      {closePrompt && <UnsavedDialog
+        names={('id' in closePrompt ? [closePrompt.id] : sessions.current.dirtyIds()).map((id) => tabs.find((tab) => tab.id === id)?.name ?? 'document')}
+        saving={closingSave} error={closingError} onCancel={() => setClosePrompt(null)}
+        onDiscard={() => void finishClose(false)} onSave={() => void finishClose(true)}
+      />}
     </div>
   )
 }
