@@ -35,6 +35,8 @@ import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } f
 import SignatureDialog from './components/SignatureDialog'
 import UnsavedDialog from './components/UnsavedDialog'
 import { DocumentSessions } from './document-sessions'
+import { clearRecovery, discardRecovery, invalidateRecovery, listRecovery, readRecovery, RECOVERY_CONSENT_KEY, setRecoveryConsent, writeRecovery, type RecoveryEntry } from './recovery'
+import RecoveryDialog from './components/RecoveryDialog'
 import { watchWindowClose, closeNativeWindow } from './native'
 import ToolsPanel, { type PanelActions } from './components/ToolsPanel'
 import { EngineError, setTokenSigner, activeDocument, requestRender, closeDocument, engine, engineFor, newDocument, setActiveDocument, hasPendingDocumentWork } from './engine/client'
@@ -76,7 +78,9 @@ function loadSettings(): Settings {
   }
   try {
     const legacyAuthor = localStorage.getItem('openquire.author') ?? ''
-    return { ...fallback, author: legacyAuthor, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') }
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}')
+    return { ...fallback, author: legacyAuthor, ...stored,
+      recoveryEnabled: stored.recoveryEnabled === true && (localStorage.getItem(RECOVERY_CONSENT_KEY) ?? '').startsWith('enabled:') }
   } catch {
     return fallback
   }
@@ -124,6 +128,15 @@ export default function App() {
   const [closePrompt, setClosePrompt] = useState<{ id: number } | { window: true } | null>(null)
   const [closingSave, setClosingSave] = useState(false)
   const [closingError, setClosingError] = useState('')
+  const recoveryKeys = useRef(new Map<number, string>())
+  const recoveryMeta = useRef(new Map<number, { revision: string; encrypted: boolean }>())
+  const checkpointed = useRef(new Map<number, string>())
+  const recoveryFailures = useRef(new Map<number, string>())
+  const checkpointRunning = useRef(false)
+  const [recoveries, setRecoveries] = useState<RecoveryEntry[]>([])
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
+  const [recoveryError, setRecoveryError] = useState('')
   const [status, setStatus] = useState('')
   const [statusError, setStatusError] = useState('')
   const [signing, setSigning] = useState(false)
@@ -142,6 +155,8 @@ export default function App() {
     }
   })
   const [settings, setSettingsState] = useState(loadSettings)
+  const recoveryEnabled = useRef(!!settings.recoveryEnabled)
+  recoveryEnabled.current = !!settings.recoveryEnabled
   const settingsWriter = useRef<SettingsWriter<Settings> | null>(null)
   settingsWriter.current ??= new SettingsWriter<Settings>({ initial: settings })
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
@@ -197,6 +212,21 @@ export default function App() {
   const settingsPrivacy = privacyRevision().replace(/:(purging|complete)$/, '')
   const setSettings = (s: Settings) => {
     if (settingsPrivacy !== privacyRevision().replace(/:(purging|complete)$/, '')) return
+    if (!!s.recoveryEnabled !== recoveryEnabled.current) {
+      try { setRecoveryConsent(!!s.recoveryEnabled) }
+      catch (error) {
+        const text = `Recovery consent could not be saved: ${error instanceof Error ? error.message : String(error)}`
+        setStatus(text); setStatusError(text)
+        return
+      }
+      recoveryEnabled.current = !!s.recoveryEnabled
+      checkpointed.current.clear()
+      recoveryFailures.current.clear()
+      if (!s.recoveryEnabled) void clearRecovery().then(() => { setRecoveries([]); setRecoveryOpen(false) }).catch((error: unknown) => {
+        const text = `Recovery is off, but checkpoints could not be removed. Retry private-data purge: ${error instanceof Error ? error.message : String(error)}`
+        setStatus(text); setStatusError(text)
+      })
+    }
     setSettingsState(s)
     void settingsWriter.current!.save(s).catch((error: unknown) => {
       const text = error instanceof Error ? error.message : 'Preferences could not be saved on this device.'
@@ -207,7 +237,13 @@ export default function App() {
 
   const clearPrivateState = () => {
     settingsWriter.current!.invalidate()
-    setSettingsState((prev) => ({ ...prev, aiKey: '', aiProfile: '', aiEnabled: false, author: 'OpenQuire user' }))
+    invalidateRecovery()
+    recoveryEnabled.current = false
+    checkpointed.current.clear()
+    recoveryKeys.current.clear()
+    setRecoveries([])
+    setRecoveryOpen(false)
+    setSettingsState((prev) => ({ ...prev, aiKey: '', aiProfile: '', aiEnabled: false, recoveryEnabled: false, author: 'OpenQuire user' }))
     setRecent([])
     setAiLog([])
     aiAllowed.current.clear()
@@ -394,6 +430,7 @@ export default function App() {
     const id = s.documentId ?? activeDocument()
     if (!sessions.current.has(id)) return
     sessions.current.update(id, s.revision)
+    recoveryMeta.current.set(id, { revision: s.revision, encrypted: s.encrypted })
     setTabs((tabs) => tabs.map((tab) => tab.id === id ? { ...tab, name: s.name } : tab))
     setSessionTick((tick) => tick + 1)
     if (id !== activeDocument()) return
@@ -498,6 +535,14 @@ export default function App() {
     paths.current.delete(id)
     saveOptions.current.delete(id)
     sessions.current.close(id)
+    recoveryMeta.current.delete(id)
+    checkpointed.current.delete(id)
+    const recoveryId = recoveryKeys.current.get(id)
+    recoveryKeys.current.delete(id)
+    if (recoveryId) void discardRecovery(recoveryId).catch((error: unknown) => {
+      const text = `The tab closed, but its recovery checkpoint could not be removed: ${error instanceof Error ? error.message : String(error)}`
+      setStatus(text); setStatusError(text)
+    })
     setSide((sp) => (sp?.id === id ? null : sp))
     if (id === activeDocument()) {
       if (rest.length) void switchTab(rest[Math.max(0, index - 1)].id)
@@ -1025,6 +1070,13 @@ export default function App() {
         }
       } else download(bytes, `${name}.pdf`)
       sessions.current.markSaved(id, revision)
+      if (!sessions.current.dirty(id)) {
+        const recoveryId = recoveryKeys.current.get(id)
+        if (recoveryId) void discardRecovery(recoveryId).catch((error: unknown) => {
+          setStatusError(`The file was saved, but its recovery checkpoint could not be removed: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        checkpointed.current.delete(id)
+      }
       setSessionTick((tick) => tick + 1)
       // Passwords aren't recorded: a shared workflow file would reveal them.
       if (options.security.mode !== 'set') record({ action: 'save', options })
@@ -1104,6 +1156,97 @@ export default function App() {
   }, [])
 
   const closeDoc = () => closeTab(activeDocument())
+
+  // Recovery is a bounded convenience, separate from an explicit file save.
+  // Snapshot jobs are serialized, and a late result cannot replace newer content.
+  useEffect(() => {
+    let disposed = false
+    void listRecovery().then((entries) => {
+      if (!disposed && entries.length) { setRecoveries(entries); setRecoveryOpen(true) }
+    }).catch((error: unknown) => {
+      if (!disposed && recoveryEnabled.current) setStatusError(`Recovery storage is unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    })
+    const onConsent = (event: StorageEvent) => {
+      if (event.key !== RECOVERY_CONSENT_KEY || event.newValue?.startsWith('enabled:')) return
+      invalidateRecovery()
+      recoveryEnabled.current = false
+      checkpointed.current.clear()
+      setRecoveries([])
+      setRecoveryOpen(false)
+      setSettingsState((prev) => ({ ...prev, recoveryEnabled: false }))
+    }
+    window.addEventListener('storage', onConsent)
+    const checkpoint = async () => {
+      if (!recoveryEnabled.current || checkpointRunning.current) return
+      checkpointRunning.current = true
+      try {
+        for (const id of sessions.current.dirtyIds()) {
+          if (disposed || !recoveryEnabled.current) break
+          const meta = recoveryMeta.current.get(id)
+          if (!meta || checkpointed.current.get(id) === meta.revision || recoveryFailures.current.get(id) === meta.revision || documentWorking(id)) continue
+          if (meta.encrypted) {
+            checkpointed.current.set(id, meta.revision)
+            setStatus('Recovery skipped for a password-protected document. Save it to keep your changes.')
+            continue
+          }
+          try {
+            const privacy = privacyRevision()
+            const snapshot = await engineFor(id).saveSnapshot({ compress: 'none', security: { mode: 'keep' } })
+            try {
+              const key = recoveryKeys.current.get(id) ?? crypto.randomUUID()
+              recoveryKeys.current.set(id, key)
+              const valid = () => !disposed && recoveryEnabled.current && sessions.current.has(id) && sessions.current.dirty(id) && recoveryMeta.current.get(id)?.revision === snapshot.revision
+              if (await writeRecovery(key, snapshot, valid, privacy)) checkpointed.current.set(id, snapshot.revision)
+            } finally { snapshot.bytes.fill(0) }
+          } catch (error) {
+            recoveryFailures.current.set(id, meta.revision)
+            setStatusError(`Recovery checkpoint failed; save your document yourself. ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+      } catch (error) {
+        setStatusError(`Recovery checkpoint failed; save your document yourself. ${error instanceof Error ? error.message : String(error)}`)
+      } finally { checkpointRunning.current = false }
+    }
+    const timer = window.setInterval(() => void checkpoint(), 2500)
+    return () => { disposed = true; window.clearInterval(timer); window.removeEventListener('storage', onConsent) }
+  }, [])
+
+  const restoreCheckpoint = async (key: string) => {
+    if (recoveryBusy) return
+    setRecoveryBusy(true)
+    setRecoveryError('')
+    try {
+      const privacy = privacyRevision()
+      const snapshot = await readRecovery(key)
+      const previous = activeDocument()
+      try {
+        await run(m.busy.opening, async () => {
+          await inNewTab(async () => {
+            const state = await engine.open(`${snapshot.name}.pdf`, snapshot.bytes.slice())
+            return privacy === privacyRevision() ? state : null
+          }, false)
+        })
+      } finally { snapshot.bytes.fill(0) }
+      const id = activeDocument()
+      if (id !== previous && sessions.current.has(id) && privacy === privacyRevision()) {
+        recoveryKeys.current.set(id, key)
+        setRecoveries((entries) => entries.filter((entry) => entry.id !== key))
+        setStatus('Recovered an unsaved checkpoint. Save the document to keep a file.')
+      } else setRecoveryError('The checkpoint could not be opened. It has been kept for another attempt.')
+    } catch (error) { setRecoveryError(error instanceof Error ? error.message : 'The checkpoint could not be restored.') }
+    finally { setRecoveryBusy(false) }
+  }
+
+  const discardCheckpoint = async (key: string) => {
+    if (recoveryBusy) return
+    setRecoveryBusy(true)
+    setRecoveryError('')
+    try {
+      await discardRecovery(key)
+      setRecoveries((entries) => entries.filter((entry) => entry.id !== key))
+    } catch (error) { setRecoveryError(error instanceof Error ? error.message : 'The checkpoint could not be removed.') }
+    finally { setRecoveryBusy(false) }
+  }
 
   // ---- navigation --------------------------------------------------------------------------
 
@@ -1696,7 +1839,7 @@ export default function App() {
 
   const keys = useRef<(e: KeyboardEvent) => void>()
   keys.current = (e) => {
-    if (closePrompt) return
+    if (closePrompt || (recoveryOpen && recoveries.length)) return
     // The Hotkeys settings tab records presses itself.
     if ((e.target as Element).closest?.('[data-recording-hotkey]')) return
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as Element).tagName) || (e.target as HTMLElement).isContentEditable
@@ -2188,6 +2331,8 @@ export default function App() {
         saving={closingSave} error={closingError} onCancel={() => setClosePrompt(null)}
         onDiscard={() => void finishClose(false)} onSave={() => void finishClose(true)}
       />}
+      {recoveryOpen && recoveries.length > 0 && <RecoveryDialog entries={recoveries} busy={recoveryBusy} error={recoveryError}
+        onRestore={(id) => void restoreCheckpoint(id)} onDiscard={(id) => void discardCheckpoint(id)} onLater={() => setRecoveryOpen(false)} />}
     </div>
   )
 }

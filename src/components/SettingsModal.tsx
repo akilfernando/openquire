@@ -47,6 +47,8 @@ export interface Settings {
   aiProfile: string
   /** Air-gapped privacy mode: completely disables/hides all AI features and settings. */
   aiDisabled?: boolean
+  /** Explicit consent to encrypted document checkpoints on this device. Default off. */
+  recoveryEnabled?: boolean
 }
 
 export const ACCENTS: { key: string; hue: number }[] = [
@@ -274,6 +276,11 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
               <h2>{m.settings.tabs.privacy}</h2>
               <p className="hint">{m.settings.privacyIntro}</p>
 
+              <Item name="Encrypted document recovery" desc="Off by default. Keep the newest 3 unsaved document checkpoints on this device for up to 7 days (16 MiB per document, 32 MiB total). Checkpoints may lag your edits. Password-protected documents are skipped. Turning this off removes checkpoints; it does not save your files.">
+                <input type="checkbox" className="toggle" checked={!!settings.recoveryEnabled}
+                  aria-label="Encrypted document recovery" onChange={(e) => set({ recoveryEnabled: e.target.checked })} />
+              </Item>
+
               <Item name={m.settings.airGapped} desc={m.settings.airGappedDesc}>
                 <input
                   type="checkbox"
@@ -307,7 +314,7 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                     disabled={purging}
                     style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', cursor: 'pointer', fontWeight: 500 }}
                     onClick={async () => {
-                      if (window.confirm('Are you sure you want to purge all stored signatures, recent files, and saved AI keys from this browser?')) {
+                      if (window.confirm('Are you sure you want to purge all stored signatures, recent files, saved AI keys, and recovery checkpoints from this browser?')) {
                         setPurging(true)
                         setPurgeFeedback('')
                         setPurgeError('')

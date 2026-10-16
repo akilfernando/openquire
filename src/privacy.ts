@@ -19,13 +19,14 @@ function assertCurrent(revision: string): void {
   }
 }
 
-function openDb(revision: string): Promise<IDBDatabase> {
+export function openPrivateDb(revision: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') return reject(new Error('Encrypted storage is unavailable.'))
     let blocked = false
-    const req = indexedDB.open(DB_NAME, 1)
+    const req = indexedDB.open(DB_NAME, 2)
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains(STORE_NAME)) req.result.createObjectStore(STORE_NAME)
+      if (!req.result.objectStoreNames.contains('recovery')) req.result.createObjectStore('recovery')
     }
     req.onerror = () => reject(req.error ?? new Error('Cannot open encrypted storage.'))
     req.onblocked = () => {
@@ -56,7 +57,7 @@ async function masterKey(create: boolean, revision: string): Promise<CryptoKey |
     { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
   ) : null
   assertCurrent(revision)
-  const db = await openDb(revision)
+  const db = await openPrivateDb(revision)
   try {
     return await new Promise<CryptoKey | null>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, create ? 'readwrite' : 'readonly')
@@ -131,11 +132,35 @@ export function zeroizeBuffer(buf: Uint8Array | ArrayBuffer | null | undefined):
   else if (buf instanceof ArrayBuffer) new Uint8Array(buf).fill(0)
 }
 
+export interface EncryptedBytes { iv: Uint8Array; data: Uint8Array }
+
+/** Binary storage avoids base64 copies of document checkpoints. No plaintext fallback. */
+export async function encryptPrivateBytes(bytes: Uint8Array, context: string, revision: string): Promise<EncryptedBytes> {
+  const key = await masterKey(true, revision)
+  assertCurrent(revision)
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const additionalData = new TextEncoder().encode(context)
+  const data = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData }, key!, bytes))
+  assertCurrent(revision)
+  return { iv, data }
+}
+
+export async function decryptPrivateBytes(value: EncryptedBytes, context: string, revision: string): Promise<Uint8Array> {
+  const key = await masterKey(false, revision)
+  if (!key) throw new Error('The device encryption key is unavailable. This checkpoint cannot be restored.')
+  assertCurrent(revision)
+  const additionalData = new TextEncoder().encode(context)
+  const bytes = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: value.iv, additionalData }, key, value.data))
+  try { assertCurrent(revision); return bytes }
+  catch (error) { bytes.fill(0); throw error }
+}
+
 /** Resolves only after deletion; blocked/failed deletion is reported to the UI. */
 export async function purgeAllPrivateData(): Promise<void> {
   generation++
   const marker = `${Date.now()}-${Math.random()}:purging`
   localStorage.setItem(PRIVACY_REVISION_KEY, marker)
+  localStorage.setItem('openquire.recovery-consent', `disabled:${marker}`)
   for (const key of ['openquire.signature', 'openquire:signature', 'openquire.recent', 'openquire.pkcs11', 'openquire.author']) {
     localStorage.removeItem(key)
   }
@@ -146,6 +171,7 @@ export async function purgeAllPrivateData(): Promise<void> {
       delete settings.aiKey
       delete settings.aiProfile
       settings.aiEnabled = false
+      settings.recoveryEnabled = false
       settings.author = 'OpenQuire user'
       localStorage.setItem('openquire.settings', JSON.stringify(settings))
     } catch {

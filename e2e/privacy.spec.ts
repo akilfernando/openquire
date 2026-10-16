@@ -59,7 +59,7 @@ test('concurrent tabs encrypt with one persisted, non-extractable device key', a
   }, { values, code: privacyCode })
   expect(decoded).toEqual(Array.from({ length: 2 }, (_, tab) => Array.from({ length: 5 }, (_, n) => `tab-${tab}-${n}`)).flat())
   const stored = await page.evaluate(() => new Promise<{ count: number; extractable: boolean }>((resolve, reject) => {
-    const request = indexedDB.open('openquire_vault', 1)
+    const request = indexedDB.open('openquire_vault')
     request.onerror = () => reject(request.error)
     request.onsuccess = () => {
       const db = request.result
@@ -83,7 +83,7 @@ test('purge invalidates old ciphertext without generating a replacement key on r
     await privacy.purgeAllPrivateData()
     const decrypted = await privacy.decryptSensitive(encrypted)
     const count = await new Promise<number>((resolve, reject) => {
-      const request = indexedDB.open('openquire_vault', 1)
+      const request = indexedDB.open('openquire_vault')
       request.onerror = () => reject(request.error)
       request.onsuccess = () => {
         const db = request.result
@@ -151,7 +151,7 @@ test('purge reports blocked deletion and only shows success after a completed re
     const { encryptSensitive } = new Function(`${code}; return privacyTest;`)()
     localStorage.setItem('openquire.signature', await encryptSensitive('saved signature'))
     await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('openquire_vault', 1)
+      const request = indexedDB.open('openquire_vault')
       request.onerror = () => reject(request.error)
       request.onsuccess = () => {
         // Deliberately emulate an old tab that does not close on versionchange.
