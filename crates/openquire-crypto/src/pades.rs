@@ -196,10 +196,11 @@ pub fn create_pades_cms_signature(opts: &SignOptions) -> Result<Vec<u8>> {
                             });
 
                             // signedAttrs: [0] IMPLICIT SignedAttributes
-                            writer.next().write_tagged_implicit(yasna::Tag::context(0), |writer| {
-                                // Implicit tagging replaces the SET tag; retain its length/body.
-                                writer.write_der(&signed_attrs_der);
-                            });
+                            // write_der copies bytes verbatim, so apply the implicit
+                            // context tag explicitly while preserving length/body.
+                            let mut tagged_attrs = signed_attrs_der.clone();
+                            tagged_attrs[0] = 0xa0;
+                            writer.next().write_der(&tagged_attrs);
 
                             // signatureAlgorithm: rsaEncryption
                             writer.next().write_sequence(|writer| {

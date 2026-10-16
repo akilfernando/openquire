@@ -294,8 +294,10 @@ impl PdfDocument {
         self.doc.save_to(&mut out)?;
 
         let needle = format!("<{}>", "0".repeat(placeholder_size * 2));
-        let pos = out.windows(needle.len()).position(|window| window == needle.as_bytes())
-            .ok_or_else(|| anyhow!("Signature Contents placeholder missing"))?;
+        let positions: Vec<_> = out.windows(needle.len()).enumerate()
+            .filter_map(|(i, window)| (window == needle.as_bytes()).then_some(i)).collect();
+        if positions.len() != 1 { return Err(anyhow!("Signature Contents placeholder missing or ambiguous")); }
+        let pos = positions[0];
         {
             let content_start = pos;
             let content_end = pos + needle.len();
@@ -307,8 +309,10 @@ impl PdfDocument {
 
             // Update ByteRange string FIRST before hashing
             let br_placeholder = "[0 1000000000 1000000000 1000000000]";
-            let br_pos = out.windows(br_placeholder.len()).position(|window| window == br_placeholder.as_bytes())
-                .ok_or_else(|| anyhow!("Signature ByteRange placeholder missing"))?;
+            let positions: Vec<_> = out.windows(br_placeholder.len()).enumerate()
+                .filter_map(|(i, window)| (window == br_placeholder.as_bytes()).then_some(i)).collect();
+            if positions.len() != 1 { return Err(anyhow!("Signature ByteRange placeholder missing or ambiguous")); }
+            let br_pos = positions[0];
             {
                 let br_actual = format!("[{} {} {} {}]", range_1, len_1, range_2, len_2);
                 if br_actual.len() > br_placeholder.len() { return Err(anyhow!("Signature ByteRange exceeds reserved space")); }

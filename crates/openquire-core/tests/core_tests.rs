@@ -3,7 +3,8 @@ use lopdf::{Dictionary, Document, Object, StringFormat};
 use openquire_core::{
     resolve_pattern, Metadata, PdfDocument, StampPosition, StampSpec,
 };
-use openquire_crypto::{create_digital_id, CreateDigitalIdOptions};
+use openquire_crypto::{create_digital_id, verify_cms_signature, CreateDigitalIdOptions};
+use sha2::{Digest, Sha256};
 use regex::Regex;
 
 /// Helper to generate a minimal valid 1-page PDF document in memory.
@@ -145,6 +146,22 @@ fn test_digital_signing() {
     assert!(!signed_bytes.is_empty());
     assert!(signed_bytes.len() > bytes.len());
     assert_eq!(pdf.save().unwrap(), original);
+    let parsed = Document::load_mem(&signed_bytes).unwrap();
+    let signature = parsed.objects.values().filter_map(|o| o.as_dict().ok())
+        .find(|d| d.has(b"ByteRange")).unwrap();
+    let ranges: Vec<usize> = signature.get(b"ByteRange").unwrap().as_array().unwrap().iter()
+        .map(|v| v.as_i64().unwrap() as usize).collect();
+    assert_eq!(ranges.len(), 4);
+    assert_eq!(ranges[0], 0);
+    assert!(ranges[1] < ranges[2]);
+    assert_eq!(ranges[2] + ranges[3], signed_bytes.len());
+    let mut digest = Sha256::new();
+    digest.update(&signed_bytes[..ranges[1]]);
+    digest.update(&signed_bytes[ranges[2]..]);
+    let digest: [u8; 32] = digest.finalize().into();
+    let cms = signature.get(b"Contents").unwrap().as_str().unwrap();
+    let report = verify_cms_signature(cms, &digest).unwrap();
+    assert!(report.valid_signature && report.valid_digest);
     let mut signed = PdfDocument::open("signed.pdf".to_string(), &signed_bytes).unwrap();
     assert!(signed.sign(&p12_bytes, "signpass", None, None).is_err());
 }
