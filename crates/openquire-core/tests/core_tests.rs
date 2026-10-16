@@ -97,15 +97,10 @@ fn test_redact_patterns_and_terms() {
 
     let pattern = resolve_pattern("email");
     let regex = Regex::new(pattern).unwrap();
-    let count = pdf.redact(&[regex], &["confidential".to_string()]);
-    assert!(count >= 2);
+    let before = pdf.save().unwrap();
+    assert!(pdf.redact(&[regex], &["confidential".to_string()]).is_err());
+    assert_eq!(pdf.save().unwrap(), before);
 
-    let saved = pdf.save().unwrap();
-    let reloaded = PdfDocument::open("redacted.pdf".to_string(), &saved).unwrap();
-    let text = reloaded.extract_text();
-    assert!(!text.contains("test.user@example.com"));
-    assert!(!text.contains("confidential"));
-    assert!(text.contains("Contact us at"));
 }
 
 #[test]
@@ -145,7 +140,12 @@ fn test_digital_signing() {
     };
     let p12_bytes = create_digital_id(&opts).unwrap();
 
+    let original = pdf.save().unwrap();
     let signed_bytes = pdf.sign(&p12_bytes, "signpass", Some("Approval"), Some("Office")).unwrap();
     assert!(!signed_bytes.is_empty());
     assert!(signed_bytes.len() > bytes.len());
+    assert_eq!(pdf.save().unwrap(), original);
+    let mut signed = PdfDocument::open("signed.pdf".to_string(), &signed_bytes).unwrap();
+    assert!(signed.sign(&p12_bytes, "signpass", None, None).is_err());
 }
+

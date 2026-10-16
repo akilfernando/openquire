@@ -90,6 +90,8 @@ fn test_cli_redact_folder() {
     let b_pdf = dir.path().join("b.pdf");
     fs::write(&a_pdf, create_pdf("Contact jane.doe@example.com today.")).unwrap();
     fs::write(&b_pdf, create_pdf("No personal information.")).unwrap();
+    let a_before = fs::read(&a_pdf).unwrap();
+    let b_before = fs::read(&b_pdf).unwrap();
 
     let out_dir = dir.path().join("out");
     let output = Command::new(&bin)
@@ -97,15 +99,12 @@ fn test_cli_redact_folder() {
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(0));
-    assert!(out_dir.join("a.pdf").exists());
-    assert!(out_dir.join("b.pdf").exists());
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not supported"));
+    assert!(!out_dir.exists());
+    assert_eq!(fs::read(&a_pdf).unwrap(), a_before);
+    assert_eq!(fs::read(&b_pdf).unwrap(), b_before);
 
-    let a_bytes = fs::read(out_dir.join("a.pdf")).unwrap();
-    let doc = PdfDocument::open("a.pdf".to_string(), &a_bytes).unwrap();
-    let text = doc.extract_text();
-    assert!(!text.contains("jane.doe@example.com"));
-    assert!(text.contains("Contact"));
 }
 
 #[test]
@@ -441,4 +440,5 @@ fn mixed_redaction_workflows_fail_before_writing() {
         assert_eq!(fs::read(&input).unwrap(), original);
     }
 }
+
 

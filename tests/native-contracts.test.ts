@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName } from 'pdf-lib'
 import { createDigitalId } from '../src/engine/signing'
-import { embeddedTextPdf, SECRET, separateTextObjectsPdf, signedIncrementalPdf, splitTextPdf } from './fixtures/contracts'
+import { embeddedTextPdf, rotatedFormPdf, SECRET, separateTextObjectsPdf, signedIncrementalPdf, splitTextPdf } from './fixtures/contracts'
 
 const binary = process.env.OPENQUIRE_NATIVE_BIN
 const root = mkdtempSync(join(tmpdir(), 'oq-native-contract-'))
@@ -32,7 +32,7 @@ describe.skipIf(!binary)('native output contracts (required in Native PDF contra
 
   it('produces a complete PDF signature that OpenSSL verifies and rejects after tampering', async () => {
     const input = join(root, 'sign.pdf'), output = join(root, 'signed.pdf'), identity = join(root, 'identity.p12')
-    const source = await embeddedTextPdf()
+    const source = await rotatedFormPdf()
     writeFileSync(input, source)
     writeFileSync(identity, await createDigitalId({ name: 'Native contract signer', password: 'fixture-only' }))
     const result = spawnSync(binary!, ['sign', input, '--p12', identity, '--password', 'fixture-only', '-o', output], { encoding: 'utf8' })
@@ -41,6 +41,9 @@ describe.skipIf(!binary)('native output contracts (required in Native PDF contra
     const bytes = readFileSync(output)
     const parsed = await PDFDocument.load(bytes)
     expect(parsed.getPageCount()).toBe(1)
+    expect(parsed.getPages()[0].getRotation().angle).toBe(90)
+    expect(parsed.getForm().getTextField('contact').getText()).toBe(SECRET)
+    expect(parsed.getForm().getTextField('contact').acroField.getWidgets()[0].getAppearances()?.normal).toBeDefined()
     const signatures = parsed.context.enumerateIndirectObjects().map(([, o]) => o)
       .filter((o): o is PDFDict => o instanceof PDFDict && o.get(PDFName.of('ByteRange')) instanceof PDFArray)
     expect(signatures).toHaveLength(1)
@@ -63,5 +66,12 @@ describe.skipIf(!binary)('native output contracts (required in Native PDF contra
     writeFileSync(data, content)
     expect(verify().status).not.toBe(0)
     expect(readFileSync(input)).toEqual(Buffer.from(source))
+
+    const refused = join(root, 'second-signature.pdf')
+    const again = spawnSync(binary!, ['sign', output, '--p12', identity, '--password', 'fixture-only', '-o', refused], { encoding: 'utf8' })
+    expect(again.status).not.toBe(0)
+    expect(again.stderr).toContain('existing signatures')
+    expect(existsSync(refused)).toBe(false)
+    expect(readFileSync(output)).toEqual(bytes)
   }, 120_000)
 })
