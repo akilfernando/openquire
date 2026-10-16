@@ -1,8 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use openquire_core::{
-    parse_workflow, resolve_pattern, PdfDocument, StampPosition, StampSpec, WorkflowStep,
+    parse_workflow, PdfDocument, StampPosition, StampSpec, WorkflowStep,
 };
-use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -36,7 +35,7 @@ enum Commands {
     #[command(about = "Show pages and properties; unsupported checks are reported as unknown")]
     Info(PathArgs),
 
-    #[command(about = "Find and permanently remove text")]
+    #[command(about = "Unavailable in the native CLI; use the Node CLI or app for redaction")]
     Redact(RedactArgs),
 
     #[command(about = "Add text to pages: page numbers, Bates numbers, watermarks")]
@@ -350,71 +349,7 @@ fn main() -> ExitCode {
             }
         }
 
-        Commands::Redact(args) => {
-            let files = match collect_pdf_files(&args.paths, cli.recursive) {
-                Ok(f) => f,
-                Err((msg, code)) => {
-                    eprintln!("{msg}");
-                    return ExitCode::from(code);
-                }
-            };
-
-            for pat in &args.pattern {
-                let resolved = resolve_pattern(pat);
-                if Regex::new(resolved).is_err() {
-                    eprintln!("\"{pat}\" is not a valid pattern. Use email, phone, card, date, url, or a regular expression.");
-                    return ExitCode::from(2);
-                }
-            }
-
-            if args.pattern.is_empty() && args.term.is_empty() {
-                eprintln!("Give at least one --pattern or --term.");
-                return ExitCode::from(2);
-            }
-
-            let mut regexes = Vec::new();
-            for pat in &args.pattern {
-                let resolved = resolve_pattern(pat);
-                regexes.push(Regex::new(resolved).unwrap());
-            }
-            let many = files.len() > 1;
-
-            for file in &files {
-                match fs::read(file) {
-                    Ok(bytes) => match PdfDocument::open(file.display().to_string(), &bytes) {
-                        Ok(mut pdf) => {
-                            let count = pdf.redact(&regexes, &args.term);
-                            let saved_bytes = match pdf.save() {
-                                Ok(b) => b,
-                                Err(e) => {
-                                    eprintln!("{}: {}", file.display(), e);
-                                    failed += 1;
-                                    continue;
-                                }
-                            };
-                            let out_path = output_path(file, "redacted", cli.out.as_deref(), many, "pdf");
-                            if let Err(e) = fs::write(&out_path, saved_bytes) {
-                                eprintln!("{}: {}", file.display(), e);
-                                failed += 1;
-                                continue;
-                            }
-                            say(&format!("{}: removed {} matches", out_path.display(), count));
-                        }
-                        Err(e) => {
-                            eprintln!("{}: {}", file.display(), e);
-                            failed += 1;
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("{}: {}", file.display(), e);
-                        failed += 1;
-                    }
-                }
-            }
-            if many && !quiet {
-                println!("Done: {} of {} files", files.len() - failed, files.len());
-            }
-        }
+        Commands::Redact(_) => return unavailable("Native redaction; use the Node CLI or app"),
 
         Commands::Stamp(args) => {
             let files = match collect_pdf_files(&args.paths, cli.recursive) {
@@ -787,4 +722,5 @@ fn main() -> ExitCode {
         ExitCode::from(0)
     }
 }
+
 

@@ -13,6 +13,8 @@ Generated files live in temporary directories and are removed after the suite.
 | `contracts.ts:separateTextObjectsPdf` | Embedded font split across distinct BT/ET objects; adjacent, separate-column and separate-line layouts | Adjacent text matches terms/patterns and is removed through Engine/Node/MCP; unrelated columns and lines must not match |
 | `contracts.ts:signedIncrementalPdf` | Synthetic digital ID; signed base plus later annotation revision | OpenSSL verifies the input CMS signature; all redaction outputs must discard prior revisions |
 | `contracts.ts:rotatedFormPdf` | Page rotation 90 degrees; populated text widget | Save/reopen with pdf-lib checks rotation, value and appearance presence |
+| `hidden-content.ts:hiddenContentPdf` | Invisible OCR text, hidden layer, JavaScript and private metadata | Existing sanitization assertions, including signed source and form clearing |
+| `archive.ts:archiveSource` | Standard fonts, comment, form, links, bookmarks and attachment | Existing PDF/A-2b/3b conversion and veraPDF validation |
 | `invoice.ts:textPdf`, `scannedPdf` | Invoice source and image-only rendering | Existing OCR alignment/pixel and signature tests |
 | `report.ts:reportPdf` | Two-page report, table, prose and image | Existing DOCX and XLSX tests parse produced containers with mammoth and SheetJS |
 
@@ -30,5 +32,7 @@ redaction and sanitization.
 The integrated suite also checks corrupt/protected input refusal through Engine,
 Node CLI and MCP, plus form filling followed by independently verified signing.
 Coverage still to add includes native CLI parity, more complex text geometry,
-and extraction of the existing hidden-content/PDF-A builders into
-this shared directory. Existing sanitization/PDF-A tests remain in their suites.
+and additional independent viewer coverage. Hidden-content/PDF-A builders are now shared; their existing sanitization/PDF-A assertions remain in their suites.
+
+The Native PDF contracts workflow runs the native executable against these inputs. Redaction must refuse without altering inputs or outputs. Native signing of the rotated form must preserve fields/appearances and pass OpenSSL CMS verification; a changed signed-content byte must fail verification.
+

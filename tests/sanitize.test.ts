@@ -2,32 +2,11 @@ import { expect, it } from 'vitest'
 import * as mupdf from 'mupdf'
 import { Engine } from '../src/engine/core'
 import { createDigitalId } from '../src/engine/signing'
-
-/** A page with visible text, invisible (OCR-style) text and a hidden layer, plus scripts and metadata. */
-function leakyPdf() {
-  const d = new mupdf.PDFDocument()
-  const font = d.addSimpleFont(new mupdf.Font('Helvetica'))
-  const ocg = d.addObject({ Type: 'OCG', Name: d.newString('Draft notes') })
-  const content = [
-    'BT /F1 14 Tf 40 700 Td (Visible paragraph) Tj ET',
-    'BT /F1 10 Tf 3 Tr 40 650 Td (hidden ocr words) Tj 0 Tr ET',
-    '/OC /L1 BDC BT /F1 12 Tf 40 600 Td (secret layer text) Tj ET EMC',
-  ].join('\n')
-  d.insertPage(-1, d.addPage([0, 0, 400, 800], 0, { Font: { F1: font }, Properties: { L1: ocg } }, content))
-  const root = d.getTrailer().get('Root')
-  root.put('OCProperties', d.addObject({ OCGs: [ocg], D: { OFF: [ocg] } }))
-  root.put('Metadata', d.addStream('<x:xmpmeta>author secrets</x:xmpmeta>', { Type: 'Metadata', Subtype: 'XML' }))
-  const js = d.addObject({ S: 'JavaScript', JS: d.newString('app.alert("hi")') })
-  root.put('OpenAction', js)
-  root.put('Names', d.addObject({ JavaScript: { Names: [d.newString('init'), js] } }))
-  d.setMetaData('info:Author', 'Jane Secret')
-  d.setMetaData('info:Title', 'Internal draft')
-  return d.saveToBuffer('').asUint8Array().slice()
-}
+import { hiddenContentPdf } from './fixtures/hidden-content'
 
 it('removes hidden and sensitive information', async () => {
   const e = new Engine()
-  let s = e.open('leaky.pdf', leakyPdf())
+  let s = e.open('leaky.pdf', hiddenContentPdf())
   const id = s.pages[0].id
   e.attach('salaries.csv', new TextEncoder().encode('a,b'), 'text/csv')
   e.addAnnot(id, { type: 'Text', at: [10, 10], text: 'internal comment', color: [1, 1, 0] })
@@ -71,7 +50,7 @@ it('removes hidden and sensitive information', async () => {
 
 it('flattens form data and keeps what was not selected', () => {
   const e = new Engine()
-  const id = e.open('leaky.pdf', leakyPdf()).pages[0].id
+  const id = e.open('leaky.pdf', hiddenContentPdf()).pages[0].id
   const { state } = e.addField(id, 'text', [40, 300, 240, 322], { name: 'Notes' })
   e.setField(id, state.pages[0].widgets[0].id, 'kept as page text')
   const { report, state: after } = e.sanitize({ formData: 'flatten', hiddenText: true })
@@ -82,3 +61,4 @@ it('flattens form data and keeps what was not selected', () => {
   expect(e.save({ compress: 'none', security: { mode: 'keep' } }).length).toBeGreaterThan(0)
   expect(after.meta.author).toBe('Jane Secret')
 })
+

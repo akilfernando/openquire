@@ -102,7 +102,7 @@ impl PdfDocument {
         }
     }
 
-    pub fn redact(&mut self, regexes: &[Regex], terms: &[String]) -> usize {
+    pub fn redact(&mut self, regexes: &[Regex], terms: &[String]) -> Result<usize> {
         redact_document(&mut self.doc, regexes, terms)
     }
 
@@ -207,21 +207,71 @@ impl PdfDocument {
         &mut self,
         p12_bytes: &[u8],
         password: &str,
+        reason: Option<&str>,
+        location: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        // Build the signed copy without corrupting the open document on failure.
+        let mut candidate = Self { name: self.name.clone(), doc: self.doc.clone() };
+        candidate.sign_copy(p12_bytes, password, reason, location)
+    }
+
+    fn sign_copy(
+        &mut self,
+        p12_bytes: &[u8],
+        password: &str,
         _reason: Option<&str>,
         _location: Option<&str>,
     ) -> Result<Vec<u8>> {
+        if self.doc.is_encrypted() {
+            return Err(anyhow!("Native signing of encrypted PDFs is not supported"));
+        }
+        if self.doc.objects.values().any(|o| o.as_dict().map(|d| d.has(b"ByteRange") || d.get(b"FT").and_then(|v| v.as_name()).ok() == Some(b"Sig".as_slice())).unwrap_or(false)) {
+            return Err(anyhow!("Native signing cannot preserve existing signatures; use the Node CLI or app"));
+        }
+        let first_page_id = self.doc.page_iter().next().ok_or_else(|| anyhow!("Cannot sign a PDF without pages"))?;
         let digital_id = read_digital_id(p12_bytes, password)?;
+        // Resolve indirect form/annotation containers before adding the signature.
+        fn resolved(doc: &Document, value: &Object) -> Result<Object> {
+            Ok(match value { Object::Reference(id) => doc.get_object(*id)?.clone(), _ => value.clone() })
+        }
+        let mut acro_form = match self.doc.catalog()?.get(b"AcroForm") {
+            Ok(value) => resolved(&self.doc, value)?.as_dict()?.clone(),
+            Err(_) => lopdf::Dictionary::new(),
+        };
+        let mut fields = match acro_form.get(b"Fields") {
+            Ok(value) => resolved(&self.doc, value)?.as_array()?.clone(),
+            Err(_) => Vec::new(),
+        };
+        let mut annots = match self.doc.get_object(first_page_id)?.as_dict()?.get(b"Annots") {
+            Ok(value) => resolved(&self.doc, value)?.as_array()?.clone(),
+            Err(_) => Vec::new(),
+        };
+        let mut field_names = Vec::new();
+        for field in &fields {
+            let object = resolved(&self.doc, field)?;
+            if let Ok(name) = object.as_dict()?.get(b"T").and_then(|v| v.as_str()) {
+                field_names.push(name.to_vec());
+            }
+        }
+        let mut suffix = 1usize;
+        let signature_name = loop {
+            let name = format!("Signature{}", suffix);
+            let mut unicode_name = vec![0xfe, 0xff];
+            for c in name.encode_utf16() { unicode_name.extend_from_slice(&c.to_be_bytes()); }
+            if !field_names.iter().any(|n| n == name.as_bytes() || n == &unicode_name) { break name; }
+            suffix += 1;
+        };
 
         // 1. Create signature object placeholder
         let placeholder_size = 8192; // 8KB for CMS signature
-        let placeholder_hex = "0".repeat(placeholder_size * 2);
+        let placeholder = vec![0; placeholder_size];
 
         let mut sig_dict = lopdf::Dictionary::new();
         sig_dict.set("Type", "Sig");
         sig_dict.set("Filter", "Adobe.PPKLite");
         sig_dict.set("SubFilter", "adbe.pkcs7.detached");
         sig_dict.set("ByteRange", Object::Array(vec![0.into(), 1_000_000_000.into(), 1_000_000_000.into(), 1_000_000_000.into()]));
-        sig_dict.set("Contents", Object::String(placeholder_hex.into_bytes(), StringFormat::Hexadecimal));
+        sig_dict.set("Contents", Object::String(placeholder, StringFormat::Hexadecimal));
         sig_dict.set("Name", Object::String(digital_id.name.clone().into_bytes(), StringFormat::Literal));
         if let Some(r) = _reason {
             sig_dict.set("Reason", Object::String(r.as_bytes().to_vec(), StringFormat::Literal));
@@ -234,55 +284,36 @@ impl PdfDocument {
         let sig_obj_id = self.doc.add_object(Object::Dictionary(sig_dict));
 
         // 2. Create signature form field
-        let first_page_id = self.doc.page_iter().next().unwrap();
         let mut field_dict = lopdf::Dictionary::new();
         field_dict.set("Type", "Annot");
         field_dict.set("Subtype", "Widget");
         field_dict.set("FT", "Sig");
-        field_dict.set("T", Object::String(b"Signature1".to_vec(), StringFormat::Literal));
+        field_dict.set("T", Object::String(signature_name.into_bytes(), StringFormat::Literal));
         field_dict.set("F", 132);
         field_dict.set("P", Object::Reference(first_page_id));
         field_dict.set("V", Object::Reference(sig_obj_id));
         field_dict.set("Rect", Object::Array(vec![0.into(), 0.into(), 0.into(), 0.into()]));
         let field_obj_id = self.doc.add_object(Object::Dictionary(field_dict));
 
-        // 3. Add to /AcroForm in Root
-        if let Ok(catalog_id) = self.doc.trailer.get(b"Root").and_then(|o| o.as_reference()) {
-            if let Ok(catalog_dict) = self.doc.get_object_mut(catalog_id).and_then(|o| o.as_dict_mut()) {
-                let mut acro_form = if let Ok(form) = catalog_dict.get_mut(b"AcroForm").and_then(|f| f.as_dict_mut()) {
-                    form.clone()
-                } else {
-                    lopdf::Dictionary::new()
-                };
-                let mut fields = if let Ok(f) = acro_form.get_mut(b"Fields").and_then(|f| f.as_array_mut()) {
-                    f.clone()
-                } else {
-                    Vec::new()
-                };
-                fields.push(Object::Reference(field_obj_id));
-                acro_form.set("Fields", Object::Array(fields));
-                acro_form.set("SigFlags", 3);
-                catalog_dict.set("AcroForm", Object::Dictionary(acro_form));
-            }
-        }
-
-        // 4. Add to first page /Annots
-        if let Ok(page_dict) = self.doc.get_object_mut(first_page_id).and_then(|o| o.as_dict_mut()) {
-            let mut annots = if let Ok(arr) = page_dict.get_mut(b"Annots").and_then(|a| a.as_array_mut()) {
-                arr.clone()
-            } else {
-                Vec::new()
-            };
-            annots.push(Object::Reference(field_obj_id));
-            page_dict.set("Annots", Object::Array(annots));
-        }
+        // 3. Preserve existing form fields and page annotations.
+        fields.push(Object::Reference(field_obj_id));
+        acro_form.set("Fields", Object::Array(fields));
+        acro_form.set("SigFlags", 3);
+        let catalog_id = self.doc.trailer.get(b"Root")?.as_reference()?;
+        self.doc.get_object_mut(catalog_id)?.as_dict_mut()?.set("AcroForm", Object::Dictionary(acro_form));
+        annots.push(Object::Reference(field_obj_id));
+        self.doc.get_object_mut(first_page_id)?.as_dict_mut()?.set("Annots", Object::Array(annots));
 
         // 5. Save document and patch ByteRange + Contents
         let mut out = Vec::new();
         self.doc.save_to(&mut out)?;
 
         let needle = format!("<{}>", "0".repeat(placeholder_size * 2));
-        if let Some(pos) = out.windows(needle.len()).position(|window| window == needle.as_bytes()) {
+        let positions: Vec<_> = out.windows(needle.len()).enumerate()
+            .filter_map(|(i, window)| (window == needle.as_bytes()).then_some(i)).collect();
+        if positions.len() != 1 { return Err(anyhow!("Signature Contents placeholder missing or ambiguous")); }
+        let pos = positions[0];
+        {
             let content_start = pos;
             let content_end = pos + needle.len();
 
@@ -293,8 +324,13 @@ impl PdfDocument {
 
             // Update ByteRange string FIRST before hashing
             let br_placeholder = "[0 1000000000 1000000000 1000000000]";
-            if let Some(br_pos) = out.windows(br_placeholder.len()).position(|window| window == br_placeholder.as_bytes()) {
+            let positions: Vec<_> = out.windows(br_placeholder.len()).enumerate()
+                .filter_map(|(i, window)| (window == br_placeholder.as_bytes()).then_some(i)).collect();
+            if positions.len() != 1 { return Err(anyhow!("Signature ByteRange placeholder missing or ambiguous")); }
+            let br_pos = positions[0];
+            {
                 let br_actual = format!("[{} {} {} {}]", range_1, len_1, range_2, len_2);
+                if br_actual.len() > br_placeholder.len() { return Err(anyhow!("Signature ByteRange exceeds reserved space")); }
                 let padded = format!("{:width$}", br_actual, width = br_placeholder.len());
                 out[br_pos..br_pos + br_placeholder.len()].copy_from_slice(padded.as_bytes());
             }
@@ -313,6 +349,7 @@ impl PdfDocument {
             let cms_sig = create_pades_cms_signature(&sign_opts)?;
             let hex_sig = hex::encode(cms_sig);
 
+            if hex_sig.len() > placeholder_size * 2 { return Err(anyhow!("CMS signature exceeds reserved space")); }
             // Write hex signature into contents placeholder
             let sig_slice = &mut out[content_start + 1..content_start + 1 + hex_sig.len()];
             sig_slice.copy_from_slice(hex_sig.as_bytes());
@@ -327,3 +364,4 @@ impl PdfDocument {
         Ok(out)
     }
 }
+

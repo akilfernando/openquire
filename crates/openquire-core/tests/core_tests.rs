@@ -3,8 +3,18 @@ use lopdf::{Dictionary, Document, Object, StringFormat};
 use openquire_core::{
     resolve_pattern, Metadata, PdfDocument, StampPosition, StampSpec,
 };
-use openquire_crypto::{create_digital_id, CreateDigitalIdOptions};
+use openquire_crypto::{create_digital_id, verify_cms_signature, CreateDigitalIdOptions};
+use sha2::{Digest, Sha256};
 use regex::Regex;
+
+// lopdf's serializer advances cross-reference IDs. Serialize a copy so the
+// observation itself does not change the state being checked.
+fn snapshot(pdf: &PdfDocument) -> Vec<u8> {
+    let mut copy = pdf.doc.clone();
+    let mut bytes = Vec::new();
+    copy.save_to(&mut bytes).unwrap();
+    bytes
+}
 
 /// Helper to generate a minimal valid 1-page PDF document in memory.
 fn create_test_pdf(text: &str) -> Vec<u8> {
@@ -97,15 +107,10 @@ fn test_redact_patterns_and_terms() {
 
     let pattern = resolve_pattern("email");
     let regex = Regex::new(pattern).unwrap();
-    let count = pdf.redact(&[regex], &["confidential".to_string()]);
-    assert!(count >= 2);
+    let before = snapshot(&pdf);
+    assert!(pdf.redact(&[regex], &["confidential".to_string()]).is_err());
+    assert_eq!(snapshot(&pdf), before);
 
-    let saved = pdf.save().unwrap();
-    let reloaded = PdfDocument::open("redacted.pdf".to_string(), &saved).unwrap();
-    let text = reloaded.extract_text();
-    assert!(!text.contains("test.user@example.com"));
-    assert!(!text.contains("confidential"));
-    assert!(text.contains("Contact us at"));
 }
 
 #[test]
@@ -145,7 +150,28 @@ fn test_digital_signing() {
     };
     let p12_bytes = create_digital_id(&opts).unwrap();
 
+    let original = snapshot(&pdf);
     let signed_bytes = pdf.sign(&p12_bytes, "signpass", Some("Approval"), Some("Office")).unwrap();
     assert!(!signed_bytes.is_empty());
     assert!(signed_bytes.len() > bytes.len());
+    assert_eq!(snapshot(&pdf), original);
+    let parsed = Document::load_mem(&signed_bytes).unwrap();
+    let signature = parsed.objects.values().filter_map(|o| o.as_dict().ok())
+        .find(|d| d.has(b"ByteRange")).unwrap();
+    let ranges: Vec<usize> = signature.get(b"ByteRange").unwrap().as_array().unwrap().iter()
+        .map(|v| v.as_i64().unwrap() as usize).collect();
+    assert_eq!(ranges.len(), 4);
+    assert_eq!(ranges[0], 0);
+    assert!(ranges[1] < ranges[2]);
+    assert_eq!(ranges[2] + ranges[3], signed_bytes.len());
+    let mut digest = Sha256::new();
+    digest.update(&signed_bytes[..ranges[1]]);
+    digest.update(&signed_bytes[ranges[2]..]);
+    let digest: [u8; 32] = digest.finalize().into();
+    let cms = signature.get(b"Contents").unwrap().as_str().unwrap();
+    let report = verify_cms_signature(cms, &digest).unwrap();
+    assert!(report.valid_signature && report.valid_digest);
+    let mut signed = PdfDocument::open("signed.pdf".to_string(), &signed_bytes).unwrap();
+    assert!(signed.sign(&p12_bytes, "signpass", None, None).is_err());
 }
+

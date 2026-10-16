@@ -9,11 +9,11 @@ contains it. Check the commit and package version you actually run.
 | Operation | Browser / desktop UI | Node CLI and npm Engine | MCP | Native Rust CLI |
 | --- | --- | --- | --- | --- |
 | Read, inspect, merge, stamp | MuPDF engine; UI controls | Full engine and CLI commands | Scoped tools for inspection and page organization | Experimental PDF subset; `info` reports uninspected capabilities as unknown |
-| Redact | Mark, review, apply, save | Terms/patterns and workflows | Derived output within allowed directories | Basic text tests only; shared embedded-font/history parity is unverified; use Node for supported redaction workflows |
+| Redact | Mark, review, apply, save | Terms/patterns and workflows | Derived output within allowed directories | Refused before writes; use Node or the app for permanent redaction |
 | Signed input after redaction | Full rewrite discards earlier revisions and invalidates original signatures | Same engine contract | Same engine contract | Not claimed to meet this contract |
 | OCR, PDF/A, tagging, compression | Supported with feature-specific limitations in README | TypeScript/MuPDF implementation; PDF/A checked with veraPDF | Accessibility inspection; use the Node CLI for broader operations | Refused with a nonzero exit before output writes |
 | DOCX / XLSX export | Simplified reconstruction of text, tables and images | Supported; existing tests parse real containers | Markdown export; Office export is not an MCP tool | Refused; TXT and escaped HTML supported |
-| Certificate signing | Browser software ID; desktop also exposes smart-card integration | Software IDs, timestamps and validation features subject to network policy | Explicit confirmation required | Software ID path; timestamp option refused |
+| Certificate signing | Browser software ID; desktop also exposes smart-card integration | Software IDs, timestamps and validation features subject to network policy | Explicit confirmation required | RSA/SHA-256 software ID path; encrypted/already-signed inputs and timestamp option refused |
 | Recorded workflows | Full supported app steps; batch progress, per-file report, stop between files | Node implementation supports canonical workflow steps | Operations exposed as individual tools | Metadata-only `setMeta` workflows; other steps refused before processing |
 | File save and close | Browser prepares downloads; desktop replaces a complete flushed candidate, with Windows rollback backup. Saved revisions and unsaved guards apply per tab | File output behavior is command-specific | New outputs use exclusive creation unless overwrite is explicitly allowed | Not covered by desktop replacement guarantees |
 | Recovery | Explicit opt-in; encrypted local checkpoints, newest 3, 16 MiB/document and 32 MiB total, 7 days. Password-protected inputs skipped | No automatic document checkpoints | No automatic document checkpoints | No automatic document checkpoints |
@@ -81,3 +81,10 @@ Installing `openquire@latest` therefore does not install this development branch
 
 Automated checks are reported separately from these human pilot tasks. No human
 pilot or external-viewer acceptance is implied by a green browser test run.
+
+## Native cryptographic contracts
+
+Native signing is checked with an independent PDF parser and OpenSSL, including a rotated form with existing fields and appearances. The native CMS verifier supports detached, single-signer RSA/SHA-256 messages and checks both signed attributes and the supplied content digest. Unsupported or malformed structures return errors. Signature validity and digest validity must both pass; neither establishes certificate trust, revocation or a trusted signing time. The verifier returns no inferred signing time.
+
+Native redaction is disabled in both the CLI and Rust core API until it meets the shared permanent-removal contract. The previous implementation edited individual encoded text operands and could retain old streams. Use the canonical Node/MuPDF engine or app. Rust redaction entry points now return an error without mutating the document; callers must handle the Result.
+

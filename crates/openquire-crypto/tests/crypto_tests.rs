@@ -57,7 +57,26 @@ fn test_pades_cms_signing_and_verification() {
     let verification = verify_cms_signature(&cms_signature, &digest).expect("Should verify signature");
     assert_eq!(verification.signer, "Signer Person");
     assert!(verification.valid_signature);
+    assert!(verification.valid_digest);
     assert_eq!(verification.chain.len(), 1);
+
+    let mut wrong_digest = digest;
+    wrong_digest[0] ^= 1;
+    let wrong_content = verify_cms_signature(&cms_signature, &wrong_digest).unwrap();
+    assert!(!wrong_content.valid_digest);
+
+    let mut forged = cms_signature.clone();
+    *forged.last_mut().unwrap() ^= 1;
+    assert!(!verify_cms_signature(&forged, &digest).unwrap().valid_signature);
+
+    for length in [0, 1, cms_signature.len() / 2, cms_signature.len() - 1] {
+        assert!(verify_cms_signature(&cms_signature[..length], &digest).is_err());
+    }
+    let mut mismatched = read_digital_id(&p12_bytes, "p12password").unwrap();
+    mismatched.key = Some(rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap());
+    assert!(create_pades_cms_signature(&SignOptions {
+        digital_id: &mismatched, content_digest: digest, signing_time: None,
+    }).is_err());
 }
 
 #[test]
@@ -78,3 +97,4 @@ fn test_bundled_trust_store() {
     assert!(!report.trusted);
     assert!(!report.issues.is_empty());
 }
+

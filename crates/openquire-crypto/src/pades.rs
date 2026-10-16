@@ -3,9 +3,10 @@
 use crate::p12::DigitalId;
 use crate::pki::{cert_common_name, parse_cert_der, CertInfo};
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use rsa::pkcs1v15::SigningKey;
-use rsa::signature::{SignatureEncoding, Signer};
+use rsa::signature::{SignatureEncoding, Signer, Verifier};
+use rsa::pkcs8::DecodePublicKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use x509_parser::prelude::*;
@@ -68,9 +69,15 @@ pub fn build_signed_attributes(content_digest: &[u8; 32], cert_der: &[u8], signi
     attrs.push(encode_attribute(OID_MESSAGE_DIGEST, vec![message_digest_val]));
 
     // 3. SigningTime: UTC time string
-    let time_str = signing_time.format("%y%m%d%H%M%SZ").to_string();
+    let (tag, time_str) = if (1950..2050).contains(&signing_time.year()) {
+        (0x17, signing_time.format("%y%m%d%H%M%SZ").to_string())
+    } else {
+        (0x18, signing_time.format("%Y%m%d%H%M%SZ").to_string())
+    };
     let signing_time_val = yasna::construct_der(|writer| {
-        writer.write_visible_string(&time_str);
+        let mut encoded = vec![tag, time_str.len() as u8];
+        encoded.extend_from_slice(time_str.as_bytes());
+        writer.write_der(&encoded);
     });
     attrs.push(encode_attribute(OID_SIGNING_TIME, vec![signing_time_val]));
 
@@ -189,17 +196,11 @@ pub fn create_pades_cms_signature(opts: &SignOptions) -> Result<Vec<u8>> {
                             });
 
                             // signedAttrs: [0] IMPLICIT SignedAttributes
-                            writer.next().write_tagged_implicit(yasna::Tag::context(0), |writer| {
-                                // Extract the inner content of the SET (without the 0x31 tag)
-                                // or parse signed_attrs_der:
-                                let inner = if signed_attrs_der.len() > 2 {
-                                    // Strip tag and length of outer SET
-                                    strip_asn1_tag_len(&signed_attrs_der)
-                                } else {
-                                    &[]
-                                };
-                                writer.write_der(inner);
-                            });
+                            // write_der copies bytes verbatim, so apply the implicit
+                            // context tag explicitly while preserving length/body.
+                            let mut tagged_attrs = signed_attrs_der.clone();
+                            tagged_attrs[0] = 0xa0;
+                            writer.next().write_der(&tagged_attrs);
 
                             // signatureAlgorithm: rsaEncryption
                             writer.next().write_sequence(|writer| {
@@ -216,86 +217,158 @@ pub fn create_pades_cms_signature(opts: &SignOptions) -> Result<Vec<u8>> {
         });
     });
 
+    // A mismatched certificate/private key must never produce a reported success.
+    let verified = verify_cms_signature(&cms_der, &opts.content_digest)?;
+    if !verified.valid_signature || !verified.valid_digest {
+        return Err(anyhow!("Generated CMS signature failed verification"));
+    }
     Ok(cms_der)
 }
 
-fn strip_asn1_tag_len(der: &[u8]) -> &[u8] {
-    if der.len() < 2 {
-        return der;
-    }
-    let len_byte = der[1];
-    if len_byte < 0x80 {
-        &der[2..]
-    } else {
-        let num_len_bytes = (len_byte & 0x7f) as usize;
-        let start = 2 + num_len_bytes;
-        if start <= der.len() {
-            &der[start..]
-        } else {
-            der
+// A bounded DER reader for the supported detached, single-signer RSA/SHA-256
+// profile. Unsupported structures fail closed rather than becoming a success.
+#[derive(Clone, Copy)]
+struct Der<'a> { tag: u8, full: &'a [u8], body: &'a [u8] }
+
+fn der(input: &[u8]) -> Result<(Der<'_>, &[u8])> {
+    if input.len() < 2 || input[0] & 0x1f == 0x1f { return Err(anyhow!("Invalid DER tag")); }
+    let first = input[1];
+    let (header, length) = if first < 128 { (2, first as usize) } else {
+        let n = (first & 127) as usize;
+        if n == 0 || n > std::mem::size_of::<usize>() || input.len() < 2 + n || input[2] == 0 {
+            return Err(anyhow!("Invalid DER length"));
         }
-    }
+        let mut length = 0usize;
+        for b in &input[2..2+n] {
+            length = length.checked_mul(256).and_then(|v| v.checked_add(*b as usize))
+                .ok_or_else(|| anyhow!("DER length overflow"))?;
+        }
+        if length < 128 { return Err(anyhow!("Noncanonical DER length")); }
+        (2 + n, length)
+    };
+    let end = header.checked_add(length).filter(|end| *end <= input.len())
+        .ok_or_else(|| anyhow!("Truncated DER"))?;
+    Ok((Der { tag: input[0], full: &input[..end], body: &input[header..end] }, &input[end..]))
 }
 
-/// Verifies a CMS PKCS#7 signature against a known byte-range digest.
-pub fn verify_cms_signature(cms_der: &[u8], _actual_content_digest: &[u8; 32]) -> Result<SignatureVerificationResult> {
-    // 1. Parse top-level ContentInfo using x509_parser / der-parser
-    use der_parser::parse_der;
-
-    let (_, content_info) = parse_der(cms_der).map_err(|e| anyhow!("Failed to parse CMS ContentInfo: {:?}", e))?;
-    let seq = content_info.as_sequence().map_err(|_| anyhow!("Expected SEQUENCE"))?;
-    if seq.len() < 2 {
-        return Err(anyhow!("ContentInfo sequence too short"));
+fn children(value: Der<'_>, tag: u8) -> Result<Vec<Der<'_>>> {
+    if value.tag != tag { return Err(anyhow!("Unexpected DER tag")); }
+    let mut out = Vec::new();
+    let mut remaining = value.body;
+    while !remaining.is_empty() {
+        let (item, rest) = der(remaining)?;
+        out.push(item);
+        remaining = rest;
     }
+    Ok(out)
+}
 
-    // 2. Parse inner SignedData inside [0] EXPLICIT
-    let explicit_content = &seq[1];
-    let signed_data_obj = parse_der(explicit_content.as_slice().map_err(|_| anyhow!("Invalid explicit content"))?)
-        .map_err(|e| anyhow!("Failed to parse SignedData: {:?}", e))?
-        .1;
-    let sd_seq = signed_data_obj.as_sequence().map_err(|_| anyhow!("Expected SignedData SEQUENCE"))?;
+fn oid(value: Der<'_>, expected: &[u64]) -> bool {
+    value.full == yasna::construct_der(|w| w.write_oid(&ObjectIdentifier::from_slice(expected)))
+}
 
-    // In SignedData:
-    // [0] version
-    // [1] digestAlgorithms
-    // [2] encapContentInfo
-    // [3] certificates [0] IMPLICIT (optional)
-    // [last] signerInfos
+fn algorithm(value: Der<'_>, expected: &[u64]) -> Result<()> {
+    let fields = children(value, 0x30)?;
+    if fields.is_empty() || fields.len() > 2 || !oid(fields[0], expected)
+        || (fields.len() == 2 && fields[1].full != [0x05, 0x00]) {
+        return Err(anyhow!("Unsupported CMS algorithm"));
+    }
+    Ok(())
+}
 
-    let mut certs = Vec::new();
-    for item in sd_seq {
-        if item.header.tag().0 == 0 && item.header.is_contextspecific() {
-            // Certificates set inside [0] IMPLICIT
-            let mut remaining = item.as_slice().unwrap_or(&[]);
-            while !remaining.is_empty() {
-                match parse_x509_certificate(remaining) {
-                    Ok((rem, _cert)) => {
-                        let consumed = remaining.len() - rem.len();
-                        let der_bytes = &remaining[..consumed];
-                        if let Ok(info) = parse_cert_der(der_bytes) {
-                            certs.push(info);
-                        }
-                        remaining = rem;
-                    }
-                    Err(_) => break,
-                }
-            }
+fn unsigned_integer(bytes: &[u8]) -> &[u8] {
+    let start = bytes.iter().position(|b| *b != 0).unwrap_or(bytes.len());
+    &bytes[start..]
+}
+
+/// Verify detached, single-signer RSA/SHA-256 CMS integrity. This does not
+/// establish certificate trust, revocation status or a trusted signing time.
+pub fn verify_cms_signature(cms_der: &[u8], actual_content_digest: &[u8; 32]) -> Result<SignatureVerificationResult> {
+    let (root, padding) = der(cms_der)?;
+    // PDF Contents often reserves more space than the DER value needs.
+    if padding.iter().any(|b| *b != 0) { return Err(anyhow!("Trailing CMS data")); }
+    let outer = children(root, 0x30)?;
+    if outer.len() != 2 || !oid(outer[0], OID_PKCS7_SIGNED_DATA) {
+        return Err(anyhow!("Expected CMS SignedData"));
+    }
+    let explicit = children(outer[1], 0xa0)?;
+    if explicit.len() != 1 { return Err(anyhow!("Invalid SignedData wrapper")); }
+    let sd = children(explicit[0], 0x30)?;
+    if sd.len() != 5 || sd[0].full != [0x02, 0x01, 0x01] {
+        return Err(anyhow!("Unsupported SignedData structure"));
+    }
+    let algorithms = children(sd[1], 0x31)?;
+    if algorithms.len() != 1 { return Err(anyhow!("Expected one digest algorithm")); }
+    algorithm(algorithms[0], OID_SHA256)?;
+    let content = children(sd[2], 0x30)?;
+    if content.len() != 1 || !oid(content[0], OID_PKCS7_DATA) {
+        return Err(anyhow!("Expected detached CMS data"));
+    }
+    let certs = children(sd[3], 0xa0)?;
+    let signers = children(sd[4], 0x31)?;
+    if signers.len() != 1 { return Err(anyhow!("Expected one signer")); }
+    let si = children(signers[0], 0x30)?;
+    if si.len() != 6 || si[0].full != [0x02, 0x01, 0x01] || si[5].tag != 0x04 {
+        return Err(anyhow!("Unsupported SignerInfo"));
+    }
+    algorithm(si[2], OID_SHA256)?;
+    algorithm(si[4], OID_RSA_ENCRYPTION)?;
+    let sid = children(si[1], 0x30)?;
+    if sid.len() != 2 || sid[0].tag != 0x30 || sid[1].tag != 0x02 || sid[1].body.is_empty()
+        || sid[1].body[0] & 0x80 != 0 {
+        return Err(anyhow!("Invalid signer identifier"));
+    }
+    let mut signer_der = None;
+    for cert in &certs {
+        let (rest, parsed) = parse_x509_certificate(cert.full).map_err(|_| anyhow!("Invalid CMS certificate"))?;
+        if !rest.is_empty() { return Err(anyhow!("Trailing certificate data")); }
+        if parsed.issuer().as_raw() == sid[0].full
+            && unsigned_integer(parsed.raw_serial()) == unsigned_integer(sid[1].body) {
+            if signer_der.replace(cert.full).is_some() { return Err(anyhow!("Ambiguous signer certificate")); }
         }
     }
-
-    let signer = certs
-        .first()
-        .map(cert_common_name)
-        .unwrap_or_else(|| "Unknown Signer".to_string());
-
-    // Basic validity check: match actual document digest against content
-    let valid_digest = true; // In full engine verify, compare against embedded MessageDigest attribute
-
+    let signer_der = signer_der.ok_or_else(|| anyhow!("Signer certificate missing"))?;
+    let attrs = children(si[3], 0xa0)?;
+    if attrs.windows(2).any(|a| a[0].full > a[1].full) { return Err(anyhow!("Noncanonical signed attributes")); }
+    let mut message_digest = None;
+    let mut content_type_seen = false;
+    let mut seen = std::collections::HashSet::new();
+    for attr in attrs {
+        let fields = children(attr, 0x30)?;
+        if fields.len() != 2 || fields[0].tag != 0x06 || !seen.insert(fields[0].full) {
+            return Err(anyhow!("Invalid or duplicate signed attribute"));
+        }
+        let values = children(fields[1], 0x31)?;
+        if oid(fields[0], OID_MESSAGE_DIGEST) {
+            if values.len() != 1 || values[0].tag != 0x04 || values[0].body.len() != 32 {
+                return Err(anyhow!("Invalid message digest"));
+            }
+            message_digest = Some(values[0].body);
+        } else if oid(fields[0], OID_CONTENT_TYPE) {
+            if values.len() != 1 || !oid(values[0], OID_PKCS7_DATA) {
+                return Err(anyhow!("Invalid content type"));
+            }
+            content_type_seen = true;
+        }
+    }
+    if !content_type_seen { return Err(anyhow!("Missing content type")); }
+    let digest = message_digest.ok_or_else(|| anyhow!("Missing message digest"))?;
+    let (_, parsed) = parse_x509_certificate(signer_der).map_err(|_| anyhow!("Invalid signer certificate"))?;
+    let key = rsa::RsaPublicKey::from_public_key_der(parsed.public_key().raw)
+        .map_err(|_| anyhow!("Unsupported signer key"))?;
+    let signature = rsa::pkcs1v15::Signature::try_from(si[5].body)
+        .map_err(|_| anyhow!("Invalid RSA signature"))?;
+    let mut signed = si[3].full.to_vec();
+    signed[0] = 0x31; // Signature covers the DER SET, not its implicit context tag.
+    let valid_signature = rsa::pkcs1v15::VerifyingKey::<Sha256>::new(key).verify(&signed, &signature).is_ok();
+    let signer = parse_cert_der(signer_der)?;
+    let mut chain = vec![signer.clone()];
+    for cert in certs {
+        if cert.full != signer_der { chain.push(parse_cert_der(cert.full)?); }
+    }
     Ok(SignatureVerificationResult {
-        signer,
-        signing_time: Some(Utc::now()),
-        valid_signature: true,
-        valid_digest,
-        chain: certs,
+        signer: cert_common_name(&signer), signing_time: None,
+        valid_signature, valid_digest: digest == actual_content_digest, chain,
     })
 }
+
