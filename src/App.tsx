@@ -35,6 +35,7 @@ import { loadWorkflows, runBatch, runOnDocument, saveWorkflows, workflowJson } f
 import SignatureDialog from './components/SignatureDialog'
 import UnsavedDialog from './components/UnsavedDialog'
 import { DocumentSessions } from './document-sessions'
+import { importFiles, type ImportResult } from './import-files'
 import { clearRecovery, discardRecovery, invalidateRecovery, listRecovery, readRecovery, RECOVERY_CONSENT_KEY, setRecoveryConsent, writeRecovery, type RecoveryEntry } from './recovery'
 import RecoveryDialog from './components/RecoveryDialog'
 import Modal from './components/Modal'
@@ -140,6 +141,10 @@ export default function App() {
   const [recoveryError, setRecoveryError] = useState('')
   const ocrController = useRef<AbortController | null>(null)
   const [ocrProgress, setOcrProgress] = useState('')
+  const importController = useRef<AbortController | null>(null)
+  const [importProgress, setImportProgress] = useState('')
+  const [importStopping, setImportStopping] = useState(false)
+  const [importReport, setImportReport] = useState<ImportResult[] | null>(null)
   const [ocrStopping, setOcrStopping] = useState(false)
   const batchController = useRef<AbortController | null>(null)
   const [batchProgress, setBatchProgress] = useState('')
@@ -493,7 +498,7 @@ export default function App() {
     if (!s) {
       setActiveDocument(prev)
       void closeDocument(id)
-      return
+      return false
     }
     // The previous tab is still on screen until now, so its view is saved under its own id.
     setActiveDocument(prev)
@@ -511,6 +516,7 @@ export default function App() {
       mainRef.current?.scrollTo(0, 0)
       fitWidth(opened)
     })
+    return true
   }
 
   const switchTab = (id: number) => {
@@ -1006,42 +1012,62 @@ export default function App() {
 
   const openFiles = (files: File[], append: boolean, filePaths?: string[]) =>
     run(m.busy.opening, async () => {
-      for (const [i, file] of files.entries()) {
-        let f = file
-        let bytes = new Uint8Array(await f.arrayBuffer())
-        // In the desktop app, an installed LibreOffice converts Office files more faithfully.
-        const ext = f.name.split('.').pop()!.toLowerCase()
-        if (isDesktop && settings.nativeTools && OFFICE_EXTENSIONS.includes(ext) && (await nativeTools()).libreoffice) {
-          setBusy(m.busy.converting)
-          bytes = await nativeConvert(bytes, ext)
-          f = new File([bytes], f.name.replace(/\.[^.]+$/, '.pdf'))
-        }
-        const load = async (open: (password?: string) => Promise<DocState>) => {
-          let password: string | undefined
-          for (;;) {
-            try {
-              return await open(password)
-            } catch (e) {
-              if (!(e instanceof EngineError) || e.name !== 'PasswordError') throw e
-              const pw = await askPassword(f.name, !!e.retry)
-              setPwPrompt(null)
-              if (pw === null) return null
-              password = pw
+      if (importController.current) return
+      const controller = new AbortController()
+      importController.current = controller
+      setImportStopping(false)
+      setImportReport(null)
+      const target = engineFor(activeDocument())
+      try {
+        const results = await importFiles(files, {
+          signal: controller.signal,
+          progress: (file, index) => setImportProgress(`File ${index + 1} of ${files.length}: ${file.name} — opening or converting`),
+          load: async (file, i) => {
+            const converted = !/\.pdf$/i.test(file.name)
+            let f = file
+            let bytes = new Uint8Array(await f.arrayBuffer())
+            // In the desktop app, an installed LibreOffice converts Office files more faithfully.
+            const ext = f.name.split('.').pop()!.toLowerCase()
+            if (isDesktop && settings.nativeTools && OFFICE_EXTENSIONS.includes(ext) && (await nativeTools()).libreoffice) {
+              setBusy(m.busy.converting)
+              bytes = await nativeConvert(bytes, ext)
+              f = new File([bytes], f.name.replace(/\.[^.]+$/, '.pdf'))
             }
-          }
-        }
-        if (append) {
-          const s = await load((pw) => engine.append(f.name, bytes.slice(), pw))
-          if (s) apply(s)
-        } else {
-          const before = activeDocument()
-          await inNewTab(() => load((pw) => engine.open(f.name, bytes.slice(), pw)))
-          const path = filePaths?.[i]
-          if (path && activeDocument() !== before) {
-            paths.current.set(activeDocument(), path)
-            setRecent(addRecent(path))
-          }
-        }
+            const load = async (open: (password?: string) => Promise<DocState>) => {
+              let password: string | undefined
+              for (;;) {
+                try {
+                  return await open(password)
+                } catch (e) {
+                  if (!(e instanceof EngineError) || e.name !== 'PasswordError') throw e
+                  const pw = await askPassword(f.name, !!e.retry)
+                  setPwPrompt(null)
+                  if (pw === null) return null
+                  password = pw
+                }
+              }
+            }
+            if (append) {
+              const s = await load((pw) => target.append(f.name, bytes.slice(), pw))
+              if (s) apply(s)
+              return !!s
+            } else {
+              const before = activeDocument()
+              const opened = await inNewTab(() => load((pw) => engine.open(f.name, bytes.slice(), pw)), !converted)
+              const path = filePaths?.[i]
+              if (path && activeDocument() !== before) {
+                paths.current.set(activeDocument(), path)
+                setRecent(addRecent(path))
+              }
+              return !!opened
+            }
+          },
+        })
+        if (results.length > 1 || results.some(result => result.status !== 'completed')) setImportReport(results)
+      } finally {
+        importController.current = null
+        setImportProgress('')
+        setImportStopping(false)
       }
     })
 
@@ -1072,7 +1098,7 @@ export default function App() {
     // Registered once at startup.
   }, [])
 
-  const newBlank = () => run(m.busy.creating, () => inNewTab(() => engine.newBlank(), false))
+  const newBlank = () => run(m.busy.creating, async () => { await inNewTab(() => engine.newBlank(), false) })
 
   const saveDocument = async (id: number): Promise<boolean> => {
     if (!sessions.current.has(id) || savingDocuments.current.has(id)) return false
@@ -1884,7 +1910,7 @@ export default function App() {
 
   const keys = useRef<(e: KeyboardEvent) => void>()
   keys.current = (e) => {
-    if (closePrompt || ocrProgress || batchProgress || batchReport || (recoveryOpen && recoveries.length)) return
+    if (closePrompt || importProgress || importReport || ocrProgress || batchProgress || batchReport || (recoveryOpen && recoveries.length)) return
     // The Hotkeys settings tab records presses itself.
     if ((e.target as Element).closest?.('[data-recording-hotkey]')) return
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as Element).tagName) || (e.target as HTMLElement).isContentEditable
@@ -2371,6 +2397,17 @@ export default function App() {
       {consent && <AiConsentDialog host={consent.host} items={consent.items} onAnswer={consent.answer} />}
       {pwPrompt && <PasswordDialog file={pwPrompt.file} retry={pwPrompt.retry} onDone={pwPrompt.resolve} />}
       {busy && blockingTabOperations.current > 0 && <div className="busy" />}
+      {importProgress && !pwPrompt && <Modal title="Importing files" onClose={() => { importController.current?.abort(); setImportStopping(true) }}>
+        <p role="status">{importProgress}</p>
+        <p>Stopping finishes the current file, including conversion or password entry, then skips the rest. Completed documents remain open. Converted PDFs need to be saved.</p>
+        <button disabled={importStopping} onClick={() => { importController.current?.abort(); setImportStopping(true) }}>{importStopping ? 'Stopping after this file…' : 'Stop after this file'}</button>
+      </Modal>}
+      {importReport && <Modal title="Import results" onClose={() => setImportReport(null)}>
+        <p>{importReport.filter(r => r.status === 'completed').length} completed · {importReport.filter(r => r.status === 'failed').length} failed · {importReport.filter(r => r.status === 'skipped').length} skipped</p>
+        <p>Retry only failed or skipped files using Open or Add pages. Completed files are already open or appended; selecting them again creates duplicates.</p>
+        <ul>{importReport.map((r, i) => <li key={i}><strong>{r.name}</strong>: {r.status}{r.error ? ` — ${r.error}` : ''}</li>)}</ul>
+        <button onClick={() => setImportReport(null)}>Close</button>
+      </Modal>}
       {closePrompt && <UnsavedDialog
         names={('id' in closePrompt ? [closePrompt.id] : sessions.current.dirtyIds()).map((id) => tabs.find((tab) => tab.id === id)?.name ?? 'document')}
         saving={closingSave} error={closingError} onCancel={() => setClosePrompt(null)}

@@ -33,6 +33,10 @@ The native capability decision can be developed alongside canonical correctness,
 
 ## Pilot protocol
 
+The [import lifecycle assessment and initial performance/accessibility baselines](workflow-baselines.md)
+record the next focused package, measurement method and remaining gaps. Single-file
+conversion interruption and browser peak-memory budgets remain unverified.
+
 Use the [pilot result template](pilot-results.md), initially marked NOT RUN. Use synthetic or explicitly shareable files. Record OS/browser/viewer versions, source commit, fixture identity, exact steps, expected and actual behavior, output verification and a linked defect for every failure.
 
 - Contract: open, annotate, edit, save, retain the download on mobile, reopen in a second viewer.

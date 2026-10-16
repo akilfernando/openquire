@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { buildSync } from 'esbuild'
+import { fileURLToPath } from 'node:url'
 
 // Bundle the real modules into the test process. The suite uses the production
 // preview, where TypeScript source URLs are not available.
 const recoveryCode = buildSync({
-  entryPoints: [new URL('../src/recovery.ts', import.meta.url).pathname],
+  entryPoints: [fileURLToPath(new URL('../src/recovery.ts', import.meta.url))],
   bundle: true,
   format: 'iife',
   globalName: 'recoveryTest',
@@ -12,7 +13,7 @@ const recoveryCode = buildSync({
 }).outputFiles[0].text
 
 const privacyCode = buildSync({
-  entryPoints: [new URL('../src/privacy.ts', import.meta.url).pathname],
+  entryPoints: [fileURLToPath(new URL('../src/privacy.ts', import.meta.url))],
   bundle: true,
   format: 'iife',
   globalName: 'privacyTest',
