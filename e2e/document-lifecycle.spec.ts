@@ -80,7 +80,7 @@ test('a save targets its original document after the user switches tabs', async 
   await editName(page, 'Original document')
   await openFile(page, 'other.pdf', await reportPdf())
   const tabs = page.getByRole('navigation', { name: 'Open documents' })
-  await tabs.getByRole('button', { name: 'report', exact: true }).click()
+  await tabs.locator('.tab-title').filter({ hasText: 'report' }).click()
   await page.evaluate(() => { (globalThis as unknown as { holdSave: boolean }).holdSave = true })
   const download = page.waitForEvent('download')
   await page.keyboard.press('Control+s')
