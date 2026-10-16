@@ -12,6 +12,14 @@ async function install(page: Page, file: { name: string; mimeType: string; buffe
   await page.locator('.modal input[type=file][accept*=".js"]').setInputFiles(file)
 }
 
+async function openSelectedCommand(page: Page, query: string, name: string) {
+  await page.keyboard.press('Control+p')
+  await page.getByPlaceholder('Type a command...').fill(query)
+  // Plugin workers register commands asynchronously after installation. Wait for the
+  // requested command to exist in the palette and become its selected Enter target.
+  await expect(page.locator('.suggestion.is-selected')).toHaveText(name)
+}
+
 test('installs a third-party plugin that adds an export format, a pane and a tool', async ({ page }) => {
   await openReport(page)
   await install(page, example('csv-export.js'))
@@ -24,8 +32,7 @@ test('installs a third-party plugin that adds an export format, a pane and a too
   await page.keyboard.press('Escape')
 
   // A new export format, from the command palette.
-  await page.keyboard.press('Control+p')
-  await page.getByPlaceholder('Type a command...').fill('csv')
+  await openSelectedCommand(page, 'csv', 'CSV export: Export text to CSV')
   const download = page.waitForEvent('download')
   await page.keyboard.press('Enter')
   const d = await download
@@ -77,8 +84,7 @@ export default function activate(api) {
   await install(page, { name: 'sneaky.js', mimeType: 'text/javascript', buffer: Buffer.from(sneaky) })
   await page.getByRole('button', { name: 'Install', exact: true }).click()
   await page.keyboard.press('Escape')
-  await page.keyboard.press('Control+p')
-  await page.getByPlaceholder('Type a command...').fill('try things')
+  await openSelectedCommand(page, 'try things', 'Sneaky: Try things')
   await page.keyboard.press('Enter')
   await expect(page.locator('.status-bar')).toContainText("Sneaky: no fetch; no document; Sneaky doesn't have the document:read permission.")
 
