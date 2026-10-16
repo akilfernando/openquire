@@ -47,7 +47,12 @@ export interface RunResult {
 /** Runs a plugin command on a given document, for workflow steps from plugins. */
 export type PluginRunner = (plugin: string, command: string, doc: number) => Promise<unknown>
 
-export async function runOnDocument(doc: number, wf: Workflow, bates: number | undefined, ocr: OcrOptions, plugins?: PluginRunner, onStep?: (step: number, total: number) => void): Promise<RunResult> {
+export interface WorkflowProgress {
+  onOcrProgress?: (done: number, total: number) => void
+  onState?: (state: DocState) => void
+}
+
+export async function runOnDocument(doc: number, wf: Workflow, bates: number | undefined, ocr: OcrOptions, plugins?: PluginRunner, onStep?: (step: number, total: number) => void, progress: WorkflowProgress = {}): Promise<RunResult> {
   const engine = engineFor(doc)
   const result: RunResult = { state: null, bates, notes: [] }
   for (const [index, step] of wf.steps.entries()) {
@@ -55,9 +60,13 @@ export async function runOnDocument(doc: number, wf: Workflow, bates: number | u
     if (step.action === 'ocr') {
       const ids = await engine.pagesWithoutText()
       if (!ids.length) continue
-      if (step.straighten) await engine.straighten(ids)
+      if (step.straighten) {
+        const straightened = await engine.straighten(ids)
+        result.state = straightened.state
+        progress.onState?.(straightened.state)
+      }
       const { recognizePages } = await import('./ocr')
-      result.state = (await recognizePages(ids, () => {}, doc, { ...ocr, lang: step.lang ?? ocr.lang })).state ?? result.state
+      result.state = (await recognizePages(ids, (done, total) => progress.onOcrProgress?.(done, total), doc, { ...ocr, lang: step.lang ?? ocr.lang }, { onState: progress.onState })).state ?? result.state
       continue
     }
     if (step.action === 'plugin') {
@@ -107,7 +116,9 @@ export async function runBatch(files: File[], wf: Workflow, ocr: OcrOptions, onP
     try {
       const engine = engineFor(doc)
       const state = await engine.open(file.name, new Uint8Array(await file.arrayBuffer()))
-      const r = await runOnDocument(doc, wf, bates, ocr, plugins, (step, total) => controls.onStage?.(file.name, `Step ${step} of ${total}`))
+      const r = await runOnDocument(doc, wf, bates, ocr, plugins, (step, total) => controls.onStage?.(file.name, `Step ${step} of ${total}`), {
+        onOcrProgress: (done, total) => controls.onStage?.(file.name, `Text recognition: ${done} of ${total} pages processed`),
+      })
       bates = r.bates
       controls.onStage?.(file.name, 'Preparing output')
       const bytes = r.bytes ?? (await engine.save({ compress: 'standard', security: { mode: 'keep' } }))
@@ -133,3 +144,4 @@ export async function runBatch(files: File[], wf: Workflow, ocr: OcrOptions, onP
   }, null, 2))
   return { zip: zipSync(out, { level: 0 }), done, failed, cancelled, skipped }
 }
+
