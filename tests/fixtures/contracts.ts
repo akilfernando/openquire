@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url'
 import * as mupdf from 'mupdf'
 import fontkit from '@pdf-lib/fontkit'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
-import { Engine } from '../../../src/engine/core'
-import { createDigitalId } from '../../../src/engine/signing'
+import { Engine } from '../../src/engine/core'
+import { createDigitalId } from '../../src/engine/signing'
 
 export const SECRET = 'alice@example.com'
 export const ORPHAN = 'UNREACHABLE_PRIVATE_COPY_87261'
@@ -25,7 +25,7 @@ export function splitTextPdf() {
 export async function embeddedTextPdf() {
   const doc = await PDFDocument.create()
   doc.registerFontkit(fontkit)
-  const bytes = readFileSync(fileURLToPath(new URL('../../../node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf', import.meta.url)))
+  const bytes = readFileSync(fileURLToPath(new URL('../../node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf', import.meta.url)))
   const font = await doc.embedFont(bytes, { subset: true })
   const page = doc.addPage([595, 842])
   let x = 60

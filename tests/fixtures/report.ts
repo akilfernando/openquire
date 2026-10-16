@@ -1,5 +1,5 @@
 import * as mupdf from 'mupdf'
-import { Engine } from '../../../src/engine/core'
+import { Engine } from '../../src/engine/core'
 
 const text = (x: number, y: number, size: number, s: string, font = 'F1') => `BT /${font} ${size} Tf ${x} ${842 - y} Td (${s}) Tj ET`
 

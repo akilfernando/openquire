@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PDFDocument, PDFRawStream, decodePDFRawStream, PDFArray, PDFHexString, PDFName } from 'pdf-lib'
+import { PDFDocument, PDFRawStream, decodePDFRawStream, PDFArray, PDFDict, PDFHexString, PDFName } from 'pdf-lib'
 import { Engine } from '../src/engine/core'
 import { createOpenQuireMcpServer } from '../cli/src/mcp/server'
 import { embeddedTextPdf, ORPHAN, rotatedFormPdf, SECRET, signedIncrementalPdf, splitTextPdf } from './fixtures/contracts'
@@ -43,8 +43,8 @@ async function inspectRemoval(bytes: Uint8Array) {
 async function verifySignedFixture(bytes: Uint8Array) {
   const parsed = await PDFDocument.load(bytes)
   const signature = parsed.context.enumerateIndirectObjects().map(([, object]) => object)
-    .find((object) => 'get' in object && object.get(PDFName.of('ByteRange')) instanceof PDFArray)
-  if (!signature || !('get' in signature)) throw new Error('Missing fixture signature')
+    .find((object): object is PDFDict => object instanceof PDFDict && object.get(PDFName.of('ByteRange')) instanceof PDFArray)
+  if (!signature) throw new Error('Missing fixture signature')
   const ranges = signature.get(PDFName.of('ByteRange')) as PDFArray
   const offsets = ranges.asArray().map((n) => Number(n.toString()))
   const content = Buffer.concat([bytes.subarray(offsets[0], offsets[0] + offsets[1]), bytes.subarray(offsets[2], offsets[2] + offsets[3])])

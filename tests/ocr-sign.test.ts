@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import * as mupdf from 'mupdf'
-import { PDFDocument as LibDoc, StandardFonts } from 'pdf-lib'
+import { PDFDocument as LibDoc } from 'pdf-lib'
 import { createWorker } from 'tesseract.js'
 import { scannedPdf, textPdf } from './fixtures/invoice'
 import { Engine } from '../src/engine/core'
