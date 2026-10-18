@@ -40,6 +40,17 @@ for (const width of [1440, 390]) for (const colorScheme of ['light', 'dark'] as 
     await expect(toggle).toBeFocused()
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    // Closing a drawer can resize the canvas. Wait for the report text to be
+    // painted, rather than recording a transient blank render as visual evidence.
+    await expect.poll(() => page.locator('.page canvas').first().evaluate(canvas => {
+      const c = canvas as HTMLCanvasElement
+      const pixels = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data
+      let ink = 0
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] > 0 && pixels[i] < 150 && pixels[i + 1] < 150 && pixels[i + 2] < 150) ink++
+      }
+      return ink
+    })).toBeGreaterThan(100)
     await info.attach('workspace-closed.png', { body: await page.screenshot({ path: info.outputPath('workspace-closed.png') }), contentType: 'image/png' })
     await expect(page.locator('.document-save-state')).toHaveText('No unsaved changes')
   })
