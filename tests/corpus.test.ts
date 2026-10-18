@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { PDFDocument, PDFRawStream, decodePDFRawStream, PDFArray, PDFDict, PDFHexString, PDFName } from 'pdf-lib'
 import { Engine } from '../src/engine/core'
 import { createDigitalId } from '../src/engine/signing'
@@ -87,7 +87,7 @@ describe('shared permanent-redaction contract', () => {
       const cliOut = join(root, `cli-${++sequence}`)
       const cli = spawnSync(process.execPath, [bin, 'redact', inputPath, '--pattern', 'email', '-o', cliOut], { encoding: 'utf8' })
       expect(cli.status, cli.stderr).toBe(0)
-      await inspectRemoval(new Uint8Array(readFileSync(join(cliOut, inputPath.split('/').pop()!))))
+      await inspectRemoval(new Uint8Array(readFileSync(join(cliOut, basename(inputPath)))))
 
       const server = createOpenQuireMcpServer({ allowedDirs: [root] })
       // @ts-expect-error Exercise the registered tool handler with its real engine and filesystem.
