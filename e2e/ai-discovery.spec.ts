@@ -17,6 +17,7 @@ interface ClaudeMockOptions {
   folder?: string | null
   failLink?: boolean
   holdLink?: boolean
+  failSetupLink?: boolean
 }
 
 async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMockOptions = {}) {
@@ -27,6 +28,7 @@ async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMock
       folder: claude.folder === undefined ? 'C:\\Users\\Akil\\Documents\\PDFs' : claude.folder,
       failLink: claude.failLink ?? false,
       holdLink: claude.holdLink ?? false,
+      failSetupLink: claude.failSetupLink ?? false,
       pickerCalls: 0, linkCalls: 0, linkRelease: null as (() => void) | null,
     }
     Object.defineProperty(window, '__aiDiscoveryNativeMock', { configurable: true, value: state })
@@ -44,6 +46,7 @@ async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMock
           if (command === 'plugin:event|unlisten' || command === 'take_opened_files') return null
           if (command === 'native_tools') return { libreoffice: null, tesseract: null, tesseract_langs: [] }
           if (command === 'plugin:dialog|open') { state.pickerCalls++; return state.folder }
+          if (command === 'open_setup_link' && state.failSetupLink) throw new Error('Injected browser open failure')
           if (command === 'link_claude_desktop' || command === 'link_codex' || command === 'link_chatgpt_desktop') {
             state.linkCalls++
             if (state.holdLink) await new Promise<void>(resolve => { state.linkRelease = resolve })
@@ -301,6 +304,19 @@ test('Claude setup stays opt-in and manual instructions expose the pinned packag
   await expect(command).toBeHidden()
   await manual.locator(':scope > summary').click()
   await expect(command).toContainText('https://github.com/akilfernando/openquire/releases/download/desktop-v0.2.0-rc.1/openquire-1.0.3.tgz')
+})
+
+test('Claude Node.js setup link uses the desktop browser command and shows a manual fallback on failure', async ({ page }) => {
+  const { claudeItem } = await openClaudeConnection(page, { failSetupLink: true })
+  const connectionDetails = claudeItem.locator('details').filter({ has: page.getByText('What this connection does', { exact: true }) })
+  await connectionDetails.locator(':scope > summary').click()
+  await connectionDetails.getByRole('link', { name: 'Get Node.js', exact: true }).click()
+  await expect(connectionDetails.getByRole('alert')).toHaveText('Could not open your browser. Open this address manually: https://nodejs.org/en/download')
+  const state = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock)
+  const openLink = state.invoked.find((call: any) => call.command === 'open_setup_link')
+  expect(openLink?.args).toEqual({ url: 'https://nodejs.org/en/download' })
+  expect(state.calls).not.toContain('link_claude_desktop')
+  expect(state.calls).not.toContain('plugin:dialog|open')
 })
 
 test('Connect Claude Desktop picks a folder and writes only that exact allowed path', async ({ page }) => {

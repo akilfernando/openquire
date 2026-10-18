@@ -496,3 +496,39 @@ ChatGPT setup/retry, existing Claude/Codex flows, mobile layout, reduced motion
 and automated accessibility. Initial selector/clock test failures were corrected
 and the complete 75-case suite passed on rerun. Human client handshakes remain
 NOT RUN; configuration writing and mocked UI checks do not establish them.
+
+### Provider and local-model onboarding completion — 0.2.2
+
+The API setup Continue action now checks the selected endpoint/key and lists its
+models, preselecting a sole result. The finish step explicitly offers Save and
+enable AI, with an option to keep AI off. Rejected keys can be corrected and
+retried; safe errors do not echo provider responses. An unverified manual model
+path requires an explicit choice when listing is unavailable. Catalogue access
+continues to mean exactly that, not verified inference, billing or image support.
+
+Ollama's normal path does not require a key. Discovery can prefill a sole local
+model; an empty catalogue explains how to add one and refresh. A model missing
+from a successful Ollama catalogue cannot be selected accidentally. Installing
+Ollama/Node and restarting external clients remain explicit handoffs where the
+needed software or client reload is outside OpenQuire's control.
+
+API-key, Ollama and runtime help links now open in the desktop user's system
+browser through Tauri's opener plugin and an exact seven-URL allowlist. Arbitrary
+URLs, file paths and shell targets are refused. Browser-open failure shows the
+manual address. Technical/setup alternatives remain in disclosures.
+
+Validation so far: production build, 47 focused unit checks, all 237 unit tests
+with file parallelism disabled (six environment-dependent skips), and two native
+setup-link tests passed. The normal parallel unit run exposed concurrent CLI/
+corpus rebuilds sharing cli/dist; CLI tests passed independently and the complete
+suite passed sequentially. Browser integration, updated document-consent tests,
+candidate Actions checks and signed all-platform release validation are pending.
+Human installed-client acceptance and live provider inference remain NOT RUN.
+
+Final local UI checks for this increment: all 117 provider/discovery checks across
+Chromium, Firefox and WebKit passed, plus the two document-consent/locked-storage
+integration checks. Initial test fixture/label issues were corrected before the
+complete rerun. The Windows Ollama origin limitation remains a release gate:
+its upstream defaults omit http(s)://tauri.localhost, so the next focused increment
+must use native desktop HTTP for AI discovery/checks and inference before release.
+Source verified: https://github.com/ollama/ollama/blob/main/envconfig/config.go.

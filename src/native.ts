@@ -221,3 +221,7 @@ export async function linkChatGPTDesktop(allowedDir: string): Promise<string> {
   if (!isDesktop) throw new Error('Use OpenQuire desktop to connect ChatGPT.')
   return invoke<string>('link_chatgpt_desktop', { allowedDir })
 }
+
+export async function openSetupLink(url: string): Promise<void> {
+  return invoke<void>('open_setup_link', { url })
+}
