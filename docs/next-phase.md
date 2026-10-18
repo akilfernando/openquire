@@ -153,3 +153,24 @@ text opaque throughout the reveal motion instead of relaxing axe checks.
 The save lifecycle test now polls the beforeunload guard because the saved
 revision can render before asynchronous save cleanup completes. The guard
 itself is unchanged. Candidate results are tracked in issue #44.
+
+## Home routing and operation feedback — 18 October 2026
+
+Home task cards now carry the chosen group through file opening: Edit selects
+its existing tool; the other groups expand the relevant Tools sections and focus
+the first heading. Narrow layouts close the opposite drawer. Routing is scoped
+to that import; cancellation and failure consume the intent, and ordinary Open
+starts without it. No conversion, signature, redaction or other mutation runs
+merely because a group was chosen. Search and manual section controls remain
+available, with fields preserved during filtering.
+
+Text, HTML and PNG exports now report completion consistently with Office and
+Markdown exports. The message says “Download prepared” because browser download
+retention is outside the app's control. Busy, completion and failure feedback
+share a polite live region; the existing operation guard and error handling stay
+in place. This package does not add cancellation to indivisible export work.
+
+Cross-browser regressions cover every Home group on narrow layouts, picker
+cancellation, unchanged source revisions, download names, completion/error
+announcements and the save cleanup race. Full local/candidate results belong in
+issue #44. Native dialogs and independent-viewer acceptance remain NOT RUN.

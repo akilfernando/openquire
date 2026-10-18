@@ -6,7 +6,7 @@ import { fileName } from '../native'
 const icons = [PenLine, Layers, ScanText, Signature, ShieldCheck, Workflow]
 
 export default function Home({ onOpen, onBlank, onCommands, recent, onRecent, openShortcut }: {
-  onOpen: () => void; onBlank: () => void; onCommands: () => void
+  onOpen: (group?: number) => void; onBlank: () => void; onCommands: () => void
   recent: string[]; onRecent: (path: string) => void; openShortcut?: string
 }) {
   const [query, setQuery] = useState('')
@@ -20,7 +20,7 @@ export default function Home({ onOpen, onBlank, onCommands, recent, onRecent, op
         <h1 id="home-title">{m.home.title}</h1>
         <p className="home-description">{m.home.description}</p>
         <div className="home-actions">
-          <button className="home-primary" onClick={onOpen}><FolderOpen size={19} />{m.workspace.emptyOpen}{openShortcut && <kbd>{openShortcut}</kbd>}</button>
+          <button className="home-primary" onClick={() => onOpen()}><FolderOpen size={19} />{m.workspace.emptyOpen}{openShortcut && <kbd>{openShortcut}</kbd>}</button>
           <button onClick={onBlank}>{m.workspace.emptyBlank}</button>
         </div>
         <p className="home-drop">{m.home.drop}</p>
@@ -32,7 +32,7 @@ export default function Home({ onOpen, onBlank, onCommands, recent, onRecent, op
           {groups.map(group => { const Icon = icons[group.index]; return <details className="home-tool" key={group.title}>
             <summary><Icon size={22} /><span><h3>{group.title}</h3><span className="home-tool-description">{group.description}</span></span><span className="home-expand" aria-hidden="true">+</span></summary>
             <p className="home-tool-keywords">{group.tools}</p>
-            <div className="home-tool-detail"><p>{group.hint}</p><button onClick={onOpen}>{m.home.start}<ArrowUpRight size={15} /></button></div>
+            <div className="home-tool-detail"><p>{group.hint}</p><button onClick={() => onOpen(group.index)}>{m.home.start}<ArrowUpRight size={15} /></button></div>
           </details> })}
         </div>
         {groups.length === 0 && <div className="home-no-results" role="status"><p>{m.home.empty}</p><button onClick={() => setQuery('')}>{m.home.clear}</button></div>}

@@ -198,7 +198,7 @@ export const en = {
 
   status: {
     noTables: 'No tables were found to export',
-    exported: (file: string) => `Saved ${file}`,
+    exported: (file: string) => `Download prepared: ${file}`,
     tagged: (notes: string[]) => ['Tagged the document.', ...notes].join(' '),
     error: (message: string) => `Error: ${message}`,
     saved: (file: string, size: string) => `Saved ${file}, ${size}`,

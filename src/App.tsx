@@ -113,6 +113,9 @@ export default function App() {
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false)
   const zoomMenuRef = useRef<HTMLDivElement>(null)
   const toolsToggleRef = useRef<HTMLButtonElement>(null)
+  const homeIntent = useRef<number | undefined>(undefined)
+  const [toolRoute, setToolRoute] = useState<{ id: number; group: number } | null>(null)
+  const homeSections: (keyof typeof m.discovery.keywords)[][] = [[], ['organize', 'split'], ['export', 'ocr'], ['forms', 'digitalSignature'], ['redact', 'security', 'sanitize'], ['archive', 'stamps', 'security']]
   const [tool, setTool] = useState<Tool>('select')
   const [colors, setColors] = useState(saved.colors ?? { markup: '#ffd400', draw: '#e11d48', text: '#111111' })
   const [strokeWidth, setStrokeWidth] = useState(saved.strokeWidth ?? 2)
@@ -1027,6 +1030,8 @@ export default function App() {
       importController.current = controller
       setImportStopping(false)
       setImportReport(null)
+      const intent = homeIntent.current
+      homeIntent.current = undefined
       const target = engineFor(activeDocument())
       try {
         const results = await importFiles(files, {
@@ -1073,6 +1078,12 @@ export default function App() {
                 paths.current.set(activeDocument(), path)
                 setRecent(addRecent(path))
               }
+              if (opened && intent !== undefined) {
+                setToolRoute({ id: activeDocument(), group: intent })
+                setTool(intent === 0 ? 'edittext' : 'select')
+                setRightOpen(intent !== 0)
+                if (narrow) setLeftOpen(false)
+              }
               return !!opened
             }
           },
@@ -1085,11 +1096,24 @@ export default function App() {
       }
     })
 
-  /** Opens files: the native dialog in the desktop app, the file picker in the browser. */
-  const openDialog = () => {
+  // A cancelled picker must not leave an intent for a later import.
+  useEffect(() => {
+    const input = openRef.current
+    const cancel = () => { homeIntent.current = undefined }
+    input?.addEventListener('cancel', cancel)
+    return () => input?.removeEventListener('cancel', cancel)
+  }, [])
+  /** Opens files and carries an optional Home task through this import only. */
+  const openDialog = (group?: number) => {
+    homeIntent.current = group
     if (!isDesktop) return openRef.current!.click()
     void pickFiles().then((picked) => {
       if (picked.length) void openFiles(picked.map((p) => p.file), false, picked.map((p) => p.path))
+      else homeIntent.current = undefined
+    }).catch(error => {
+      homeIntent.current = undefined
+      const text = m.status.error(error instanceof Error ? error.message : String(error))
+      setStatus(text); setStatusError(text)
     })
   }
 
@@ -1657,8 +1681,16 @@ export default function App() {
         apply(await engine.flatten(annots, widgets))
         record({ action: 'flatten', annots, widgets })
       }),
-    exportImages: () => void run(m.busy.renderingImages, async () => download(await engine.exportImages(2), `${doc!.name}-images.zip`, 'application/zip')),
-    exportText: () => void run(m.busy.extractingText, async () => download(await engine.exportText(), `${doc!.name}.txt`, 'text/plain')),
+    exportImages: () => void run(m.busy.renderingImages, async () => {
+      const file = `${doc!.name}-images.zip`
+      download(await engine.exportImages(2), file, 'application/zip')
+      setStatus(m.status.exported(file))
+    }),
+    exportText: () => void run(m.busy.extractingText, async () => {
+      const file = `${doc!.name}.txt`
+      download(await engine.exportText(), file, 'text/plain')
+      setStatus(m.status.exported(file))
+    }),
     exportMarkdown: () =>
       void run(m.busy.converting, async () => {
         const file = `${doc!.name}.md`
@@ -1679,7 +1711,11 @@ export default function App() {
         download(bytes, file, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         setStatus(m.status.exported(file))
       }),
-    exportHtml: () => void run(m.busy.converting, async () => download(await engine.exportHtml(), `${doc!.name}.html`, 'text/html')),
+    exportHtml: () => void run(m.busy.converting, async () => {
+      const file = `${doc!.name}.html`
+      download(await engine.exportHtml(), file, 'text/html')
+      setStatus(m.status.exported(file))
+    }),
     setMeta: (meta) => {
       // Only the properties that changed are recorded, so a workflow doesn't copy this file's title.
       const before = docRef.current!.meta
@@ -2268,13 +2304,13 @@ export default function App() {
               )}
             </>
           ) : (
-            <Home onOpen={() => openDialog()} onBlank={() => newBlank()} onCommands={() => setPalette(true)}
+            <Home onOpen={group => openDialog(group)} onBlank={() => newBlank()} onCommands={() => setPalette(true)}
               recent={recent} onRecent={p => openPaths([p])} openShortcut={hk('open')} />
           )}
         </div>
       </div>
 
-      {doc && <ToolsPanel key={`tools-${active}`} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} open={rightOpen} onClose={() => { setRightOpen(false); toolsToggleRef.current?.focus() }} />}
+      {doc && <ToolsPanel key={`tools-${active}-${toolRoute?.id === active ? toolRoute.group : "default"}`} initialSections={toolRoute?.id === active ? homeSections[toolRoute.group] : undefined} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} open={rightOpen} onClose={() => { setRightOpen(false); toolsToggleRef.current?.focus() }} />}
       {doc && narrow && (leftOpen || rightOpen) && <div className="drawer-scrim" onClick={() => { setLeftOpen(false); setRightOpen(false) }} />}
 
       <div className="status-bar">
@@ -2284,8 +2320,10 @@ export default function App() {
             <button className="clickable-icon" aria-label={m.workflows.stop} title={m.workflows.stop} onClick={stopRecording}><StopIcon size={14} /></button>
           </span>
         )}
-        {busy && <span className="status-item"><Loader2 size={15} className="spin" />{busy}</span>}
-        {!busy && status && <span className={`status-item${status === statusError ? ' error' : ''}`}>{status}</span>}
+        <span role="status" aria-live="polite" aria-atomic="true">
+          {busy && <span className="status-item"><Loader2 size={15} className="spin" />{busy}</span>}
+          {!busy && status && <span className={`status-item${status === statusError ? ' error' : ''}`}>{status}</span>}
+        </span>
         {doc?.encrypted && <span className="status-item" title={m.status.passwordProtected}><Lock size={15} />{m.status.protected}</span>}
         {doc && doc.signatures.length > 0 && (
           <span className={`status-item ${signedOk ? 'ok' : 'error'}`} title={m.status.signatures}>
