@@ -1610,6 +1610,17 @@ export default function App() {
 
   // ---- tool panel actions -------------------------------------------------------------------
 
+  // Keep the operation guard active through the native dialog and disk write.
+  const exportOutput = async (bytes: Uint8Array | string, file: string, mime: string) => {
+    if (isDesktop) {
+      const path = await saveAs(file, bytes)
+      setStatus(path ? m.status.exportSaved(fileName(path)) : m.status.exportCancelled)
+    } else {
+      download(bytes, file, mime)
+      setStatus(m.status.exported(file))
+    }
+  }
+
   const panelActions: PanelActions = {
     rotate: (delta) => {
       const pages = pageSetNow()
@@ -1683,38 +1694,32 @@ export default function App() {
       }),
     exportImages: () => void run(m.busy.renderingImages, async () => {
       const file = `${doc!.name}-images.zip`
-      download(await engine.exportImages(2), file, 'application/zip')
-      setStatus(m.status.exported(file))
+      await exportOutput(await engine.exportImages(2), file, 'application/zip')
     }),
     exportText: () => void run(m.busy.extractingText, async () => {
       const file = `${doc!.name}.txt`
-      download(await engine.exportText(), file, 'text/plain')
-      setStatus(m.status.exported(file))
+      await exportOutput(await engine.exportText(), file, 'text/plain')
     }),
     exportMarkdown: () =>
       void run(m.busy.converting, async () => {
         const file = `${doc!.name}.md`
-        download(await engine.exportMarkdown(), file, 'text/markdown')
-        setStatus(m.status.exported(file))
+        await exportOutput(await engine.exportMarkdown(), file, 'text/markdown')
       }),
     exportDocx: () =>
       void run(m.busy.exportingOffice, async () => {
         const file = `${doc!.name}.docx`
-        download(await engine.exportDocx(), file, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-        setStatus(m.status.exported(file))
+        await exportOutput(await engine.exportDocx(), file, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
       }),
     exportXlsx: () =>
       void run(m.busy.exportingOffice, async () => {
         const bytes = await engine.exportXlsx()
         if (!bytes) return setStatus(m.status.noTables)
         const file = `${doc!.name}.xlsx`
-        download(bytes, file, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        setStatus(m.status.exported(file))
+        await exportOutput(bytes, file, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       }),
     exportHtml: () => void run(m.busy.converting, async () => {
       const file = `${doc!.name}.html`
-      download(await engine.exportHtml(), file, 'text/html')
-      setStatus(m.status.exported(file))
+      await exportOutput(await engine.exportHtml(), file, 'text/html')
     }),
     setMeta: (meta) => {
       // Only the properties that changed are recorded, so a workflow doesn't copy this file's title.
@@ -2081,7 +2086,7 @@ export default function App() {
           {/* On phones the ribbon is hidden, so its essentials move here. */}
           <span className="phone-only">
             <IconButton Icon={PanelLeft} label={m.actions.toggleLeft} disabled={!doc} active={doc ? leftOpen : false} onClick={() => setLeftOpen((o) => !o)} />
-            <IconButton Icon={FolderOpen} label={m.actions.openFile} onClick={openDialog} />
+            <IconButton Icon={FolderOpen} label={m.actions.openFile} onClick={() => openDialog()} />
           </span>
           {tabs.map((t) => {
             const isActive = t.id === active

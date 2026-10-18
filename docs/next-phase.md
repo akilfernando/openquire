@@ -174,3 +174,11 @@ Cross-browser regressions cover every Home group on narrow layouts, picker
 cancellation, unchanged source revisions, download names, completion/error
 announcements and the save cleanup race. Full local/candidate results belong in
 issue #44. Native dialogs and independent-viewer acceptance remain NOT RUN.
+
+Desktop completion for the six Export-section formats now awaits the native
+Save As dialog and actual write. Cancellation reports that no file was saved;
+write failures flow through the operation error handler. The pending-work guard
+remains active through delayed writes. A Tauri mock covers cancellation, held
+writes, successful text output and failure; this is automated contract evidence,
+not human dialog acceptance. Other output paths (for example PDF/A and batch)
+remain a separate lifecycle audit.

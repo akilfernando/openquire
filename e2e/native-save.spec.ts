@@ -9,11 +9,14 @@ async function editName(page: Page, name: string) {
   await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toBeVisible()
 }
 
-test('cancelled native saves preserve edits and an accepted save writes the edited PDF', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     type NativeMock = {
       savePath: string | null
       saveCalls: number
+      failWrite?: boolean
+      holdWrite?: boolean
+      releaseWrite?: () => void
       writes: { path: string; bytes: number[] }[]
     }
     const state: NativeMock = { savePath: null, saveCalls: 0, writes: [] }
@@ -40,6 +43,8 @@ test('cancelled native saves preserve edits and an accepted save writes the edit
             return state.savePath
           }
           if (command === 'write_file') {
+            if (state.holdWrite) await new Promise<void>(resolve => { state.releaseWrite = resolve })
+            if (state.failWrite) throw new Error('Injected native export failure')
             const bytes = args instanceof Uint8Array ? args : new Uint8Array(args as ArrayBuffer)
             const path = decodeURIComponent(options?.headers?.path ?? '')
             state.writes.push({ path, bytes: Array.from(bytes) })
@@ -51,6 +56,9 @@ test('cancelled native saves preserve edits and an accepted save writes the edit
     })
   })
 
+})
+
+test('cancelled native saves preserve edits and an accepted save writes the edited PDF', async ({ page }) => {
   await openReport(page)
   await editName(page, 'Ada Lovelace')
 
@@ -81,4 +89,39 @@ test('cancelled native saves preserve edits and an accepted save writes the edit
   expect(saved.path).toBe('/tmp/selected-name.pdf')
   const pdf = await PDFDocument.load(new Uint8Array(saved.bytes))
   expect(pdf.getForm().getTextField('full_name').getText()).toBe('Ada Lovelace')
+})
+
+
+test('native exports await writes and report cancellation or failure honestly', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('searchbox', { name: 'Search document tools' }).fill('export')
+  const output = page.getByRole('button', { name: 'Text', exact: true })
+  await output.click()
+  await expect(page.locator('.status-bar [role=status]')).toHaveText('Export cancelled. No file was saved.')
+  await page.evaluate(() => {
+    const mock = (window as any).__nativeSaveMock
+    mock.savePath = '/tmp/exported.txt'
+    mock.holdWrite = true
+  })
+  await output.click()
+  await expect.poll(() => page.evaluate(() => !!(window as any).__nativeSaveMock.releaseWrite)).toBe(true)
+  await expect(page.locator('.status-bar .spin')).toBeVisible()
+  expect(await page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })).toBe(true)
+  await page.evaluate(() => (window as any).__nativeSaveMock.releaseWrite())
+  await expect(page.locator('.status-bar [role=status]')).toHaveText('Export saved: exported.txt')
+  const writes = await page.evaluate(() => (window as any).__nativeSaveMock.writes)
+  expect(writes).toHaveLength(1)
+  expect(new TextDecoder().decode(new Uint8Array(writes[0].bytes))).toContain('Quarterly Report')
+  await page.evaluate(() => {
+    const mock = (window as any).__nativeSaveMock
+    mock.holdWrite = false
+    mock.failWrite = true
+  })
+  await output.click()
+  await expect(page.locator('.status-bar [role=status]')).toContainText('Injected native export failure')
+  await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toHaveCount(0)
 })
