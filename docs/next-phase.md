@@ -189,7 +189,7 @@ The next phase treats Anthropic/Claude, OpenAI, Google AI/Gemini, xAI/Grok,
 Ollama and custom compatible services as equal choices. Keep all AI opt-in and
 keep document disclosure approval independent of the selected provider.
 
-### Package 1: provider connection foundation (implemented; candidate validation)
+### Package 1: provider connection foundation (merged in #60)
 
 Use one endpoint resolver for model discovery, connection checks, consent labels
 and inference. Repair the empty OpenAI endpoint falling through to Ollama.
@@ -206,18 +206,45 @@ Settings now adapts to narrow screens, the model refresh control has an explicit
 accessible name, and saved manual model selections remain visible after reopening.
 Local build and 21 AI unit tests pass. The full local unit run has 197 passes,
 six skips and five environment failures from missing Poppler/OpenSSL on PATH;
-CI must pass those independent PDF contracts before integration. Final browser
-and candidate workflow evidence is tracked in issue #44.
+Post-merge CI passed 204 unit tests, 179 browser tests without retries, Rust tests,
+three benchmarks and the independent PDF contracts. All packaging workflows and
+Pages deployment passed. Detailed evidence is tracked in issue #44.
 Compatibility references checked 18 October 2026:
 - https://developers.openai.com/api/reference/resources/chat
 - https://ai.google.dev/gemini-api/docs/openai
 - https://docs.x.ai/developers/rest-api-reference/inference
 
+### Package 2: saved connections and diagnostics (implemented; validation in progress)
+
+Each provider retains one connection (key, endpoint and model), restoring it when
+selected. Existing active settings migrate without requiring key re-entry. The
+saved connection map is a single encrypted envelope using the existing device
+vault; active legacy key storage remains encrypted too. Endpoint/model fields in
+the legacy active settings remain plain preferences. This is device storage, not
+an independent password-protected vault or protection from code running in the app.
+
+Provider changes reset remembered document-disclosure consent. Endpoint changes
+clear the key/model for that connection. Disconnect forgets only the selected
+connection and turns AI off; revoking the actual API key remains a provider-account
+action. Private-data purge removes all profiles, including across open tabs, and
+invalidates pending writes. Switching and checks wait for credential hydration.
+Encryption failures keep profiles in memory only and show an in-dialog warning.
+
+The same cancellable, 20-second catalogue check is used for every provider.
+Diagnostics distinguish access denial, quota/rate limits, missing catalogues,
+provider outages and network/URL/CORS failures without echoing provider error
+bodies. Text, image and billing capabilities stay explicitly untested; catalogue
+presence is not a capability guarantee. No billable inference is introduced.
+
+Validation covers encrypted persistence, legacy hydration, stale saves and purge,
+all six provider switches, reload/disconnect, cancellation, safe diagnostics,
+storage failure, accessibility and narrow light/dark layouts. Final evidence and
+remaining limitations belong in issue #44. Live account validation remains NOT RUN.
+
 ### Subsequent focused packages (planned)
 
-1. Provider setup polish: securely retained separate provider profiles, explicit
-   disconnect, capability-aware model choices, bounded connection/inference
-   diagnostics and cancellation. Verify each provider with an approved minimal
+1. Capability-aware model choices and bounded inference diagnostics/cancellation.
+   Verify each provider with an approved minimal
    live request before claiming end-to-end account support. Do not infer image or
    structured-output support from a model's name or presence in a catalogue.
 2. Client-neutral MCP distribution and diagnostics: pinned/current package,

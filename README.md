@@ -37,6 +37,16 @@ Browser saves prepare downloads; the desktop app can save back to the source fil
 Annotations are standard PDF annotations that Acrobat and other
 viewers can display and reply to.
 
+AI connections are managed in **Settings → AI assistant**. Each provider keeps
+its own key, endpoint and model on this device; saved connection profiles and keys
+are encrypted using the device vault. Switching providers restores its connection
+and requires fresh document-sharing consent. **Check connection** lists models
+without sending document content; it does not verify inference, image support or
+billing. Checks can be cancelled and time out after 20 seconds. **Disconnect this
+provider** forgets its connection and turns AI off; it does not revoke the API key
+at the provider. **Purge private data** removes all saved connections. If encrypted
+storage is unavailable, Settings warns that credentials remain session-only.
+
 ## Design
 
 The interface is modelled on [Obsidian](https://obsidian.md): its neutral base color scale, thin

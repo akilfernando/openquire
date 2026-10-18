@@ -181,6 +181,9 @@ export default function App() {
     }
   })
   const [settings, setSettingsState] = useState(loadSettings)
+  const [credentialsReady, setCredentialsReady] = useState(false)
+  const [credentialStorageError, setCredentialStorageError] = useState('')
+  const settingsSaveRevision = useRef(0)
   const recoveryEnabled = useRef(!!settings.recoveryEnabled)
   recoveryEnabled.current = !!settings.recoveryEnabled
   const settingsWriter = useRef<SettingsWriter<Settings> | null>(null)
@@ -238,6 +241,7 @@ export default function App() {
   const settingsPrivacy = privacyRevision().replace(/:(purging|complete)$/, '')
   const setSettings = (s: Settings) => {
     if (settingsPrivacy !== privacyRevision().replace(/:(purging|complete)$/, '')) return
+    if (s.aiProvider !== settings.aiProvider || s.aiBaseUrl !== settings.aiBaseUrl || s.aiKey !== settings.aiKey || !s.aiEnabled || s.aiDisabled) aiAllowed.current.clear()
     if (!!s.recoveryEnabled !== recoveryEnabled.current) {
       try { setRecoveryConsent(!!s.recoveryEnabled) }
       catch (error) {
@@ -254,14 +258,21 @@ export default function App() {
       })
     }
     setSettingsState(s)
-    void settingsWriter.current!.save(s).catch((error: unknown) => {
+    const saveRevision = ++settingsSaveRevision.current
+    void settingsWriter.current!.save(s).then(() => {
+      if (saveRevision === settingsSaveRevision.current) setCredentialStorageError('')
+    }).catch((error: unknown) => {
+      if (saveRevision !== settingsSaveRevision.current) return
       const text = error instanceof Error ? error.message : 'Preferences could not be saved on this device.'
+      setCredentialStorageError(text)
       setStatus(text)
       setStatusError(text)
     })
   }
 
   const clearPrivateState = () => {
+    settingsSaveRevision.current++
+    setCredentialStorageError('')
     settingsWriter.current!.invalidate()
     invalidateRecovery()
     recoveryEnabled.current = false
@@ -269,7 +280,8 @@ export default function App() {
     recoveryKeys.current.clear()
     setRecoveries([])
     setRecoveryOpen(false)
-    setSettingsState((prev) => ({ ...prev, aiKey: '', aiProfile: '', aiEnabled: false, recoveryEnabled: false, author: 'OpenQuire user' }))
+    setSettingsState((prev) => ({ ...prev, aiKey: '', aiProfile: '', aiConnections: '', aiEnabled: false, recoveryEnabled: false, author: 'OpenQuire user' }))
+    setCredentialsReady(true)
     setRecent([])
     setAiLog([])
     aiAllowed.current.clear()
@@ -296,10 +308,12 @@ export default function App() {
     const revision = privacyRevision()
     const originalKey = settings.aiKey
     const originalProfile = settings.aiProfile
+    const originalConnections = settings.aiConnections
     void (async () => {
       let changed = false
       let key = settings.aiKey
       let profile = settings.aiProfile
+      let connections = settings.aiConnections
       if (key?.startsWith('enc:v1:') || key?.startsWith('raw:')) {
         key = await decryptSensitive(key)
         changed = true
@@ -308,12 +322,23 @@ export default function App() {
         profile = await decryptSensitive(profile)
         changed = true
       }
+      if (connections?.startsWith('enc:v1:') || connections?.startsWith('raw:')) {
+        connections = await decryptSensitive(connections)
+        changed = true
+      }
       if (changed && active && revision === privacyRevision()) {
         setSettingsState((prev) => ({
           ...prev,
           aiKey: prev.aiKey === originalKey ? key : prev.aiKey,
           aiProfile: prev.aiProfile === originalProfile ? profile : prev.aiProfile,
+          aiConnections: prev.aiConnections === originalConnections ? connections : prev.aiConnections,
         }))
+      }
+      if (active && revision === privacyRevision()) {
+        if ((originalKey?.startsWith('enc:v1:') && !key) || (originalProfile?.startsWith('enc:v1:') && !profile) || (originalConnections?.startsWith('enc:v1:') && !connections)) {
+          setCredentialStorageError('Some saved AI settings could not be unlocked on this device. Re-enter the affected credentials and check the connection.')
+        }
+        setCredentialsReady(true)
       }
     })()
     return () => { active = false; settingsWriter.current!.invalidate() }
@@ -789,6 +814,7 @@ export default function App() {
 
   /** Sends a request after the user agrees; returns null when they decline. */
   const sendAi = async (req: AiRequest, items: string[]) => {
+    if (!credentialsReady) throw new Error('Saved AI connections are still unlocking. Please try again shortly.')
     if (!settings.aiEnabled || settings.aiDisabled) throw new Error('The AI assistant is turned off.')
     if (!(await askConsent(items))) {
       setStatus(m.ai.notSent)
@@ -802,6 +828,8 @@ export default function App() {
     if (aiBusy) return
     setAiBusy(true)
     try {
+      if (!credentialsReady) throw new Error('Saved AI connections are still unlocking. Please try again shortly.')
+      if (!settings.aiEnabled || settings.aiDisabled) throw new Error('The AI assistant is turned off.')
       const entry = await fn()
       if (entry) setAiLog((l) => [...l, entry])
     } catch (e) {
@@ -2344,7 +2372,7 @@ export default function App() {
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
 
-      {settingsOpen && <SettingsModal settings={settings} onChange={setSettings} onPurge={purgePrivateData} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
+      {settingsOpen && <SettingsModal settings={settings} credentialsReady={credentialsReady} credentialStorageError={credentialStorageError} onChange={setSettings} onPurge={purgePrivateData} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
         plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} onOpenWizard={() => setShowOnboarding(true)} />}
       {showOnboarding && (
         <OnboardingModal

@@ -6,6 +6,7 @@ interface Settings {
   aiKey: string
   aiProfile: string
   theme: string
+  aiConnections?: string
 }
 
 function deferred<T>() {
@@ -18,6 +19,30 @@ function deferred<T>() {
 const settings = (aiKey: string, aiProfile: string, theme: string): Settings => ({ aiKey, aiProfile, theme })
 
 describe('SettingsWriter', () => {
+  it('encrypts the whole profile envelope and clears it on storage failure', async () => {
+    const writes: Settings[] = []
+    const raw = { ...settings('key', 'bio', 'dark'), aiConnections: JSON.stringify({ openai: { apiKey: 'secret', model: 'private-model', baseUrl: 'private-endpoint' } }) }
+    const writer = new SettingsWriter<Settings>({ encrypt: async () => 'enc:v1:cipher', write: value => writes.push(value), privacyRevision: () => 'same' })
+    await writer.save(raw)
+    assert.equal(writes[0].aiConnections, 'enc:v1:cipher')
+    assert.equal(JSON.stringify(writes).includes('secret'), false)
+    const failing = new SettingsWriter<Settings>({ encrypt: async () => { throw Error('unavailable') }, write: value => writes.push(value), privacyRevision: () => 'same' })
+    await assert.rejects(failing.save(raw))
+    assert.equal(writes[1].aiConnections, '')
+  })
+  it('preserves a locked envelope and prevents its delayed save after purge', async () => {
+    const pending = deferred<string>()
+    const writes: Settings[] = []
+    const initial = { ...settings('', '', 'dark'), aiConnections: 'enc:v1:profiles' }
+    const writer = new SettingsWriter<Settings>({ initial, encrypt: () => pending.promise, write: value => writes.push(value), privacyRevision: () => 'same' })
+    await writer.save(initial)
+    assert.equal(writes[0].aiConnections, initial.aiConnections)
+    const saving = writer.save({ ...initial, aiConnections: 'new-profile-json' })
+    writer.invalidate()
+    pending.resolve('enc:v1:new-profiles')
+    await saving
+    assert.equal(writes.length, 1)
+  })
   it('initializes with full preferences that contain non-string fields', async () => {
     const initial = { aiKey: 'enc:v1:stored-key', aiProfile: '', theme: 'dark', accentHue: 32, aiEnabled: true, trusted: [] }
     const writes: typeof initial[] = []

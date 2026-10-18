@@ -680,7 +680,7 @@ export const en = {
     aiEnabled: 'Enable the AI assistant',
     aiEnabledDesc: 'Off by default. When on, OpenQuire asks before every request and sends only what it shows you, only to the provider below.',
     aiConnectionHint: 'Choose where AI requests go. Document content is sent only after you approve an AI action. Local processing depends on the endpoint you configure.',
-    aiSwitchHint: 'Changing provider or endpoint clears the current key and model. Enter credentials for the selected service. API billing is managed by that provider.',
+    aiSwitchHint: 'Each provider keeps its own connection on this device, encrypted when saved. Switching restores that provider’s key, endpoint and model. Changing an endpoint clears its key and model. API billing is managed by the provider.',
     aiKeyRequired: 'Use an API key issued by the selected provider.',
     aiCheck: 'Check connection',
     aiChecking: 'Checking…',

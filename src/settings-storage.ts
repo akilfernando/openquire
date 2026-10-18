@@ -1,6 +1,6 @@
 import { encryptSensitive, privacyRevision } from './privacy'
 
-interface Credentials { aiKey: string; aiProfile: string }
+interface Credentials { aiKey: string; aiProfile: string; aiConnections?: string }
 interface WriterOptions<T> {
   encrypt: (value: string) => Promise<string>
   write: (settings: T) => void
@@ -14,7 +14,7 @@ export class SettingsWriter<T extends Credentials> {
   private originalCiphertexts: Set<string>
 
   constructor(options: Partial<WriterOptions<T>> & { initial?: Credentials } = {}) {
-    this.originalCiphertexts = new Set([options.initial?.aiKey, options.initial?.aiProfile]
+    this.originalCiphertexts = new Set([options.initial?.aiKey, options.initial?.aiProfile, options.initial?.aiConnections]
       .filter((value): value is string => typeof value === 'string' && value.startsWith('enc:v1:')))
     this.options = {
       encrypt: encryptSensitive,
@@ -37,11 +37,11 @@ export class SettingsWriter<T extends Credentials> {
     }
     let encrypted: T
     try {
-      const [aiKey, aiProfile] = await Promise.all([encode(settings.aiKey), encode(settings.aiProfile)])
-      encrypted = { ...settings, aiKey, aiProfile }
+      const [aiKey, aiProfile, aiConnections] = await Promise.all([encode(settings.aiKey), encode(settings.aiProfile), encode(settings.aiConnections ?? '')])
+      encrypted = { ...settings, aiKey, aiProfile, ...(settings.aiConnections !== undefined ? { aiConnections } : {}) }
     } catch {
       if (!current()) return
-      this.options.write({ ...settings, aiKey: '', aiProfile: '' })
+      this.options.write({ ...settings, aiKey: '', aiProfile: '', ...(settings.aiConnections !== undefined ? { aiConnections: '' } : {}) })
       throw new Error('Encrypted storage is unavailable. Credentials and profile are kept only for this session.')
     }
     if (current()) this.options.write(encrypted)

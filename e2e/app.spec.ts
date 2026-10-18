@@ -602,6 +602,15 @@ test('the AI assistant is off by default and never sends without consent', async
 
   const sidebar = await new AxeBuilder({ page }).include('.sidebar.left').withTags(['wcag2a', 'wcag2aa']).analyze()
   expect(sidebar.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([])
+  // Remembered disclosure permission belongs to the connection, not just the document.
+  await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByRole('button', { name: 'AI assistant', exact: true }).click()
+  await page.getByLabel('Provider', { exact: true }).selectOption('gemini')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Summarize' }).click()
+  await expect(consent).toContainText('generativelanguage.googleapis.com')
+  await consent.getByRole('button', { name: "Don't send" }).click()
+  expect(sent).toHaveLength(3)
 })
 
 test('rebinds a command shortcut and keeps it', async ({ page }) => {
