@@ -18,6 +18,8 @@ openquire-crypto = { path = "../crates/openquire-crypto" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+# The SDK does not forward credentials: omit; keep the persistent cookie jar disabled.
+tauri-plugin-http = { version = "2", default-features = false, features = ["rustls-tls", "http2", "charset", "system-proxy"] }
 percent-encoding = "2"
 cryptoki = "0.12"
 serde = { version = "1", features = ["derive"] }

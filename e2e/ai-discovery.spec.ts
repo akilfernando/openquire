@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { PRIVACY_REVISION_KEY } from '../src/privacy'
+import { installNativeHttpMock } from './native-http-mock'
+import { openFile, reportPdf } from './fixtures'
 
 const CATALOGUE = 'http://localhost:11434/v1/models'
 
@@ -21,6 +23,7 @@ interface ClaudeMockOptions {
 }
 
 async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMockOptions = {}) {
+  await installNativeHttpMock(page)
   await page.addInitScript(({ hold, claude }) => {
     const state = {
       calls: [] as string[], invoked: [] as { command: string; args?: any }[], hold, completed: 0,
@@ -42,6 +45,8 @@ async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMock
         async invoke(command: string, args?: any) {
           state.calls.push(command)
           state.invoked.push({ command, args })
+          const http = await (window as any).__forwardNativeHttpCommand(command, args, state)
+          if (http.handled) return http.value
           if (command === 'plugin:event|listen') return ++callbackId
           if (command === 'plugin:event|unlisten' || command === 'take_opened_files') return null
           if (command === 'native_tools') return { libreoffice: null, tesseract: null, tesseract_langs: [] }
@@ -73,7 +78,7 @@ async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMock
 
 async function openClaudeConnection(page: Page, claude: ClaudeMockOptions = {}) {
   await mockDesktopDetection(page, false, claude)
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   const findings = dialog.getByRole('region', { name: 'Desktop findings' })
@@ -85,7 +90,7 @@ async function openClaudeConnection(page: Page, claude: ClaudeMockOptions = {}) 
 
 async function openCodexConnection(page: Page, codex: ClaudeMockOptions = {}) {
   await mockDesktopDetection(page, false, codex)
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   const findings = dialog.getByRole('region', { name: 'Desktop findings' })
@@ -97,7 +102,7 @@ async function openCodexConnection(page: Page, codex: ClaudeMockOptions = {}) {
 
 async function openChatGPTConnection(page: Page, chatgpt: ClaudeMockOptions = {}) {
   await mockDesktopDetection(page, false, chatgpt)
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   const findings = dialog.getByRole('region', { name: 'Desktop findings' })
@@ -111,7 +116,7 @@ test('discovery waits for explicit consent, then shows local and desktop finding
   await mockDesktopDetection(page, true)
   let catalogueCalls = 0
   let releaseCatalogue!: () => Promise<void>
-  await page.route(CATALOGUE, route => { catalogueCalls++; return new Promise<void>(resolve => { releaseCatalogue = async () => { await route.fulfill({ json: { data: [{ id: 'qwen-local' }] } }); resolve() } }) })
+  await page.route(CATALOGUE, route => { catalogueCalls++; return new Promise<void>(resolve => { releaseCatalogue = async () => { await route.fulfill({ json: { data: [{ id: 'qwen-local' }] }, headers: { 'access-control-allow-origin': '*' } }); resolve() } }) })
   await openDiscovery(page)
   expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)).not.toContain('detect_ai_assistants')
   expect(catalogueCalls).toBe(0)
@@ -141,7 +146,7 @@ test('discovery waits for explicit consent, then shows local and desktop finding
 
 test('stopping a pending search ignores late local catalogue results', async ({ page }) => {
   let fulfill!: () => Promise<void>
-  await page.route(CATALOGUE, route => new Promise<void>(resolve => { fulfill = async () => { await route.fulfill({ json: { data: [{ id: 'late-model' }] } }); resolve() } }))
+  await page.route(CATALOGUE, route => new Promise<void>(resolve => { fulfill = async () => { await route.fulfill({ json: { data: [{ id: 'late-model' }] }, headers: { 'access-control-allow-origin': '*' } }); resolve() } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   await expect.poll(() => !!fulfill).toBe(true)
@@ -152,10 +157,24 @@ test('stopping a pending search ignores late local catalogue results', async ({ 
   await expect(dialog.getByText('late-model')).toHaveCount(0)
 })
 
+test('desktop Stop aborts the in-flight native HTTP catalogue request', async ({ page }) => {
+  await mockDesktopDetection(page)
+  let routeAborted = false
+  page.on('requestfailed', request => { if (request.url() === CATALOGUE) routeAborted = true })
+  await page.route(CATALOGUE, () => new Promise<void>(() => {}))
+  const dialog = await openDiscovery(page)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls.includes('plugin:http|fetch'))).toBe(true)
+  await dialog.getByRole('button', { name: 'Stop search', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.http?.cancelled.length ?? 0)).toBeGreaterThan(0)
+  await expect.poll(() => routeAborted).toBe(true)
+  await expect(dialog.getByRole('region', { name: 'Local models' })).toHaveCount(0)
+})
+
 test('immediate discovery results remain in the searching state for 900 ms', async ({ page }) => {
   await page.clock.pauseAt(new Date('2025-01-01T00:00:00Z'))
   await mockDesktopDetection(page)
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [{ id: 'qwen-local' }] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [{ id: 'qwen-local' }] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   const catalogueResponse = page.waitForResponse(CATALOGUE)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
@@ -173,7 +192,7 @@ test('immediate discovery results remain in the searching state for 900 ms', asy
 test('stopping during the minimum search delay discards already returned results', async ({ page }) => {
   await page.clock.pauseAt(new Date('2025-01-01T00:00:00Z'))
   await mockDesktopDetection(page)
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [{ id: 'early-model' }] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [{ id: 'early-model' }] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   const catalogueResponse = page.waitForResponse(CATALOGUE)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
@@ -202,7 +221,7 @@ test('manual provider setup opens AI settings without enabling or saving a draft
 })
 
 test('reviewing a local model opens a populated manual setup and cancel leaves settings unchanged', async ({ page }) => {
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [{ id: 'qwen-local' }, { id: 'llama-local' }] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [{ id: 'qwen-local' }, { id: 'llama-local' }] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   await expect(dialog.getByRole('region', { name: 'Local models' })).toBeVisible()
@@ -222,6 +241,62 @@ test('reviewing a local model opens a populated manual setup and cancel leaves s
   await expect(setup).toHaveCount(0)
   expect(await page.evaluate(() => localStorage.getItem('openquire.settings'))).toBe(before)
   await expect(page.getByRole('checkbox', { name: 'Enable the AI assistant', exact: true })).not.toBeChecked()
+})
+
+test('desktop local discovery uses native HTTP safely and saves its sole model as an enabled provider', async ({ page }) => {
+  await mockDesktopDetection(page)
+  let summaries = 0
+  await page.route('http://localhost:11434/v1/chat/completions', async route => {
+    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'POST, OPTIONS' }
+    if (route.request().method() === 'OPTIONS') { await route.fulfill({ status: 204, headers }); return }
+    summaries++
+    expect(route.request().postDataJSON().model).toBe('qwen-local')
+    await route.fulfill({ headers, json: { choices: [{ message: { content: 'A local summary of the report [p. 1].' } }] } })
+  })
+  await page.route(CATALOGUE, route => route.fulfill({
+    json: { data: [{ id: 'qwen-local' }] },
+    headers: { 'access-control-allow-origin': '*' },
+  }))
+  const dialog = await openDiscovery(page)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  await expect(dialog.getByRole('region', { name: 'Local models' })).toContainText('1 model listed')
+  const nativeFetch = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.invoked.find((call: any) => call.command === 'plugin:http|fetch'))
+  expect(nativeFetch).toBeTruthy()
+  expect(nativeFetch?.args.clientConfig).toMatchObject({ method: 'GET', url: CATALOGUE, maxRedirections: 0 })
+  expect(nativeFetch!.args.clientConfig.headers.map((header: [string, string]) => header[0].toLowerCase())).not.toContain('origin')
+
+  await dialog.getByRole('button', { name: 'Review local setup', exact: true }).click()
+  const setup = page.getByRole('region', { name: 'Provider setup' })
+  await expect(setup.getByLabel('Model', { exact: true })).toHaveValue('qwen-local')
+  await expect(setup.getByLabel('Enable AI when I finish', { exact: true })).toBeChecked()
+  await setup.getByRole('button', { name: 'Save and enable AI', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await expect(settings.getByLabel('Enable the AI assistant', { exact: true })).toBeChecked()
+  await expect(settings.getByRole('status')).toContainText('Ollama selected. AI assistant is on.')
+  // Encrypted settings persist asynchronously after the visible state updates.
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('openquire.settings') ?? '{}')
+    return { provider: saved.aiProvider, model: saved.aiModel }
+  })).toEqual({ provider: 'ollama', model: 'qwen-local' })
+  const calls = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)
+  expect(calls).not.toContain('link_claude_desktop')
+  expect(calls).not.toContain('link_codex')
+  expect(calls).not.toContain('link_chatgpt_desktop')
+  expect(calls).not.toContain('plugin:dialog|open')
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  await openFile(page, 'report.pdf', await reportPdf())
+  await expect(page.locator('.page canvas[width]').first()).toBeVisible()
+  await page.getByRole('tab', { name: 'Assistant', exact: true }).click()
+  await page.getByRole('button', { name: 'Summarize', exact: true }).click()
+  const consent = page.getByRole('dialog', { name: 'Send to the AI model?' })
+  await expect(consent).toContainText('localhost:11434')
+  expect(summaries).toBe(0)
+  await consent.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.locator('.ai-entry.answer')).toContainText('A local summary of the report')
+  expect(summaries).toBe(1)
+  const post = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.invoked.find((call: any) => call.command === 'plugin:http|fetch' && call.args.clientConfig.method === 'POST'))
+  expect(post.args.clientConfig.url).toBe('http://localhost:11434/v1/chat/completions')
+  expect(post.args.clientConfig.maxRedirections).toBe(0)
 })
 
 test('unreachable local service produces a friendly empty state', async ({ page }) => {
@@ -244,7 +319,7 @@ test('a pending search finishes on its own and keeps manual setup available', as
 
 test('closing during native detection discards its late result after reopening', async ({ page }) => {
   await mockDesktopDetection(page, true)
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls.includes('detect_ai_assistants'))).toBe(true)
@@ -266,7 +341,7 @@ test('closing during native detection discards its late result after reopening',
 
 test('a privacy revision closes discovery and prevents a pending result appearing on reopen', async ({ page }) => {
   let fulfill!: () => Promise<void>
-  await page.route(CATALOGUE, route => new Promise<void>(resolve => { fulfill = async () => { await route.fulfill({ json: { data: [{ id: 'private-late-model' }] } }); resolve() } }))
+  await page.route(CATALOGUE, route => new Promise<void>(resolve => { fulfill = async () => { await route.fulfill({ json: { data: [{ id: 'private-late-model' }] }, headers: { 'access-control-allow-origin': '*' } }); resolve() } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   await expect.poll(() => !!fulfill).toBe(true)
@@ -289,7 +364,7 @@ test('a privacy revision closes discovery and prevents a pending result appearin
 
 test('Claude setup stays opt-in and manual instructions expose the pinned package only on demand', async ({ page }) => {
   await mockDesktopDetection(page)
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   const calls = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)
@@ -370,7 +445,7 @@ test('Claude setup disables search, provider setup, and closing while native lin
 
 test('Codex setup is opt-in and exposes its pinned manual command only on demand', async ({ page }) => {
   await mockDesktopDetection(page)
-  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] }, headers: { 'access-control-allow-origin': '*' } }))
   const dialog = await openDiscovery(page)
   await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
   const calls = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)
