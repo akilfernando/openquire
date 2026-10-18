@@ -1,5 +1,9 @@
 # Generated PDF corpus
 
+`updater-signature.json` is a separate synthetic updater verification fixture: a
+short text payload, public verification key and Tauri signature. It contains no
+private key. Tests reject changed payload bytes, versions and signed metadata.
+
 All fixtures are generated from repository-owned test code using synthetic content.
 No customer documents, private keys, or production certificates are included.
 Run `npm ci && npm test` to generate and exercise them. The contract tests also

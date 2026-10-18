@@ -1,4 +1,8 @@
 import type { DiscoveredConnection } from '../ai-discovery'
+import type { UpdateMode } from '../update-preferences'
+import type { DesktopUpdates, UpdateState } from '../desktop-updates'
+import UpdateSettings from './UpdateSettings'
+import packageJson from '../../package.json'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ChevronRight, ExternalLink, X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
@@ -16,6 +20,8 @@ import AiConnections from './AiConnections'
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
 export interface Settings {
+  /** Desktop updates; missing preferences default to notification only. */
+  updateMode?: UpdateMode
   theme: ThemeSetting
   accentHue: number
   author: string
@@ -68,6 +74,8 @@ export const ACCENTS: { key: string; hue: number }[] = [
 type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'privacy' | 'ai' | 'hotkeys' | 'plugins' | 'about'
 
 interface Props {
+  updateState: UpdateState
+  updateController: DesktopUpdates | null
   credentialsReady: boolean
   credentialStorageError: string
   settings: Settings
@@ -98,7 +106,7 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, credentialsReady, credentialStorageError, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard, discoveredConnection, initialTab = 'appearance' }: Props) {
+export default function SettingsModal({ updateState, updateController, settings, credentialsReady, credentialStorageError, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard, discoveredConnection, initialTab = 'appearance' }: Props) {
   const set = (p: Partial<Settings>) => {
     const next = { ...settings, ...p }
     onChange(credentialsReady && ('aiKey' in p || 'aiModel' in p || 'aiBaseUrl' in p) ? rememberProvider(next) : next)
@@ -109,7 +117,7 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
   const [purging, setPurging] = useState(false)
   const [tab, setTab] = useState<Tab>(initialTab)
   const [suggestion, setSuggestion] = useState(discoveredConnection)
-  const [detail, setDetail] = useState(initialTab === 'ai')
+  const [detail, setDetail] = useState(initialTab !== 'appearance')
   const content = useRef<HTMLDivElement>(null)
   const navigation = useRef<HTMLElement>(null)
   const navScroll = useRef(0)
@@ -335,8 +343,9 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
           {tab === 'about' && (
             <>
               <h2>{m.settings.about}</h2>
+              {isDesktop && <UpdateSettings mode={settings.updateMode} onMode={updateMode => set({ updateMode })} state={updateState} controller={updateController} />}
               <Item name={m.settings.version} desc={m.app.tagline}>
-                <span className="muted tnum">0.1.0</span>
+                <span className="muted tnum">{packageJson.version}</span>
               </Item>
               <Item name={m.settings.license} desc={m.settings.licenseDesc}>
                 <span className="muted">AGPL-3.0</span>

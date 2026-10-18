@@ -1,4 +1,6 @@
 import type { DiscoveredConnection } from './ai-discovery'
+import { DEFAULT_UPDATE_MODE, updateModeOf } from './update-preferences'
+import { DesktopUpdates, checkDesktopUpdate, type UpdateState } from './desktop-updates'
 import Home from './components/Home'
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import {
@@ -86,6 +88,7 @@ const STAMP_PRESETS: [string, Omit<StampSpec, 'pageIds'>][] = [
 const SETTINGS_KEY = 'openquire.settings'
 function loadSettings(): Settings {
   const fallback: Settings = {
+    updateMode: DEFAULT_UPDATE_MODE,
     theme: 'system', accentHue: 32, author: '', tsa: 'https://rfc3161.ai.moda', airGappedSign: false, trusted: [], ocrLang: 'auto', ocrDownload: false, ocrStraighten: true, nativeTools: true, hotkeys: {}, themes: [], activeTheme: '', snippets: [],
     aiEnabled: false, aiDisabled: false, aiProvider: 'anthropic', aiKey: '', aiModel: '', aiBaseUrl: '', aiProfile: '',
   }
@@ -93,6 +96,7 @@ function loadSettings(): Settings {
     const legacyAuthor = localStorage.getItem('openquire.author') ?? ''
     const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}')
     return { ...fallback, author: legacyAuthor, ...stored,
+      updateMode: updateModeOf(stored.updateMode),
       recoveryEnabled: stored.recoveryEnabled === true && (localStorage.getItem(RECOVERY_CONSENT_KEY) ?? '').startsWith('enabled:') }
   } catch {
     return fallback
@@ -141,6 +145,11 @@ export default function App() {
   const blockingTabOperations = useRef(0)
   const savingDocuments = useRef(new Set<number>())
   const nativeCloseAllowed = useRef(false)
+  const updateInstalling = useRef(false)
+  const openingFiles = useRef(0)
+  const settingsWrites = useRef(0)
+  const updateController = useRef<DesktopUpdates | null>(null)
+  const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' })
   const [, setSessionTick] = useState(0)
   const [closePrompt, setClosePrompt] = useState<{ id: number } | { window: true } | null>(null)
   const [closingSave, setClosingSave] = useState(false)
@@ -176,7 +185,7 @@ export default function App() {
   const [linkEdit, setLinkEdit] = useState<{ pageId: number; rect: Rect | null; index: number | null } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [discoveredConnection, setDiscoveredConnection] = useState<DiscoveredConnection | undefined>()
-  const [settingsStart, setSettingsStart] = useState<'appearance' | 'ai'>('appearance')
+  const [settingsStart, setSettingsStart] = useState<'appearance' | 'ai' | 'about'>('appearance')
   const [showAssistantSetup, setShowAssistantSetup] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try {
@@ -239,12 +248,52 @@ export default function App() {
   const replaceRef = useRef<HTMLInputElement>(null)
   const replacing = useRef<{ pageId: number; index: number } | null>(null)
 
+  const updateSafety = useRef<(automatic: boolean) => boolean>(() => false)
+  updateSafety.current = (automatic) => {
+    if (updateInstalling.current || tabs.length || docRef.current || side || busy || aiBusy ||
+      pendingOperations.current.size || blockingTabOperations.current || savingDocuments.current.size ||
+      importController.current || ocrController.current || batchController.current || checkpointRunning.current ||
+      openingFiles.current || settingsWrites.current || !credentialsReady || credentialStorageError || recoveryBusy ||
+      privacyRevision().endsWith(':purging')) return false
+    const dialogs = [...document.querySelectorAll('.modal')]
+    if (dialogs.some(dialog => automatic || !dialog.classList.contains('settings'))) return false
+    updateInstalling.current = true
+    nativeCloseAllowed.current = true
+    setSettingsOpen(false)
+    return true
+  }
+  const updateMode = updateModeOf(settings.updateMode)
+  const latestUpdateMode = useRef(updateMode)
+  latestUpdateMode.current = updateMode
+  useEffect(() => {
+    if (!isDesktop) return
+    let lastCheck = 0
+    const controller = new DesktopUpdates({
+      check: checkDesktopUpdate,
+      acquireInstall: automatic => updateSafety.current(automatic),
+      releaseInstall: () => { updateInstalling.current = false; nativeCloseAllowed.current = false },
+      relaunch: async () => { const { relaunch } = await import('@tauri-apps/plugin-process'); await relaunch() },
+      readLastCheck: () => {
+        try { const value = Number(localStorage.getItem('openquire.updateCheck')); return Number.isFinite(value) && value <= Date.now() ? Math.max(lastCheck, value) : lastCheck }
+        catch { return lastCheck }
+      },
+      writeLastCheck: time => { lastCheck = time; try { localStorage.setItem('openquire.updateCheck', String(time)) } catch { /* Session rate limit still applies. */ } },
+    }, setUpdateState)
+    controller.setMode(latestUpdateMode.current)
+    updateController.current = controller
+    const start = setTimeout(() => void controller.tick(), 5000)
+    const timer = setInterval(() => void controller.tick(), 30_000)
+    return () => { clearTimeout(start); clearInterval(timer); controller.dispose(); updateController.current = null }
+  }, [])
+  useEffect(() => { updateController.current?.setMode(updateMode) }, [updateMode])
+
   // ---- settings and theme -------------------------------------------------------------
 
   // A delayed callback from a pre-purge dialog must not submit its old snapshot
   // as a new write. Completion of that same purge keeps this identity stable.
   const settingsPrivacy = privacyRevision().replace(/:(purging|complete)$/, '')
   const setSettings = (s: Settings) => {
+    if (updateInstalling.current) return
     if (settingsPrivacy !== privacyRevision().replace(/:(purging|complete)$/, '')) return
     if (s.aiProvider !== settings.aiProvider || s.aiBaseUrl !== settings.aiBaseUrl || s.aiKey !== settings.aiKey || !s.aiEnabled || s.aiDisabled) aiAllowed.current.clear()
     if (!!s.recoveryEnabled !== recoveryEnabled.current) {
@@ -263,7 +312,9 @@ export default function App() {
       })
     }
     setSettingsState(s)
+    updateController.current?.setMode(s.updateMode)
     const saveRevision = ++settingsSaveRevision.current
+    settingsWrites.current++
     void settingsWriter.current!.save(s).then(() => {
       if (saveRevision === settingsSaveRevision.current) setCredentialStorageError('')
     }).catch((error: unknown) => {
@@ -272,7 +323,7 @@ export default function App() {
       setCredentialStorageError(text)
       setStatus(text)
       setStatusError(text)
-    })
+    }).finally(() => { settingsWrites.current-- })
   }
 
   const clearPrivateState = () => {
@@ -461,6 +512,7 @@ export default function App() {
   // ---- engine plumbing ----------------------------------------------------------------
 
   const run = useCallback(async (label: string, fn: () => Promise<void>, id = activeDocument()) => {
+    if (updateInstalling.current) return
     pendingOperations.current.set(id, (pendingOperations.current.get(id) ?? 0) + 1)
     if (label !== m.busy.saving) blockingTabOperations.current++
     setBusy(label)
@@ -527,6 +579,7 @@ export default function App() {
 
   /** Loads a document into a new tab, or returns to the previous tab if loading fails or is cancelled. */
   const inNewTab = async (load: () => Promise<DocState | null>, alreadySaved = true) => {
+    if (updateInstalling.current) return false
     const prev = activeDocument()
     const id = newDocument()
     setActiveDocument(id)
@@ -1138,8 +1191,10 @@ export default function App() {
   }, [])
   /** Opens files and carries an optional Home task through this import only. */
   const openDialog = (group?: number) => {
+    if (updateInstalling.current) return
     homeIntent.current = group
     if (!isDesktop) return openRef.current!.click()
+    openingFiles.current++
     void pickFiles().then((picked) => {
       if (picked.length) void openFiles(picked.map((p) => p.file), false, picked.map((p) => p.path))
       else homeIntent.current = undefined
@@ -1147,15 +1202,18 @@ export default function App() {
       homeIntent.current = undefined
       const text = m.status.error(error instanceof Error ? error.message : String(error))
       setStatus(text); setStatusError(text)
-    })
+    }).finally(() => { openingFiles.current-- })
   }
 
-  const openPaths = (list: string[]) =>
+  const openPaths = (list: string[]) => {
+    if (updateInstalling.current) return
+    openingFiles.current++
     void Promise.all(list.map((p) => readPath(p).catch(() => null))).then((files) => {
       const ok = list.filter((_, i) => files[i])
       list.filter((_, i) => !files[i]).forEach((p) => setRecent(removeRecent(p)))
       if (ok.length) void openFiles(files.filter((f): f is File => !!f), false, ok)
-    })
+    }).finally(() => { openingFiles.current-- })
+  }
 
   useEffect(() => {
     if (isDesktop) setTokenSigner((key, digestInfo) => tokenSign(key as TokenKey, digestInfo))
@@ -2002,6 +2060,7 @@ export default function App() {
 
   const keys = useRef<(e: KeyboardEvent) => void>()
   keys.current = (e) => {
+    if (updateInstalling.current) return
     if (closePrompt || importProgress || importReport || ocrProgress || batchProgress || batchReport || (recoveryOpen && recoveries.length)) return
     // The Hotkeys settings tab records presses itself.
     if ((e.target as Element).closest?.('[data-recording-hotkey]')) return
@@ -2376,9 +2435,20 @@ export default function App() {
         )}
       </div>
 
+      {isDesktop && ['available', 'ready', 'downloading', 'error'].includes(updateState.phase) && updateState.version && !settingsOpen && <aside className="update-notice" aria-label="App update" role="status">
+        <span>{updateState.phase === 'error' ? 'Update needs attention' : updateState.phase === 'downloading' ? 'Downloading an update…' : `OpenQuire ${updateState.version} ${updateState.phase === 'ready' ? 'is ready to install' : 'is available'}`}</span>
+        <button onClick={() => { setSettingsStart('about'); setSettingsOpen(true) }}>Review update</button>
+      </aside>}
+      {updateState.phase === 'installing' && <Modal title="Updating OpenQuire">
+        <p role="status">Installing the update. OpenQuire will restart when it’s ready.</p>
+      </Modal>}
+      {updateState.phase === 'restart-required' && <Modal title="Restart to finish updating">
+        <p role="status">{updateState.error} If restart fails again, close and reopen the app.</p>
+        <button className="mod-cta" onClick={() => void updateController.current?.restart()}>Restart OpenQuire</button>
+      </Modal>}
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
 
-      {settingsOpen && <SettingsModal discoveredConnection={discoveredConnection} initialTab={settingsStart} settings={settings} credentialsReady={credentialsReady} credentialStorageError={credentialStorageError} onChange={setSettings} onPurge={purgePrivateData} onClose={() => { setSettingsOpen(false); setSettingsStart('appearance'); setDiscoveredConnection(undefined) }} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
+      {settingsOpen && <SettingsModal updateState={updateState} updateController={updateController.current} discoveredConnection={discoveredConnection} initialTab={settingsStart} settings={settings} credentialsReady={credentialsReady} credentialStorageError={credentialStorageError} onChange={setSettings} onPurge={purgePrivateData} onClose={() => { setSettingsOpen(false); setSettingsStart('appearance'); setDiscoveredConnection(undefined) }} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
         plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} onOpenWizard={() => setShowAssistantSetup(true)} />}
       {showOnboarding && <OnboardingModal aiAvailable={!settings.aiDisabled}
         onClose={() => setShowOnboarding(false)}

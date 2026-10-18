@@ -366,3 +366,30 @@ layouts, reduced motion and accessibility. Native fake-directory tests cover
 command files versus directories without executing tools. Exact local and GitHub
 evidence belongs in issue #44 and the focused PR. Live-provider inference and
 human native/mobile acceptance remain NOT RUN. No release is published.
+
+### Desktop updates — release preparation in progress
+
+The default update preference is **Notify me** for new installations and existing
+installations without a saved preference. Background checks should announce an
+available update; installation requires the user's choice. Automatic updates and
+manual-only checks are explicit alternatives, and saved choices are preserved.
+Automatic installation must wait until documents and ongoing work are safely
+closed. Manual-only mode must not initiate background checks.
+
+The updater is implemented locally with daily background checks, explicit manual
+checks, progress and retry feedback under Settings > About, and an in-app update
+notice. Installation atomically blocks new work and waits for all documents,
+operations, native file pickers/reads, settings writes and dialogs to finish. Changing mode revokes a pending
+automatic installation. The signed desktop feed is separate from npm releases;
+artifact signatures bind the advertised version as well as the downloaded bytes.
+
+Local validation: production build, 27 updater/preference/settings-storage/signature unit
+tests, 30 native-bridge browser checks across Chromium, Firefox and WebKit, 11 Windows native tests,
+and the installed Node 1.0.3 package consumer passed. Real signed-file verification
+rejects byte tampering and version substitution. Full candidate CI and signed
+installer builds remain pending; exact evidence will be recorded in issue #44.
+Human installed-app update/restart acceptance and live-provider inference remain
+NOT RUN. The intended desktop test release is 0.2.0 (tag desktop-v0.2.0-rc.1);
+future feed promotions must use a strictly greater app version, including the
+subsequent stable release. No release has been published at this checkpoint.
+See [desktop update delivery](desktop-updates.md) for signing and promotion.

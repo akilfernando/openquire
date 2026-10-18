@@ -32,6 +32,14 @@ export default function AiConnections({ discoveredConnection, onDiscoveryUsed, s
   const root = useRef<HTMLDivElement>(null)
   const returnFocus = useRef<AiProvider | null>(null)
   const invalidate = () => { request.current++; controller.current?.abort(); setBusy(false); setFeedback(''); setModels([]) }
+  const cancelCheck = () => {
+    // Some transports settle aborts only after a response arrives. Cancellation
+    // is immediate UI state, and that late response must never replace it.
+    request.current++
+    controller.current?.abort()
+    setBusy(false)
+    setFeedback('Connection check cancelled.')
+  }
   const finish = () => {
     invalidate(); setDraft(null)
     const provider = returnFocus.current; returnFocus.current = null
@@ -128,7 +136,7 @@ export default function AiConnections({ discoveredConnection, onDiscoveryUsed, s
         </> : <>
           <p>Choose a model, or enter its name.</p>
           <p className="hint connection-endpoint">{aiEndpoint(draft)}</p>
-          <div className="surface-actions"><button disabled={busy} onClick={() => void loadModels()}>{busy ? 'Loading models…' : 'Load models'}</button>{busy && <button onClick={() => controller.current?.abort()}>Cancel connection check</button>}</div>
+          <div className="surface-actions"><button disabled={busy} onClick={() => void loadModels()}>{busy ? 'Loading models…' : 'Load models'}</button>{busy && <button onClick={cancelCheck}>Cancel connection check</button>}</div>
           <div className="connection-field"><label htmlFor="provider-model">Model</label><div className="model-picker">
             <input id="provider-model" value={draft.model} onChange={e => setDraft(current => current ? { ...current, model: e.target.value } : null)} placeholder="Model name" autoComplete="off" />
             {models.length > 0 && <select aria-label="Choose a listed model" value="" onChange={e => { const model = e.target.value; if (model) setDraft(current => current ? { ...current, model } : null) }}><option value="">Choose from list</option>{models.map(model => <option key={model} value={model}>{model}</option>)}</select>}
