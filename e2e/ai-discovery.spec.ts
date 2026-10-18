@@ -44,7 +44,7 @@ async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMock
           if (command === 'plugin:event|unlisten' || command === 'take_opened_files') return null
           if (command === 'native_tools') return { libreoffice: null, tesseract: null, tesseract_langs: [] }
           if (command === 'plugin:dialog|open') { state.pickerCalls++; return state.folder }
-          if (command === 'link_claude_desktop' || command === 'link_codex') {
+          if (command === 'link_claude_desktop' || command === 'link_codex' || command === 'link_chatgpt_desktop') {
             state.linkCalls++
             if (state.holdLink) await new Promise<void>(resolve => { state.linkRelease = resolve })
             if (state.failLink) throw new Error('Injected assistant configuration write failure')
@@ -92,6 +92,18 @@ async function openCodexConnection(page: Page, codex: ClaudeMockOptions = {}) {
   return { dialog, codexItem }
 }
 
+async function openChatGPTConnection(page: Page, chatgpt: ClaudeMockOptions = {}) {
+  await mockDesktopDetection(page, false, chatgpt)
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  const dialog = await openDiscovery(page)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  const findings = dialog.getByRole('region', { name: 'Desktop findings' })
+  const chatgptItem = findings.locator('details').filter({ has: page.getByText('ChatGPT Desktop', { exact: true }) })
+  await expect(chatgptItem).toBeVisible()
+  await chatgptItem.locator(':scope > summary').click()
+  return { dialog, chatgptItem }
+}
+
 test('discovery waits for explicit consent, then shows local and desktop findings as they arrive', async ({ page }) => {
   await mockDesktopDetection(page, true)
   let catalogueCalls = 0
@@ -135,6 +147,43 @@ test('stopping a pending search ignores late local catalogue results', async ({ 
   await expect(dialog.getByText('Search stopped.', { exact: false })).toBeVisible()
   await expect(dialog.getByRole('region', { name: 'Local models' })).toHaveCount(0)
   await expect(dialog.getByText('late-model')).toHaveCount(0)
+})
+
+test('immediate discovery results remain in the searching state for 900 ms', async ({ page }) => {
+  await page.clock.pauseAt(new Date('2025-01-01T00:00:00Z'))
+  await mockDesktopDetection(page)
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [{ id: 'qwen-local' }] } }))
+  const dialog = await openDiscovery(page)
+  const catalogueResponse = page.waitForResponse(CATALOGUE)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  await expect(dialog.getByRole('heading', { name: 'Looking around…' })).toBeVisible()
+  await catalogueResponse
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.completed)).toBe(1)
+  await page.clock.runFor(899)
+  await expect(dialog.getByRole('region', { name: 'Local models' })).toHaveCount(0)
+  await expect(dialog.getByRole('region', { name: 'Desktop findings' })).toHaveCount(0)
+  await page.clock.runFor(1)
+  await expect(dialog.getByRole('region', { name: 'Local models' })).toBeVisible()
+  await expect(dialog.getByRole('region', { name: 'Desktop findings' })).toBeVisible()
+})
+
+test('stopping during the minimum search delay discards already returned results', async ({ page }) => {
+  await page.clock.pauseAt(new Date('2025-01-01T00:00:00Z'))
+  await mockDesktopDetection(page)
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [{ id: 'early-model' }] } }))
+  const dialog = await openDiscovery(page)
+  const catalogueResponse = page.waitForResponse(CATALOGUE)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  await expect(dialog.getByRole('heading', { name: 'Looking around…' })).toBeVisible()
+  await catalogueResponse
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.completed)).toBe(1)
+  await page.clock.runFor(400)
+  await dialog.getByRole('button', { name: 'Stop search', exact: true }).click()
+  await page.clock.runFor(500)
+  await expect(dialog.getByText('Search stopped.', { exact: false })).toBeVisible()
+  await expect(dialog.getByRole('region', { name: 'Local models' })).toHaveCount(0)
+  await expect(dialog.getByRole('region', { name: 'Desktop findings' })).toHaveCount(0)
+  await expect(dialog.getByText('early-model')).toHaveCount(0)
 })
 
 test('manual provider setup opens AI settings without enabling or saving a draft', async ({ page }) => {
@@ -246,7 +295,7 @@ test('Claude setup stays opt-in and manual instructions expose the pinned packag
   const findings = dialog.getByRole('region', { name: 'Desktop findings' })
   const item = findings.locator('details').filter({ has: page.getByText('Claude Desktop', { exact: true }) })
   await item.locator(':scope > summary').click()
-  const manual = item.locator('details')
+  const manual = item.locator('details').filter({ has: page.getByText('Manual setup', { exact: true }) })
   await expect(manual).toBeVisible()
   const command = manual.locator('code')
   await expect(command).toBeHidden()
@@ -258,7 +307,7 @@ test('Connect Claude Desktop picks a folder and writes only that exact allowed p
   const chosen = 'C:\\Users\\Akil\\Documents\\Research PDFs'
   const { claudeItem } = await openClaudeConnection(page, { folder: chosen })
   await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
-  await expect(claudeItem.getByRole('status')).toContainText('Setup saved. Restart Claude Desktop')
+  await expect(claudeItem.getByRole('status')).toContainText('Setup saved. Finish in Claude Desktop.')
   const invoked = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.invoked)
   const picker = invoked.find((call: any) => call.command === 'plugin:dialog|open')
   const link = invoked.find((call: any) => call.command === 'link_claude_desktop')
@@ -300,7 +349,7 @@ test('Claude setup disables search, provider setup, and closing while native lin
   await page.keyboard.press('Escape')
   await expect(dialog).toBeVisible()
   await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkRelease())
-  await expect(claudeItem.getByRole('status')).toContainText('Setup saved. Restart Claude Desktop')
+  await expect(claudeItem.getByRole('status')).toContainText('Setup saved. Finish in Claude Desktop.')
 })
 
 test('Codex setup is opt-in and exposes its pinned manual command only on demand', async ({ page }) => {
@@ -315,7 +364,7 @@ test('Codex setup is opt-in and exposes its pinned manual command only on demand
   const item = findings.locator('details').filter({ has: page.getByText('Codex CLI', { exact: true }) })
   await item.locator(':scope > summary').click()
   await expect(item.getByRole('button', { name: 'Connect Codex', exact: true })).toBeVisible()
-  const manual = item.locator('details')
+  const manual = item.locator('details').filter({ has: page.getByText('Manual setup', { exact: true }) })
   const command = manual.locator('code')
   await expect(command).toBeHidden()
   await manual.locator(':scope > summary').click()
@@ -345,11 +394,48 @@ test('Codex native write errors remain visible and can be retried', async ({ pag
   await expect(codexItem.getByRole('alert')).toBeVisible()
 })
 
+test('ChatGPT Desktop chooses a folder, saves its exact path, and shows Settings MCP next steps', async ({ page }) => {
+  const chosen = 'C:\\Users\\Akil\\Documents\\Research PDFs'
+  const { chatgptItem } = await openChatGPTConnection(page, { folder: chosen })
+  await chatgptItem.getByRole('button', { name: 'Connect ChatGPT Desktop', exact: true }).click()
+  await expect(chatgptItem.getByRole('status')).toContainText('Setup saved. Finish in ChatGPT Desktop.')
+  await expect(chatgptItem).toContainText('Settings → MCP servers')
+  await expect(chatgptItem).toContainText('In a local chat, use /mcp')
+  await expect(chatgptItem).toContainText('Restart ChatGPT Desktop')
+  const invoked = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.invoked)
+  const picker = invoked.find((call: any) => call.command === 'plugin:dialog|open')
+  const link = invoked.find((call: any) => call.command === 'link_chatgpt_desktop')
+  expect(picker?.args).toMatchObject({ options: { directory: true, multiple: false, title: 'Choose a folder ChatGPT Desktop can use for PDFs' } })
+  expect(link?.args).toEqual({ allowedDir: chosen })
+  expect(invoked.filter((call: any) => call.command === 'link_chatgpt_desktop')).toHaveLength(1)
+})
+
+test('canceling ChatGPT folder selection writes nothing and leaves setup available to retry', async ({ page }) => {
+  const { chatgptItem } = await openChatGPTConnection(page, { folder: null })
+  await chatgptItem.getByRole('button', { name: 'Connect ChatGPT Desktop', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.pickerCalls)).toBe(1)
+  await expect(chatgptItem.getByRole('button', { name: 'Connect ChatGPT Desktop', exact: true })).toBeEnabled()
+  expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(0)
+  await chatgptItem.getByRole('button', { name: 'Connect ChatGPT Desktop', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.pickerCalls)).toBe(2)
+  expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(0)
+})
+
+test('ChatGPT native write errors stay visible and setup can be retried', async ({ page }) => {
+  const { chatgptItem } = await openChatGPTConnection(page, { failLink: true })
+  await chatgptItem.getByRole('button', { name: 'Connect ChatGPT Desktop', exact: true }).click()
+  await expect(chatgptItem.getByRole('alert')).toHaveText('Injected assistant configuration write failure')
+  await expect(chatgptItem.getByRole('button', { name: 'Connect ChatGPT Desktop', exact: true })).toBeEnabled()
+  await chatgptItem.getByRole('button', { name: 'Connect ChatGPT Desktop', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(2)
+  await expect(chatgptItem.getByRole('alert')).toBeVisible()
+})
+
 test('Connect Codex picks a PDF folder, saves its exact path, and asks for restart', async ({ page }) => {
   const chosen = 'C:\\Users\\Akil\\Documents\\Research PDFs'
   const { codexItem } = await openCodexConnection(page, { folder: chosen })
   await codexItem.getByRole('button', { name: 'Connect Codex', exact: true }).click()
-  await expect(codexItem.getByRole('status')).toContainText('Setup saved. Restart Codex')
+  await expect(codexItem.getByRole('status')).toContainText('Setup saved. Finish in Codex.')
   const invoked = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.invoked)
   const picker = invoked.find((call: any) => call.command === 'plugin:dialog|open')
   const link = invoked.find((call: any) => call.command === 'link_codex')
@@ -368,7 +454,7 @@ test('a pending Codex link disables Claude setup, search, and provider setup', a
   await expect(dialog.getByRole('button', { name: 'Search again', exact: true })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: 'Set up a provider', exact: true })).toBeDisabled()
   await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkRelease())
-  await expect(codexItem.getByRole('status')).toContainText('Setup saved. Restart Codex')
+  await expect(codexItem.getByRole('status')).toContainText('Setup saved. Finish in Codex.')
 })
 
 for (const theme of ['light', 'dark'] as const) {
@@ -386,10 +472,10 @@ for (const theme of ['light', 'dark'] as const) {
     if (theme === 'light') {
       const findings = dialog.getByRole('region', { name: 'Desktop findings' })
       await expect(findings).toBeVisible()
-      for (const name of ['Claude Desktop', 'Codex CLI']) {
+      for (const name of ['Claude Desktop', 'Codex CLI', 'ChatGPT Desktop']) {
         const item = findings.locator('details').filter({ has: page.getByText(name, { exact: true }) })
         await item.locator(':scope > summary').click()
-        const manual = item.locator('details')
+        const manual = item.locator('details').filter({ has: page.getByText('Manual setup', { exact: true }) })
         await manual.locator(':scope > summary').click()
       }
     }
