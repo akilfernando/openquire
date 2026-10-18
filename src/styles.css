@@ -1040,7 +1040,7 @@ a { color: var(--accent); }
 .surface-actions .button-primary:hover { background: var(--accent-hover); }
 button.quiet-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: transparent; box-shadow: none; border: 0; color: var(--text-muted); min-height: 44px; }
 button.quiet-action:hover { color: var(--text-normal); background: var(--hover); }
-.welcome-modal { width: min(540px, 94vw); padding: 36px; gap: 24px; text-align: center; border-radius: 20px; }
+.welcome-modal { animation: none; width: min(540px, 94vw); padding: 36px; gap: 24px; text-align: center; border-radius: 20px; }
 .welcome-modal .modal-close { width: 44px; height: 44px; }
 .welcome-art { position: relative; height: 148px; width: 180px; margin: 0 auto; }
 .welcome-paper { position: absolute; inset: 8px 35px 0; padding: 18px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-raised); box-shadow: var(--page-shadow); display: flex; flex-direction: column; gap: 10px; text-align: left; color: var(--accent); }

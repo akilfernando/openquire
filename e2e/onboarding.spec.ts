@@ -14,6 +14,9 @@ for (const theme of ['light', 'dark']) {
       await page.goto('/')
       const dialog = page.getByRole('dialog', { name: 'Welcome to OpenQuire' })
       await expect(dialog).toBeVisible()
+      // Entry text must be fully readable immediately, including during axe capture.
+      await expect(dialog).toHaveCSS('animation-name', 'none')
+      await expect(dialog).toHaveCSS('opacity', '1')
       await expect(dialog.getByRole('button', { name: 'Open a PDF', exact: true })).toBeVisible()
       await expect(dialog.getByRole('checkbox')).toHaveCount(0)
       await expect(dialog.getByText(/MCP|Claude|API|air-gapped/)).toHaveCount(0)
