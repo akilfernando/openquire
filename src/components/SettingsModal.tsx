@@ -108,6 +108,7 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
   const [purgeError, setPurgeError] = useState('')
   const [purging, setPurging] = useState(false)
   const [tab, setTab] = useState<Tab>(initialTab)
+  const [suggestion, setSuggestion] = useState(discoveredConnection)
   const [detail, setDetail] = useState(initialTab === 'ai')
   const content = useRef<HTMLDivElement>(null)
   const navigation = useRef<HTMLElement>(null)
@@ -325,7 +326,7 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
               </div>
             </>
           )}
-          {tab === 'ai' && <AiConnections discoveredConnection={discoveredConnection} settings={settings} credentialsReady={credentialsReady}
+          {tab === 'ai' && <AiConnections discoveredConnection={suggestion} onDiscoveryUsed={() => setSuggestion(undefined)} settings={settings} credentialsReady={credentialsReady}
             credentialStorageError={credentialStorageError} onChange={onChange}
             onPrivacy={() => navigate('privacy')}
             onAssistants={onOpenWizard ? () => { onClose(); onOpenWizard() } : undefined} />}

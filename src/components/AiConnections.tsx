@@ -10,6 +10,7 @@ import { m } from '../i18n'
 type Draft = { provider: AiProvider; apiKey: string; baseUrl: string; model: string; revision: string }
 interface Props {
   discoveredConnection?: DiscoveredConnection
+  onDiscoveryUsed?: () => void
   settings: Settings
   credentialsReady: boolean
   credentialStorageError: string
@@ -18,7 +19,7 @@ interface Props {
   onAssistants?: () => void
 }
 
-export default function AiConnections({ discoveredConnection, settings, credentialsReady, credentialStorageError, onChange, onPrivacy, onAssistants }: Props) {
+export default function AiConnections({ discoveredConnection, onDiscoveryUsed, settings, credentialsReady, credentialStorageError, onChange, onPrivacy, onAssistants }: Props) {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [step, setStep] = useState<1 | 2>(1)
   const [models, setModels] = useState<string[]>([])
@@ -39,8 +40,11 @@ export default function AiConnections({ discoveredConnection, settings, credenti
 
   // Configuration changes and private-data purge invalidate drafts, including an
   // initially empty profile whose settings fields might otherwise be unchanged.
+  const configuration = [settings.aiConnections, settings.aiKey, settings.aiModel, settings.aiBaseUrl, settings.aiProvider, settings.aiDisabled, credentialsReady]
+  const previousConfiguration = useRef(configuration)
   useEffect(() => {
-    finish()
+    if (configuration.some((value, index) => value !== previousConfiguration.current[index])) finish()
+    previousConfiguration.current = configuration
     const purge = (e: StorageEvent) => { if (e.key === PRIVACY_REVISION_KEY) finish() }
     window.addEventListener('storage', purge)
     return () => { request.current++; controller.current?.abort(); window.removeEventListener('storage', purge) }
@@ -54,6 +58,7 @@ export default function AiConnections({ discoveredConnection, settings, credenti
     returnFocus.current = 'ollama'
     setDraft({ provider: 'ollama', apiKey: '', baseUrl: discoveredConnection.baseUrl, model: '', revision: privacyRevision() })
     setModels(discoveredConnection.models); setStep(2)
+    onDiscoveryUsed?.()
   }, [discoveredConnection, credentialsReady, settings.aiDisabled])
 
   const profiles = readProviderProfiles(settings.aiConnections)
