@@ -50,12 +50,17 @@ export default function AssistantSetupModal({ disabled, onConfigure, onClose }: 
     const current = () => generation.current === id && revision.current === privacyRevision()
     setStarted(true); setNotice(''); setReport(null); setConnection(null)
     setApps(isDesktop ? 'checking' : 'unavailable'); setLocal('checking')
-    if (isDesktop) void bounded(detectAiAssistants(), signal).then(value => {
+    // Keep a quick scan perceptible; results still reflect the real probes.
+    // Closing/stopping invalidates this generation, including delayed results.
+    const moment = new Promise<void>(resolve => setTimeout(resolve, 900))
+    if (isDesktop) void bounded(detectAiAssistants(), signal).then(async value => {
+      await moment
       if (current()) { setReport(value); setApps('done') }
-    }, () => { if (current()) setApps('unavailable') })
-    void bounded(discoverLocalModels(signal), signal).then(value => {
+    }, async () => { await moment; if (current()) setApps('unavailable') })
+    void bounded(discoverLocalModels(signal), signal).then(async value => {
+      await moment
       if (current()) { setConnection(value); setLocal('done') }
-    }, () => { if (current()) setLocal('unavailable') })
+    }, async () => { await moment; if (current()) setLocal('unavailable') })
   }
   const configure = (value?: DiscoveredConnection) => {
     if (disabled || revision.current !== privacyRevision()) { onClose(); return }
@@ -81,10 +86,9 @@ export default function AssistantSetupModal({ disabled, onConfigure, onClose }: 
         <button className="button-primary" disabled={connecting} onClick={() => configure(connection)}>Review local setup<ArrowRight size={16} /></button>
         <details><summary>Connection details</summary><p>{connection.baseUrl}</p><p>At Ollama’s default address. Model listing does not verify text generation or image support.</p></details>
       </section>}
-      {found.length > 0 && <section className="discovery-apps" aria-label="Desktop findings"><h4>Desktop assistants</h4><p className="hint">These apps work separately from OpenQuire’s AI assistant.</p>{found.map(([id, app]) => <details className="discovery-result" key={id}>
+      {found.length > 0 && <section className="discovery-apps" aria-label="Desktop findings"><h4>Use PDF tools in your AI app</h4><p className="hint">Choose an app, connect a PDF folder, then work from your chats there.</p>{found.map(([id, app]) => <details className="discovery-result" key={id}>
         <summary><span>{app.name}</span><small>{app.linked ? 'Configuration found' : 'App files found'}</small></summary>
-        {id === 'claude_desktop' || id === 'codex_cli' ? <AssistantConnection client={id === 'claude_desktop' ? 'claude' : 'codex'} linked={app.linked} disabled={disabled || connecting} onBusy={setConnecting} /> : <p>{app.linked ? 'An OpenQuire configuration entry exists; its connection has not been tested.' : 'In-app setup is not available for this assistant yet. You can still set up an AI provider below.'}</p>}
-        <p className="hint">Discovery does not sign in or use this app’s subscription.</p>
+        {id === 'claude_desktop' || id === 'codex_cli' || id === 'chatgpt_desktop' ? <AssistantConnection client={id === 'claude_desktop' ? 'claude' : id === 'chatgpt_desktop' ? 'chatgpt' : 'codex'} linked={app.linked} disabled={disabled || connecting} onBusy={setConnecting} /> : <p>{app.linked ? 'An OpenQuire configuration entry exists; its connection has not been tested.' : 'In-app setup is not available for this assistant yet. You can still set up an AI provider below.'}</p>}
       </details>)}</section>}
       {started && !scanning && !connection && !found.length && <p className="discovery-empty">No connections found here. Set up a provider to get started.</p>}
       <div className="surface-actions discovery-actions">

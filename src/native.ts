@@ -216,3 +216,8 @@ export async function linkCodex(allowedDir: string): Promise<string> {
   if (!isDesktop) throw new Error('Connecting Codex requires OpenQuire desktop.')
   return invoke<string>('link_codex', { allowedDir })
 }
+
+export async function linkChatGPTDesktop(allowedDir: string): Promise<string> {
+  if (!isDesktop) throw new Error('Use OpenQuire desktop to connect ChatGPT.')
+  return invoke<string>('link_chatgpt_desktop', { allowedDir })
+}

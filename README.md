@@ -105,13 +105,20 @@ OpenQuire includes a local [Model Context Protocol (MCP)](https://modelcontextpr
 ### Connect from OpenQuire Desktop
 
 In **Settings → AI & connections → Find connections**, search for installed apps,
-then choose **Connect Claude Desktop** or **Connect Codex**. Select the folder
+then choose **Connect Claude Desktop**, **Connect ChatGPT Desktop** or **Connect Codex**. Select the folder
 OpenQuire's PDF tools may access. Restart the assistant and check for OpenQuire
 in its tools. Node.js 20 or later with npm is required; the assistant downloads
 the released canonical Node package on first use. Existing unrelated settings
 are preserved and backed up. Manual commands remain available under **Manual setup**.
 This connects PDF tools to the assistant; it does not enable account-backed AI
 inside OpenQuire. Client policies and permissions still apply.
+
+For ChatGPT Desktop, use a version with **Settings → MCP servers** and a local
+chat. OpenQuire saves the shared ChatGPT/Codex host configuration; it does not
+require the Codex CLI. Restart the client and use `/mcp` to verify tool loading.
+See [OpenAI's local MCP setup guide](https://learn.chatgpt.com/docs/extend/mcp).
+ChatGPT web does not read this local configuration. If your desktop version lacks
+these settings, the wizard's manual guide explains the required interface.
 
 ### Command-line setup for Claude Desktop
 

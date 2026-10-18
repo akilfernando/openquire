@@ -296,7 +296,6 @@ fn is_cursor_installed() -> (bool, bool) {
 /// Scans the machine for AI desktop assistants and their MCP status
 pub fn detect_all() -> AiAssistantsReport {
     let (claude_inst, claude_cfg, claude_linked) = is_claude_installed();
-    let chatgpt_inst = is_chatgpt_installed();
     let (cursor_inst, cursor_linked) = is_cursor_installed();
 
     AiAssistantsReport {
@@ -313,17 +312,7 @@ pub fn detect_all() -> AiAssistantsReport {
                 None
             },
         },
-        chatgpt_desktop: AssistantStatus {
-            name: "ChatGPT Desktop".into(),
-            installed: chatgpt_inst,
-            linked: false,
-            config_path: None,
-            details: if chatgpt_inst {
-                Some("Detected. Connector integration ready when open protocol expands.".into())
-            } else {
-                None
-            },
-        },
+        chatgpt_desktop: chatgpt_status(is_chatgpt_installed(), current_codex_config_path()),
         cursor: AssistantStatus {
             name: "Cursor".into(),
             installed: cursor_inst,
@@ -367,19 +356,7 @@ fn codex_status() -> AssistantStatus {
         Ok(path) => {
             status.config_path = Some(path.to_string_lossy().into_owned());
             if reject_symlinks(&path).is_ok() {
-                status.linked = fs::read_to_string(&path)
-                    .ok()
-                    .and_then(|s| s.parse::<toml_edit::DocumentMut>().ok())
-                    .is_some_and(|doc| {
-                        doc.get("mcp_servers")
-                            .and_then(|s| s.get("openquire"))
-                            .is_some_and(|s| {
-                                s.is_table_like()
-                                    && s.get("url").is_none()
-                                    && s.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true)
-                                    && s.get("command").and_then(|v| v.as_str()).is_some()
-                            })
-                    });
+                status.linked = local_openquire_configured(&path);
                 if status.linked {
                     status.details = Some("OpenQuire MCP setup saved. Restart Codex and check its tools to verify the connection.".into());
                 }
@@ -390,12 +367,56 @@ fn codex_status() -> AssistantStatus {
     status
 }
 
-/// Saves a folder-scoped local MCP entry; it does not start or authenticate Codex.
-pub fn link_codex(allowed_dir: Option<String>) -> Result<String, String> {
-    let folder = allowed_folder(allowed_dir)?;
-    if find_command("codex").is_none() {
-        return Err("Codex CLI was not found. Install Codex and restart OpenQuire.".into());
+// Configuration presence is evidence of setup only, never a live tool handshake.
+fn local_openquire_configured(path: &Path) -> bool {
+    reject_symlinks(path).is_ok()
+        && fs::read_to_string(path)
+            .ok()
+            .and_then(|s| s.parse::<toml_edit::DocumentMut>().ok())
+            .is_some_and(|doc| {
+                doc.get("mcp_servers")
+                    .and_then(|s| s.get("openquire"))
+                    .is_some_and(|s| {
+                        s.is_table_like()
+                            && s.get("url").is_none()
+                            && s.get("enabled").is_none_or(|v| v.as_bool() == Some(true))
+                            && s.get("command").and_then(|v| v.as_str()).is_some_and(|v| !v.trim().is_empty())
+                            && s.get("args").is_none_or(|v| v.as_array().is_some_and(|args| args.iter().all(|arg| arg.as_str().is_some())))
+                    })
+            })
+}
+
+fn chatgpt_status(installed: bool, config: Result<PathBuf, String>) -> AssistantStatus {
+    let mut status = AssistantStatus {
+        name: "ChatGPT Desktop".into(),
+        installed,
+        ..AssistantStatus::default()
+    };
+    match config {
+        Ok(path) => {
+            status.linked = local_openquire_configured(&path);
+            status.config_path = Some(path.to_string_lossy().into_owned());
+            status.details = Some(if status.linked {
+                "OpenQuire setup is present in the shared ChatGPT/Codex configuration. In ChatGPT, use Settings > MCP servers > Restart, then /mcp to verify; a live connection has not been checked."
+            } else {
+                "ChatGPT desktop uses the shared Codex configuration for local MCP servers. Choose a folder to save OpenQuire setup, then restart MCP servers in ChatGPT and check /mcp."
+            }.into());
+        }
+        Err(error) => status.details = Some(error),
     }
+    status
+}
+
+/// Saves local setup in ChatGPT desktop's shared Codex configuration without requiring the CLI.
+pub fn link_chatgpt_desktop(allowed_dir: Option<String>) -> Result<String, String> {
+    if !is_chatgpt_installed() {
+        return Err("ChatGPT Desktop was not found. Install the desktop app and restart OpenQuire, or use the manual setup instructions.".into());
+    }
+    link_shared_local_config(allowed_dir)
+}
+
+fn link_shared_local_config(allowed_dir: Option<String>) -> Result<String, String> {
+    let folder = allowed_folder(allowed_dir)?;
     let (node, npx) = runtime_paths()?;
     let target = current_codex_config_path()?;
     let _lock = CONFIG_LOCK
@@ -403,6 +424,14 @@ pub fn link_codex(allowed_dir: Option<String>) -> Result<String, String> {
         .map_err(|_| "Configuration update interrupted; restart OpenQuire.")?;
     link_codex_at(&target, &node, &npx, &folder)?;
     Ok(target.to_string_lossy().into_owned())
+}
+
+/// Saves a folder-scoped local MCP entry; it does not start or authenticate Codex.
+pub fn link_codex(allowed_dir: Option<String>) -> Result<String, String> {
+    if find_command("codex").is_none() {
+        return Err("Codex CLI was not found. Install Codex and restart OpenQuire.".into());
+    }
+    link_shared_local_config(allowed_dir)
 }
 
 fn link_codex_at(target: &Path, node: &Path, npx: &Path, folder: &Path) -> Result<(), String> {
@@ -847,6 +876,39 @@ mod discovery_tests {
 
     fn has_file(candidates: Vec<std::path::PathBuf>) -> bool {
         candidates.into_iter().any(|candidate| candidate.is_file())
+    }
+
+    #[test]
+    fn chatgpt_reports_shared_setup_without_claiming_live_connection_or_cli_presence() {
+        let root = TestDir::new();
+        let target = root.0.join("config.toml");
+        let absent = super::chatgpt_status(true, Ok(target.clone()));
+        assert!(absent.installed);
+        assert!(!absent.linked);
+        assert_eq!(absent.config_path.as_deref(), target.to_str());
+        // The shared writer and status require no CLI discovery or executable.
+        link_codex_at(&target, Path::new("node"), Path::new("npx-cli.js"), &root.0).unwrap();
+        let configured = super::chatgpt_status(true, Ok(target.clone()));
+        assert!(configured.linked);
+        assert!(configured.details.unwrap().contains("a live connection has not been checked"));
+        let uninstalled = super::chatgpt_status(false, Ok(target.clone()));
+        assert!(!uninstalled.installed);
+        assert!(uninstalled.linked);
+        for invalid in [
+            "invalid [",
+            "[mcp_servers.openquire]\nenabled = false\ncommand = 'node'",
+            "[mcp_servers.openquire]\nurl = 'https://example.com/mcp'",
+            "[mcp_servers.openquire]\ncommand = ''",
+            "[mcp_servers.openquire]\ncommand = 'node'\nenabled = 'false'",
+            "[mcp_servers.openquire]\ncommand = 'node'\nargs = [3]",
+        ] {
+            fs::write(&target, invalid).unwrap();
+            assert!(!super::chatgpt_status(true, Ok(target.clone())).linked);
+        }
+        let invalid_home = super::chatgpt_status(true, Err("CODEX_HOME must be absolute".into()));
+        assert!(!invalid_home.linked);
+        assert!(invalid_home.config_path.is_none());
+        assert_eq!(invalid_home.details.as_deref(), Some("CODEX_HOME must be absolute"));
     }
 
     #[test]
