@@ -16,11 +16,11 @@ export default function Home({ onOpen, onBlank, onCommands, recent, onRecent, op
   return <main className="home" aria-labelledby="home-title">
     <div className="home-content">
       <header className="home-hero">
-        <div className="home-eyebrow">{m.home.eyebrow}</div>
-        <h1 id="home-title">{m.home.title}</h1>
-        <p className="home-description">{m.home.description}</p>
-        <div className="home-actions">
-          <button className="home-primary" onClick={() => onOpen()}><FolderOpen size={19} />{m.workspace.emptyOpen}{openShortcut && <kbd>{openShortcut}</kbd>}</button>
+        <div className="home-eyebrow surface-eyebrow">{m.home.eyebrow}</div>
+        <h1 className="surface-title" id="home-title">{m.home.title}</h1>
+        <p className="home-description surface-description">{m.home.description}</p>
+        <div className="home-actions surface-actions">
+          <button className="home-primary button-primary" onClick={() => onOpen()}><FolderOpen size={19} />{m.workspace.emptyOpen}{openShortcut && <kbd>{openShortcut}</kbd>}</button>
           <button onClick={onBlank}>{m.workspace.emptyBlank}</button>
         </div>
         <p className="home-drop">{m.home.drop}</p>

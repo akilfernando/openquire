@@ -63,6 +63,17 @@ export const en = {
     ],
   },
 
+  welcome: {
+    show: 'Show welcome',
+    eyebrow: 'YOUR PDF WORKSPACE',
+    title: 'Welcome to OpenQuire',
+    description: 'Read, edit and make more of your PDFs.',
+    privacy: 'Your PDFs are processed on this device.',
+    open: 'Open a PDF',
+    explore: 'Explore tools',
+    ai: 'Explore optional AI',
+  },
+
   onboarding: {
     title: 'Welcome to OpenQuire',
     subtitle: 'Local-first, privacy-preserving PDF suite running 100% on your device.',
@@ -706,7 +717,7 @@ export const en = {
     claudeDesktopCopyCmd: 'Copy Setup Command',
     aiDisabled: 'Disable all AI features',
     aiDisabledDesc: 'Completely hide the AI assistant panel, form assistant, and external model settings. Keeps OpenQuire strictly air-gapped and distraction-free.',
-    openOnboardingWizard: 'AI & Assistant Setup Wizard',
+    openOnboardingWizard: 'Desktop assistant setup',
     openOnboardingWizardDesc: 'Re-run the setup wizard to scan for desktop AI assistants or adjust AI privacy preferences.',
     ocrLang: 'Language',
     ocrLangDesc: 'The language of scanned documents. Automatic detects it from the first page.',

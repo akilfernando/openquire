@@ -79,6 +79,7 @@ interface Props {
   onPlugins: (list: InstalledPlugin[]) => void
   /** Reads certificate files into displayable entries. */
   readCertificates: (data: Uint8Array) => Promise<Settings['trusted']>
+  initialTab?: Tab
   onOpenWizard?: () => void
 }
 
@@ -94,7 +95,7 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, credentialsReady, credentialStorageError, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard }: Props) {
+export default function SettingsModal({ settings, credentialsReady, credentialStorageError, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard, initialTab = 'appearance' }: Props) {
   const set = (p: Partial<Settings>) => {
     const next = { ...settings, ...p }
     onChange(credentialsReady && ('aiKey' in p || 'aiModel' in p || 'aiBaseUrl' in p) ? rememberProvider(next) : next)
@@ -104,7 +105,7 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
   const [purgeError, setPurgeError] = useState('')
   const [purging, setPurging] = useState(false)
   const [copiedMcp, setCopiedMcp] = useState(false)
-  const [tab, setTab] = useState<Tab>('appearance')
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [installed, setInstalled] = useState<NativeTools | null>(null)
   const [modelList, setModelList] = useState<string[]>([])
   const [loadingModels, setLoadingModels] = useState(false)

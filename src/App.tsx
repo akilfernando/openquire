@@ -15,6 +15,7 @@ import PageView, { type PageActions, type Tool } from './components/PageView'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsModal, { type Settings } from './components/SettingsModal'
 import OnboardingModal from './components/OnboardingModal'
+import AssistantSetupModal from './components/AssistantSetupModal'
 import Sidebar, { type AiEntry, type CompareInfo, type SideActions, type SideTab } from './components/Sidebar'
 import AiConsentDialog from './components/AiConsentDialog'
 import {
@@ -173,6 +174,8 @@ export default function App() {
   const [fieldEdit, setFieldEdit] = useState<{ pageId: number; rect: Rect | null; widget: WidgetInfo | null } | null>(null)
   const [linkEdit, setLinkEdit] = useState<{ pageId: number; rect: Rect | null; index: number | null } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsStart, setSettingsStart] = useState<'appearance' | 'ai'>('appearance')
+  const [showAssistantSetup, setShowAssistantSetup] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try {
       return localStorage.getItem('openquire.onboarded') !== 'true'
@@ -1988,7 +1991,8 @@ export default function App() {
       ? { id: 'stop-recording', name: m.actions.stopRecording, run: stopRecording }
       : { id: 'record-workflow', name: m.actions.recordWorkflow, run: startRecording },
     { id: 'settings', name: m.actions.openSettings, icon: SettingsIcon, hotkey: hk('settings'), run: () => setSettingsOpen(true) },
-    { id: 'onboarding-wizard', name: m.settings.openOnboardingWizard, icon: Sparkles, run: () => setShowOnboarding(true) },
+    { id: 'welcome', name: m.welcome.show, icon: FileText, run: () => setShowOnboarding(true) },
+    { id: 'onboarding-wizard', name: m.settings.openOnboardingWizard, icon: Sparkles, run: () => setShowAssistantSetup(true) },
     { id: 'theme', name: m.actions.toggleTheme, run: () => setSettings({ ...settings, theme: dark ? 'light' : 'dark' }) },
   ]
 
@@ -2372,16 +2376,20 @@ export default function App() {
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
 
-      {settingsOpen && <SettingsModal settings={settings} credentialsReady={credentialsReady} credentialStorageError={credentialStorageError} onChange={setSettings} onPurge={purgePrivateData} onClose={() => setSettingsOpen(false)} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
-        plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} onOpenWizard={() => setShowOnboarding(true)} />}
-      {showOnboarding && (
-        <OnboardingModal
+      {settingsOpen && <SettingsModal initialTab={settingsStart} settings={settings} credentialsReady={credentialsReady} credentialStorageError={credentialStorageError} onChange={setSettings} onPurge={purgePrivateData} onClose={() => { setSettingsOpen(false); setSettingsStart('appearance') }} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
+        plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} onOpenWizard={() => setShowAssistantSetup(true)} />}
+      {showOnboarding && <OnboardingModal aiAvailable={!settings.aiDisabled}
+        onClose={() => setShowOnboarding(false)}
+        onOpen={() => openDialog()}
+        onAi={() => { setSettingsStart('ai'); setSettingsOpen(true) }} />}
+      {showAssistantSetup && (
+        <AssistantSetupModal
           settings={settings}
           onUpdateSettings={(partial) => {
             const next = { ...settings, ...partial }
             setSettings(next)
           }}
-          onClose={() => setShowOnboarding(false)}
+          onClose={() => setShowAssistantSetup(false)}
         />
       )}
       {signing && <SignatureDialog onClose={() => setSigning(false)} onPlace={(png, aspect) => { setSigning(false); placeImage(png, aspect) }} />}
