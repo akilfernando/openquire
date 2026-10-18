@@ -2381,6 +2381,7 @@ export default function App() {
       {showOnboarding && <OnboardingModal aiAvailable={!settings.aiDisabled}
         onClose={() => setShowOnboarding(false)}
         onOpen={() => openDialog()}
+        onExplore={() => { if (doc) { setRightOpen(true); if (narrow) setLeftOpen(false) } }}
         onAi={() => { setSettingsStart('ai'); setSettingsOpen(true) }} />}
       {showAssistantSetup && (
         <AssistantSetupModal

@@ -7,11 +7,12 @@ interface Props {
   aiAvailable: boolean
   onClose: () => void
   onOpen: () => void
+  onExplore: () => void
   onAi: () => void
 }
 
 /** First run introduces PDF work; connection setup is an explicit, separate choice. */
-export default function OnboardingModal({ aiAvailable, onClose, onOpen, onAi }: Props) {
+export default function OnboardingModal({ aiAvailable, onClose, onOpen, onExplore, onAi }: Props) {
   const titleId = useId()
   const finish = (next?: () => void) => {
     try {
@@ -34,7 +35,7 @@ export default function OnboardingModal({ aiAvailable, onClose, onOpen, onAi }: 
     </header>
     <div className="surface-actions welcome-actions">
       <button autoFocus className="button-primary" onClick={() => finish(onOpen)}><FolderOpen size={18} />{m.welcome.open}</button>
-      <button onClick={() => finish()}>{m.welcome.explore}</button>
+      <button onClick={() => finish(onExplore)}>{m.welcome.explore}</button>
     </div>
     <p className="welcome-privacy"><ShieldCheck size={16} aria-hidden="true" />{m.welcome.privacy}</p>
     {aiAvailable && <button className="quiet-action welcome-ai" onClick={() => finish(onAi)}>{m.welcome.ai}<ArrowUpRight size={15} /></button>}
