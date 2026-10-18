@@ -567,7 +567,7 @@ test('the AI assistant is off by default and never sends without consent', async
   await page.getByRole('textbox', { name: 'Your details for forms' }).fill('Jane Doe. I want the Pro plan and the newsletter.')
   // Only explicit discovery loads models; later state updates must not fetch them again.
   await expect.poll(() => modelRequests).toBe(1)
-  await page.getByLabel('API key').focus()
+  await page.getByRole('region', { name: 'Anthropic (Claude)', exact: true }).getByRole('button', { name: 'Edit', exact: true }).focus()
   await page.keyboard.press('Escape')
 
   await page.getByRole('tab', { name: 'Assistant' }).click()
