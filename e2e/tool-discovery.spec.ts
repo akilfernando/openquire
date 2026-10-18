@@ -1,0 +1,69 @@
+import { test, expect } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+import { openReport } from './fixtures'
+
+for (const width of [1440, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+  test(`contextual tools ${width} ${colorScheme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme })
+    await openReport(page)
+    await page.locator('.dock').getByRole('button', { name: 'Highlight', exact: true }).click()
+    await expect(page.locator('.tool-context-name')).toHaveText('Highlight')
+    await expect(page.locator('.tool-context-hint')).toContainText('Drag across text')
+    await expect(page.locator('.document-save-state')).toHaveText('No unsaved changes')
+    const toggle = page.getByRole('button', { name: 'Toggle right sidebar', exact: true })
+    if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click()
+    const panel = page.locator('#document-tools')
+    const search = panel.getByRole('searchbox', { name: 'Search document tools' })
+    await search.fill('split')
+    const ranges = panel.getByPlaceholder('For example 1-3, 4-6, 7-')
+    await ranges.fill('1, 2')
+    await search.fill('word')
+    await expect(panel.locator('details:visible')).toHaveCount(1)
+    await expect(panel.getByRole('button', { name: 'Word', exact: true })).toBeVisible()
+    await search.fill('split')
+    await expect(ranges).toHaveValue('1, 2')
+    await search.fill('no such tool')
+    await expect(panel.getByRole('status')).toContainText('No matching tools')
+    await panel.getByRole('button', { name: 'Clear tool search' }).click()
+    await expect(panel.locator('details:visible')).toHaveCount(13)
+    await expect(ranges).toBeHidden()
+    await panel.locator('summary').filter({ hasText: /^Split/ }).click()
+    await expect(ranges).toHaveValue('1, 2')
+    await search.fill('password')
+    await expect(panel.getByText('Password protection', { exact: true })).toBeVisible()
+    const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
+    expect(result.violations.filter(v => v.impact === 'serious' || v.impact === 'critical')).toEqual([])
+    await info.attach('workspace.png', { body: await page.screenshot({ path: info.outputPath('workspace.png') }), contentType: 'image/png' })
+    await panel.getByRole('button', { name: 'Close tools panel' }).focus()
+    await page.keyboard.press('Enter')
+    await expect(toggle).toBeFocused()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await panel.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)))
+    // Closing a drawer can resize the canvas. Wait for the report text to be
+    // painted, rather than recording a transient blank render as visual evidence.
+    await expect.poll(() => page.locator('.page canvas').first().evaluate(canvas => {
+      const c = canvas as HTMLCanvasElement
+      const bounds = c.getBoundingClientRect()
+      if (Math.abs(c.width - bounds.width * devicePixelRatio) > 2) return 0
+      const pixels = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data
+      let ink = 0
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] > 0 && pixels[i] < 150 && pixels[i + 1] < 150 && pixels[i + 2] < 150) ink++
+      }
+      return ink
+    })).toBeGreaterThan(100)
+    await info.attach('workspace-closed.png', { body: await page.screenshot({ path: info.outputPath('workspace-closed.png') }), contentType: 'image/png' })
+    await expect(page.locator('.document-save-state')).toHaveText('No unsaved changes')
+  })
+}
+
+test('context state follows edits and undo', async ({ page }) => {
+  await openReport(page)
+  await page.locator('.dock').getByRole('button', { name: 'Sticky note', exact: true }).click()
+  await page.locator('.page .overlay.tool-note').first().click({ position: { x: 50, y: 60 } })
+  await expect(page.locator('.document-save-state')).toHaveText('Unsaved changes')
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.locator('.document-save-state')).toHaveText('No unsaved changes')
+})

@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react'
-import { ChevronRight, RotateCcw, RotateCw, Wrench } from 'lucide-react'
+import { createContext, useContext, useState, type ReactNode } from 'react'
+import { ChevronRight, RotateCcw, RotateCw, Search, Wrench, X } from 'lucide-react'
 import { rgbOf, type CompressLevel, type DocState, type Metadata, type PageLabelStyle, type Permission, type SaveOptions, type StampPosition, type StampSpec } from '../engine/types'
 import { m } from '../i18n'
 import { REDACTION_PATTERNS, type PatternName } from '../engine/patterns'
@@ -44,11 +44,27 @@ interface Props {
   onSaveOpts: (o: SaveOptions) => void
   actions: PanelActions
   open?: boolean
+  onClose: () => void
 }
 
-function Section({ title, count, open, onOpen, children }: { title: string; count?: number | string; open?: boolean; onOpen?: () => void; children: ReactNode }) {
+type SectionId = keyof typeof m.discovery.keywords
+const SearchContext = createContext('')
+function sectionMatches(id: SectionId, query: string) {
+  const text = `${m.panel[id]} ${m.discovery.keywords[id]}`.toLocaleLowerCase()
+  const words = text.split(/[^\p{L}\p{N}]+/u)
+  return query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).every(term => words.some(word => word.startsWith(term)))
+}
+
+function Section({ id, title, count, open, onOpen, children }: { id: SectionId; title: string; count?: number | string; open?: boolean; onOpen?: () => void; children: ReactNode }) {
+  const query = useContext(SearchContext)
+  const [expanded, setExpanded] = useState(!!open)
+  const matches = sectionMatches(id, query)
   return (
-    <details className="section" open={open} onToggle={(e) => e.currentTarget.open && onOpen?.()}>
+    <details className="section" hidden={!matches} open={query.trim() ? matches : expanded}
+      onToggle={e => {
+        if (!query.trim()) setExpanded(e.currentTarget.open)
+        if (e.currentTarget.open) onOpen?.()
+      }}>
       <summary>
         <ChevronRight size={16} className="chev" />
         {title}
@@ -79,7 +95,7 @@ function Stamps({ actions, scope }: { actions: PanelActions; scope: string }) {
   const patch = (p: Partial<typeof s>) => set({ ...s, ...p })
   const positions = Object.entries(m.panel.positions) as [StampPosition, string][]
   return (
-    <Section title={m.panel.stamps}>
+    <Section id="stamps" title={m.panel.stamps}>
       <div className="chips">
         {(Object.keys(PRESETS) as (keyof typeof PRESETS)[]).map((k) => <button key={k} onClick={() => set(PRESETS[k])}>{m.panel.presets[k]}</button>)}
       </div>
@@ -119,7 +135,7 @@ function Redaction({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const pending = doc.pages.reduce((n, p) => n + p.annots.filter((a) => a.type === 'Redact').length, 0)
   return (
-    <Section title={m.panel.redact} count={pending ? m.panel.marked(pending) : undefined}>
+    <Section id="redact" title={m.panel.redact} count={pending ? m.panel.marked(pending) : undefined}>
       <p className="hint">{m.panel.redactHint}</p>
       <Field label={m.panel.redactTerms}><textarea rows={3} value={terms} onChange={(e) => setTerms(e.target.value)} /></Field>
       <div className="chips">
@@ -148,7 +164,7 @@ function Redaction({ doc, actions }: Pick<Props, 'doc' | 'actions'>) {
 function Ocr({ doc, selectedCount, actions }: Pick<Props, 'doc' | 'selectedCount' | 'actions'>) {
   const [noText, setNoText] = useState<number | null>(null)
   return (
-    <Section title={m.panel.ocr} onOpen={() => void actions.pagesWithoutText().then(setNoText)}>
+    <Section id="ocr" title={m.panel.ocr} onOpen={() => void actions.pagesWithoutText().then(setNoText)}>
       <p className="hint">{m.panel.ocrHint}</p>
       <button disabled={!noText} onClick={() => { actions.ocr('notext'); setNoText(0) }}>{m.panel.pagesWithoutText(noText)}</button>
       <div className="row">
@@ -165,7 +181,7 @@ function SaveSettings({ doc, saveOpts, onSaveOpts }: Pick<Props, 'doc' | 'saveOp
   const perms = Object.entries(m.panel.permissions) as [Permission, string][]
   const levels = Object.entries(m.panel.compress) as [CompressLevel, string][]
   return (
-    <Section title={m.panel.security} count={doc.encrypted ? m.status.protected : undefined}>
+    <Section id="security" title={m.panel.security} count={doc.encrypted ? m.status.protected : undefined}>
       {doc.signatures.length > 0 && <p className="hint">{m.panel.signedNote}</p>}
       <Field label={m.panel.compression}>
         <select value={saveOpts.compress} onChange={(e) => set({ compress: e.target.value as CompressLevel })}>
@@ -216,7 +232,7 @@ function Labels({ labelPage, actions }: Pick<Props, 'labelPage' | 'actions'>) {
   const [start, setStart] = useState(1)
   const styles = Object.entries(m.panel.labelStyles) as [PageLabelStyle, string][]
   return (
-    <Section title={m.panel.labels}>
+    <Section id="labels" title={m.panel.labels}>
       <p className="hint">{m.panel.labelsHint(labelPage)}</p>
       <div className="row">
         <Field label={m.panel.labelStyle}>
@@ -239,7 +255,7 @@ const DEFAULT_RIGHT_WIDTH = 300
 const MIN_RIGHT_WIDTH = 220
 const MAX_RIGHT_WIDTH = 600
 
-export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions, open = true }: Props) {
+export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions, open = true, onClose }: Props) {
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('openquire:sidebar-right-width')
     const n = saved ? Number(saved) : DEFAULT_RIGHT_WIDTH
@@ -276,6 +292,8 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
     localStorage.setItem('openquire:sidebar-right-width', String(DEFAULT_RIGHT_WIDTH))
   }
 
+  const [search, setSearch] = useState('')
+  const hasResults = (Object.keys(m.discovery.keywords) as SectionId[]).some(id => sectionMatches(id, search))
   const [ranges, setRanges] = useState('')
   const [pdfaPart, setPdfaPart] = useState<2 | 3>(doc.attachments.length ? 3 : 2)
   const scope = selectedCount ? m.panel.scopeSelected(selectedCount) : m.panel.scopeAll
@@ -287,14 +305,25 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
     <aside
       className={`sidebar right ${open ? 'is-open' : 'is-closed'}`}
       style={{ width: `${width}px`, '--sidebar-right-width': `${width}px` } as React.CSSProperties}
+      id="document-tools"
+      aria-label={m.panel.title}
       aria-hidden={!open}
     >
       <div className="sidebar-header">
         <Wrench size={18} className="faint" />
         <span className="sidebar-title">{m.panel.title}</span>
+        <button className="clickable-icon" aria-label={m.discovery.close} onClick={onClose}><X size={18} /></button>
       </div>
+      <div className="tool-discovery">
+        <p className="tool-scope">{m.discovery.scope(doc.pages.length, selectedCount)}</p>
+        <p className="tool-scope-hint">{m.discovery.scopeHint}</p>
+        <label className="tool-search"><Search size={16} aria-hidden="true" /><input type="search" aria-label={m.discovery.search} placeholder={m.discovery.placeholder} value={search} onChange={e => setSearch(e.target.value)} /></label>
+        {search && <button className="tool-search-clear" onClick={() => setSearch('')}>{m.discovery.clear}</button>}
+        {!hasResults && <p role="status">{m.discovery.empty}</p>}
+      </div>
+      <SearchContext.Provider value={search}>
       <div className="pane" style={{ gap: 0, padding: '4px 6px 60px' }}>
-        <Section title={m.panel.organize} open count={selectedCount ? m.panel.selected(selectedCount) : undefined}>
+        <Section id="organize" title={m.panel.organize} open count={selectedCount ? m.panel.selected(selectedCount) : undefined}>
           <div className="row">
             <button onClick={() => actions.rotate(270)}><RotateCcw size={18} />{m.panel.left}</button>
             <button onClick={() => actions.rotate(90)}><RotateCw size={18} />{m.panel.right}</button>
@@ -310,7 +339,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
 
         <Labels labelPage={labelPage} actions={actions} />
 
-        <Section title={m.panel.split}>
+        <Section id="split" title={m.panel.split}>
           <input placeholder={m.panel.splitPlaceholder} aria-label={m.panel.split} value={ranges} onChange={(e) => setRanges(e.target.value)} />
           <div className="row">
             <button disabled={!ranges.trim()} onClick={() => actions.split(ranges)}>{m.panel.byRanges}</button>
@@ -323,17 +352,17 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
         <Stamps actions={actions} scope={scope} />
         <Redaction doc={doc} actions={actions} />
 
-        <Section title={m.panel.sanitize}>
+        <Section id="sanitize" title={m.panel.sanitize}>
           <p className="hint">{m.panel.sanitizeHint}</p>
           <button onClick={actions.sanitize}>{m.panel.sanitizeButton}</button>
         </Section>
 
-        <Section title={m.panel.digitalSignature} count={doc.signatures.length || undefined}>
+        <Section id="digitalSignature" title={m.panel.digitalSignature} count={doc.signatures.length || undefined}>
           <p className="hint">{m.panel.digitalSignatureHint}</p>
           <button onClick={actions.digitalSign}>{m.panel.signWithId}</button>
         </Section>
 
-        <Section title={m.panel.forms} count={widgets || undefined}>
+        <Section id="forms" title={m.panel.forms} count={widgets || undefined}>
           <p className="hint">{m.panel.formFields(widgets)}</p>
           <div className="row">
             <button onClick={actions.designForm}>{m.panel.designForm}</button>
@@ -349,7 +378,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
 
         <SaveSettings doc={doc} saveOpts={saveOpts} onSaveOpts={onSaveOpts} />
 
-        <Section title={m.panel.export}>
+        <Section id="export" title={m.panel.export}>
           <div className="row">
             <button onClick={actions.exportImages}>{m.panel.exportPng}</button>
             <button onClick={actions.exportMarkdown}>{m.panel.exportMarkdown}</button>
@@ -360,7 +389,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
           </div>
         </Section>
 
-        <Section title={m.panel.archive}>
+        <Section id="archive" title={m.panel.archive}>
           <select value={pdfaPart} aria-label={m.panel.archive} onChange={(e) => setPdfaPart(Number(e.target.value) as 2 | 3)}>
             {([2, 3] as const).map((p) => <option key={p} value={p}>{m.panel.pdfaParts[p]}</option>)}
           </select>
@@ -371,7 +400,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
           <p className="hint">{m.panel.pdfaHint}</p>
         </Section>
 
-        <Section title={m.panel.properties}>
+        <Section id="properties" title={m.panel.properties}>
           {metaKeys.map(([k, label]) => (
             <Field key={k} label={label}>
               <input key={doc.meta[k]} defaultValue={doc.meta[k]} onBlur={(e) => e.target.value !== doc.meta[k] && actions.setMeta({ ...doc.meta, [k]: e.target.value })} />
@@ -379,6 +408,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
           ))}
         </Section>
       </div>
+      </SearchContext.Provider>
       <div
         className="sidebar-resize-handle"
         title="Drag to resize panel, double-click to reset"

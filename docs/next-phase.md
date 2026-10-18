@@ -127,3 +127,20 @@ Desktop light and narrow dark screenshots were inspected; a search-field cascade
 conflict was corrected. The new suite stores screenshots as review evidence, not
 pixel-diff baselines. Full-suite and candidate CI results belong in the PR/tracker.
 Human touch/desktop/viewer acceptance remains NOT RUN.
+
+## Contextual workspace refinement — 18 October 2026
+
+Active package: labelled Tools entry point, searchable document-tool sections,
+page-selection context, active-tool instructions and an explicit unsaved-state
+indicator. Search reveals existing controls; it does not execute an operation.
+Search uses localized section names and word-prefix keywords (Word does not match
+password). Sections stay mounted so entered values survive filtering. Clearing
+search restores the section disclosure state. Closing Tools returns keyboard
+focus to its opener. The document state comes from the existing revision tracker;
+“No unsaved changes” does not assert that a browser download was retained on disk.
+
+Validation includes all three browser engines, light/dark and narrow/desktop
+layouts, search/no-results, preserved split ranges, keyboard focus return, axe,
+and edit/undo state changes. Candidate evidence will be recorded in issue #44.
+Human OS/viewer acceptance remains separate and NOT RUN. Broader contextual
+routing from Home, panel consistency and operation feedback remain follow-ups.

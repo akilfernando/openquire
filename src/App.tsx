@@ -112,6 +112,7 @@ export default function App() {
   zoomRef.current = zoom
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false)
   const zoomMenuRef = useRef<HTMLDivElement>(null)
+  const toolsToggleRef = useRef<HTMLButtonElement>(null)
   const [tool, setTool] = useState<Tool>('select')
   const [colors, setColors] = useState(saved.colors ?? { markup: '#ffd400', draw: '#e11d48', text: '#111111' })
   const [strokeWidth, setStrokeWidth] = useState(saved.strokeWidth ?? 2)
@@ -1845,6 +1846,9 @@ export default function App() {
 
   // ---- commands ------------------------------------------------------------------------------
 
+  const documentDirty = active !== null && sessions.current.dirty(active)
+  const activeTool = ALL_TOOLS.find(t => t.id === tool)
+  const pluginTool = host.tools.find(t => `plugin:${t.plugin}:${t.id}` === tool)
   const has = !!doc
   const hotkeys = effectiveHotkeys(settings.hotkeys)
   /** A command's first shortcut, as shown in tooltips and the palette. */
@@ -2067,7 +2071,7 @@ export default function App() {
             <IconButton Icon={SquareTerminal} label={m.actions.commandPalette} onClick={() => setPalette(true)} />
             <IconButton Icon={SettingsIcon} label={m.actions.settings} onClick={() => setSettingsOpen(true)} />
           </span>
-          {doc && <IconButton Icon={PanelRight} label={m.actions.toggleRight} active={rightOpen} onClick={() => setRightOpen((o) => !o)} />}
+          {doc && <button ref={toolsToggleRef} className="workspace-tools-button" aria-label={m.actions.toggleRight} aria-expanded={rightOpen} aria-controls="document-tools" onClick={() => setRightOpen(o => !o)}><PanelRight size={16} />{m.workspace.tools}</button>}
         </nav>
 
         {doc && (
@@ -2165,6 +2169,12 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {doc && <div className="tool-context" aria-label={m.discovery.active}>
+          <span className="tool-context-name">{activeTool?.name ?? pluginTool?.name}</span>
+          <span className="tool-context-hint">{activeTool?.hint}</span>
+          <span className={`document-save-state${documentDirty ? ' is-dirty' : ''}`}>{documentDirty ? m.discovery.unsaved : m.discovery.unchanged}</span>
+        </div>}
 
         <div className={`view-content${side ? ' is-split' : ''}`}>
           {doc ? (
@@ -2264,7 +2274,7 @@ export default function App() {
         </div>
       </div>
 
-      {doc && <ToolsPanel key={`tools-${active}`} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} open={rightOpen} />}
+      {doc && <ToolsPanel key={`tools-${active}`} doc={doc} selectedCount={selected.size} labelPage={doc.pages.find((p) => p.id === labelPageId())!.label} saveOpts={saveOpts} onSaveOpts={setSaveOpts} actions={panelActions} open={rightOpen} onClose={() => { setRightOpen(false); toolsToggleRef.current?.focus() }} />}
       {doc && narrow && (leftOpen || rightOpen) && <div className="drawer-scrim" onClick={() => { setLeftOpen(false); setRightOpen(false) }} />}
 
       <div className="status-bar">
