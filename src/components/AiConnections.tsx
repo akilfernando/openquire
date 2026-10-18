@@ -112,8 +112,10 @@ export default function AiConnections({ settings, credentialsReady, credentialSt
           <p>Choose a model, or enter its name.</p>
           <p className="hint connection-endpoint">{aiEndpoint(draft)}</p>
           <div className="surface-actions"><button disabled={busy} onClick={() => void loadModels()}>{busy ? 'Loading models…' : 'Load models'}</button>{busy && <button onClick={() => controller.current?.abort()}>Cancel connection check</button>}</div>
-          <label className="connection-field">Model<input list="connection-models" value={draft.model} onChange={e => setDraft({ ...draft, model: e.target.value })} placeholder="Model name" autoComplete="off" /></label>
-          <datalist id="connection-models">{models.map(model => <option key={model} value={model} />)}</datalist>
+          <div className="connection-field"><label htmlFor="provider-model">Model</label><div className="model-picker">
+            <input id="provider-model" value={draft.model} onChange={e => setDraft(current => current ? { ...current, model: e.target.value } : null)} placeholder="Model name" autoComplete="off" />
+            {models.length > 0 && <select aria-label="Choose a listed model" value="" onChange={e => { const model = e.target.value; if (model) setDraft(current => current ? { ...current, model } : null) }}><option value="">Choose from list</option>{models.map(model => <option key={model} value={model}>{model}</option>)}</select>}
+          </div></div>
           <details className="connection-details"><summary>What does Load models check?</summary><p>It sends your key to this provider to list models. No document content is sent. Text generation, image support and billing are not tested.</p></details>
           <div className="surface-actions"><button onClick={() => { invalidate(); setStep(1) }}><ArrowLeft size={16} />Back</button><button className="button-primary" disabled={busy} onClick={save}>Save and select</button></div>
         </>}

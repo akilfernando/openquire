@@ -42,6 +42,8 @@ for (const width of [1000, 390]) for (const colorScheme of ['light', 'dark'] as 
     expect(requests.filter(r => r.key?.endsWith(`test-${id}`))).toHaveLength(0)
     await settings.getByRole('button', { name: 'Load models', exact: true }).click()
     await expect(settings.getByRole('status')).toContainText('Models loaded')
+    await settings.getByRole('combobox', { name: 'Choose a listed model' }).selectOption('gpt-test-model')
+    await expect(settings.getByLabel('Model', { exact: true })).toHaveValue('gpt-test-model')
     await save(settings)
   }
   const hosts = ['api.anthropic.com', 'api.openai.com', 'generativelanguage.googleapis.com', 'api.x.ai', 'localhost:11434', 'provider.example']
@@ -100,6 +102,7 @@ test('provider profiles survive reload encrypted; disconnect and purge forget cr
   await settings.getByText('Selected connection details', { exact: true }).click()
   await settings.getByRole('button', { name: 'Disconnect this provider' }).click()
   await expect(settings.getByRole('status')).toContainText('disconnected')
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('openquire.settings') ?? '{}').aiKey)).toBe('')
   await expect(settings.getByLabel('Enable the AI assistant', { exact: true })).not.toBeChecked()
   await page.reload(); settings = await open(page)
   await edit(settings, 'custom'); await expect(settings.getByLabel('API key', { exact: true })).toHaveValue(''); await settings.getByRole('button', { name: 'Cancel setup' }).click()

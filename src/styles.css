@@ -1112,3 +1112,7 @@ button.quiet-action:hover { color: var(--text-normal); background: var(--hover);
   .provider-card-actions button { min-height: 44px; }
   .connection-editor-heading { align-items: flex-start; }
 }
+
+.model-picker { display: flex; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.model-picker input { flex: 1 1 180px; }
+.model-picker select { min-width: 0; max-width: 100%; min-height: 44px; flex: 1 1 180px; }
