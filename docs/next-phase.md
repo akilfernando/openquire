@@ -144,3 +144,12 @@ layouts, search/no-results, preserved split ranges, keyboard focus return, axe,
 and edit/undo state changes. Candidate evidence will be recorded in issue #44.
 Human OS/viewer acceptance remains separate and NOT RUN. Broader contextual
 routing from Home, panel consistency and operation feedback remain follow-ups.
+
+## Post-merge validation follow-up — 18 October 2026
+
+PR #57 post-merge CI (39114314952) found Firefox light-theme contrast failures
+while section text was fading in. The final color already meets contrast; keep
+text opaque throughout the reveal motion instead of relaxing axe checks.
+The save lifecycle test now polls the beforeunload guard because the saved
+revision can render before asynchronous save cleanup completes. The guard
+itself is unchanged. Candidate results are tracked in issue #44.
