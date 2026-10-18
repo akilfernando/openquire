@@ -1,5 +1,27 @@
 # Next phase: a polished, dependable PDF workspace
 
+## Whole-app experience review — 18 October 2026
+
+The next implementation sequence is defined in [experience-design.md](experience-design.md).
+It covers welcome, Home, the PDF workspace, Settings, provider setup, responsive
+behavior and shared visual/editorial rules. The review found that the provider
+foundation is not yet expressed through a coherent setup experience: onboarding
+still emphasizes Claude Desktop, provider controls are hidden until AI is enabled,
+and narrow Settings navigation and the full tool dock remain visually crowded.
+
+Design rule: lead with the task, choice and consequence. Put implementation
+details in contextual help, Advanced or documentation; keep essential consent,
+unsaved-state and destructive-action information visible at the point of action.
+
+The design brief is complete; the redesigned screens are **planned, not implemented**.
+Deliver in focused packages: (1) shared shell and concise welcome, (2) Settings and
+guided provider connections, (3) reading workspace and contextual tools, (4) Home
+and task continuity, (5) cross-screen feedback and performance review. Each package
+includes actual before/after visual evidence, copy review and regression coverage.
+This replaces the earlier experience-package order below, which remains as history.
+Existing reliability work, provider security boundaries and human release gates
+continue to apply. No feature/release publication is implied by this design review.
+
 ## Active experience phase — 18 October 2026
 
 PRs #49–55 are integrated. Main at `4251b7b` passed post-merge CI, native
@@ -214,7 +236,7 @@ Compatibility references checked 18 October 2026:
 - https://ai.google.dev/gemini-api/docs/openai
 - https://docs.x.ai/developers/rest-api-reference/inference
 
-### Package 2: saved connections and diagnostics (implemented; validation in progress)
+### Package 2: saved connections and diagnostics (merged in #61)
 
 Each provider retains one connection (key, endpoint and model), restoring it when
 selected. Existing active settings migrate without requiring key re-entry. The
