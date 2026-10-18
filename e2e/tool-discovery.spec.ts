@@ -40,10 +40,13 @@ for (const width of [1440, 390]) for (const colorScheme of ['light', 'dark'] as 
     await expect(toggle).toBeFocused()
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await panel.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)))
     // Closing a drawer can resize the canvas. Wait for the report text to be
     // painted, rather than recording a transient blank render as visual evidence.
     await expect.poll(() => page.locator('.page canvas').first().evaluate(canvas => {
       const c = canvas as HTMLCanvasElement
+      const bounds = c.getBoundingClientRect()
+      if (Math.abs(c.width - bounds.width * devicePixelRatio) > 2) return 0
       const pixels = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data
       let ink = 0
       for (let i = 0; i < pixels.length; i += 4) {
