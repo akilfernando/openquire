@@ -159,6 +159,7 @@ export function detectProviderFromKey(key: string): AiProvider | null {
 export async function fetchAvailableModels(
   cfg: { provider: AiProvider; apiKey?: string; baseUrl?: string },
   fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<string[]> {
   const base = aiEndpoint(cfg)
   const key = cfg.apiKey?.trim() ?? ''
@@ -166,9 +167,10 @@ export async function fetchAvailableModels(
   const headers: Record<string, string> = cfg.provider === 'anthropic'
     ? { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }
     : key ? { authorization: `Bearer ${key}` } : {}
-  const res = await fetcher(`${base}/models${cfg.provider === 'anthropic' ? '?limit=50' : ''}`, { headers, signal: AbortSignal.timeout(20_000) })
+  const timeout = AbortSignal.timeout(20_000)
+  const res = await fetcher(`${base}/models${cfg.provider === 'anthropic' ? '?limit=50' : ''}`, { headers, signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
   const data = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(data?.error?.message ?? `Could not list models (${res.status}).`)
+  if (!res.ok) throw new ModelCatalogueError(res.status)
   if (!Array.isArray(data?.data)) throw new Error('The endpoint did not return a model catalogue.')
   let models = data.data.map((m: { id?: unknown }) => m.id).filter((id: unknown): id is string => typeof id === 'string' && !!id)
   if (cfg.provider === 'openai' && base === PROVIDERS.openai.endpoint) {
@@ -183,16 +185,35 @@ export interface ApiKeyVerification {
   provider: AiProvider
 }
 
+/** Do not display arbitrary server error bodies: they can echo credentials or private URLs. */
+export class ModelCatalogueError extends Error {
+  constructor(readonly status: number) {
+    super(status === 401 || status === 403 ? 'Access denied. Check this provider’s API key and account permissions.'
+      : status === 429 ? 'Request limit reached. Check your provider’s rate limits or available quota, then retry.'
+      : status === 404 ? 'Model catalogue not found. Check the API endpoint, or enter a model ID manually.'
+      : status >= 500 ? 'The provider is unavailable. Try again later.'
+      : `Could not list models (HTTP ${status}). Check the endpoint and account settings.`)
+  }
+}
+
+export function connectionError(error: unknown): string {
+  if (error instanceof DOMException && error.name === 'TimeoutError') return 'Connection check timed out after 20 seconds. Check the endpoint and network, then retry.'
+  if (error instanceof DOMException && error.name === 'AbortError') return 'Connection check cancelled.'
+  if (error instanceof TypeError) return 'Could not reach the endpoint. Check its URL, network access and browser cross-origin permissions.'
+  return error instanceof Error ? error.message : 'Connection check failed. Check the endpoint and try again.'
+}
+
 /** A catalogue check does not prove model inference access or available billing. */
 export async function verifyApiKey(
   cfg: { provider: AiProvider; apiKey: string; baseUrl?: string },
   fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<ApiKeyVerification> {
   try {
-    const models = await fetchAvailableModels(cfg, fetcher)
+    const models = await fetchAvailableModels(cfg, fetcher, signal)
     return { ok: true, provider: cfg.provider, message: `${PROVIDERS[cfg.provider].name}: connected; ${models.length} models listed. AI requests and billing have not been tested.` }
   } catch (error) {
-    return { ok: false, provider: cfg.provider, message: error instanceof Error ? error.message : String(error) }
+    return { ok: false, provider: cfg.provider, message: connectionError(error) }
   }
 }
 

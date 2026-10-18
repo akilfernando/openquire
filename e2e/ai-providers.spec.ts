@@ -46,7 +46,8 @@ for (const width of [1000, 390]) for (const colorScheme of ['light', 'dark'] as 
   await expect(key).toHaveValue('')
   expect(requests.filter(r => new URL(r.url).host === 'another.example').every(r => !r.key)).toBe(true)
   await provider.selectOption('gemini')
-  await expect(settings.getByRole('status')).toContainText('Please enter an API key')
+  await expect(key).toHaveValue('test-gemini')
+  await expect(settings.getByRole('status').filter({ hasText: 'connected;' })).toHaveCount(0)
   const axe = await new AxeBuilder({ page }).include('[role="dialog"]').withTags(['wcag2a', 'wcag2aa']).analyze()
   expect(axe.violations.filter(v => v.impact === 'serious' || v.impact === 'critical')).toEqual([])
   expect(await settings.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
@@ -74,10 +75,115 @@ test('late verification cannot validate a newly selected provider', async ({ pag
   await settings.getByRole('button', { name: 'Check connection', exact: true }).click()
   await expect.poll(() => !!release).toBe(true)
   await settings.getByLabel('Provider', { exact: true }).selectOption('gemini')
-  const finished = page.waitForResponse('**/models')
   release!()
-  await finished
   await expect(settings.getByRole('status')).toContainText('Please enter an API key')
   await expect(settings.getByRole('status').filter({ hasText: 'connected;' })).toHaveCount(0)
   await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('')
+})
+
+test('provider profiles survive reload encrypted; disconnect and purge forget credentials', async ({ page }) => {
+  await page.route('**/models*', route => route.fulfill({ json: { data: [{ id: 'gpt-test-model' }] } }))
+  await page.goto('/')
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  const open = async () => {
+    await page.locator('button[aria-label="Settings"]:visible').first().click()
+    await settings.getByRole('button', { name: 'AI assistant', exact: true }).click()
+    await settings.getByLabel('Enable the AI assistant', { exact: true }).check()
+  }
+  await open()
+  const providers = ['anthropic', 'openai', 'gemini', 'xai', 'ollama', 'custom']
+  for (const provider of providers) {
+    await settings.getByLabel('Provider', { exact: true }).selectOption(provider)
+    if (provider === 'custom') {
+      await settings.getByLabel('Endpoint', { exact: true }).fill('https://profiles.example/v1')
+      await settings.getByLabel('Endpoint', { exact: true }).press('Tab')
+    }
+    await settings.getByLabel('API key', { exact: true }).fill(`secret-${provider}`)
+    await settings.getByLabel('API key', { exact: true }).press('Tab')
+    await expect(settings.getByLabel('Model', { exact: true })).toHaveValue('gpt-test-model')
+  }
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem('openquire.settings') ?? '{}'
+    const saved = JSON.parse(raw)
+    return saved.aiProvider === 'custom' && saved.aiModel === 'gpt-test-model' && saved.aiKey?.startsWith('enc:v1:') && saved.aiConnections?.startsWith('enc:v1:') && !raw.includes('secret-')
+  })).toBe(true)
+  // Endpoint remains in the legacy active fields; only the saved envelope hides it.
+  await page.reload()
+  await open()
+  for (const provider of providers) {
+    await settings.getByLabel('Provider', { exact: true }).selectOption(provider)
+    await expect(settings.getByLabel('API key', { exact: true })).toHaveValue(`secret-${provider}`)
+  }
+  await settings.getByRole('button', { name: 'Disconnect this provider' }).click()
+  await expect(settings.getByRole('status')).toContainText('disconnected')
+  await expect(settings.getByLabel('Enable the AI assistant', { exact: true })).not.toBeChecked()
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('openquire.settings')!).aiEnabled)).toBe(false)
+  await page.reload()
+  await open()
+  await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('')
+  await settings.getByLabel('Provider', { exact: true }).selectOption('gemini')
+  await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('secret-gemini')
+  await settings.getByRole('button', { name: 'Privacy & Security', exact: true }).click()
+  page.on('dialog', dialog => dialog.accept())
+  await settings.getByRole('button', { name: /Purge/ }).click()
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('openquire.settings') ?? '{}')
+    return !saved.aiKey && !saved.aiConnections && !saved.aiEnabled
+  })).toBe(true)
+  await page.reload()
+  await open()
+  for (const provider of providers) {
+    await settings.getByLabel('Provider', { exact: true }).selectOption(provider)
+    await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('')
+  }
+})
+
+test('diagnostics cancel pending checks and explain errors without echoing credentials', async ({ page }) => {
+  let mode = 'ok'
+  let release: (() => void) | undefined
+  await page.route('**/models*', async route => {
+    if (mode === 'hold') await new Promise<void>(resolve => { release = resolve })
+    await route.fulfill(mode === 'denied' ? { status: 429, json: { error: { message: 'secret-echoed-by-provider' } } } : { json: { data: [{ id: 'gpt-test-model' }] } })
+  })
+  await page.goto('/')
+  await page.locator('button[aria-label="Settings"]:visible').first().click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('button', { name: 'AI assistant', exact: true }).click()
+  await settings.getByLabel('Enable the AI assistant', { exact: true }).check()
+  await settings.getByLabel('Provider', { exact: true }).selectOption('xai')
+  await settings.getByLabel('API key', { exact: true }).fill('test-key')
+  await settings.getByLabel('API key', { exact: true }).press('Tab')
+  await expect(settings.getByLabel('Model', { exact: true })).toHaveValue('gpt-test-model')
+  mode = 'hold'
+  await settings.getByRole('button', { name: 'Check connection', exact: true }).click()
+  await expect.poll(() => !!release).toBe(true)
+  await settings.getByRole('button', { name: 'Cancel connection check' }).click()
+  await expect(settings.getByRole('status')).toContainText('cancelled')
+  release!()
+  mode = 'denied'
+  await settings.getByRole('button', { name: 'Check connection', exact: true }).click()
+  await expect(settings.getByRole('status')).toContainText('Request limit reached')
+  await expect(settings).not.toContainText('secret-echoed-by-provider')
+})
+
+test('unavailable encrypted storage is visible and never persists a plaintext profile', async ({ page }) => {
+  await page.route('**/models*', route => route.fulfill({ json: { data: [] } }))
+  await page.goto('/')
+  await page.evaluate(() => { crypto.subtle.encrypt = async () => { throw new Error('encryption unavailable') } })
+  await page.locator('button[aria-label="Settings"]:visible').first().click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('button', { name: 'AI assistant', exact: true }).click()
+  await settings.getByLabel('Enable the AI assistant', { exact: true }).check()
+  await settings.getByLabel('API key', { exact: true }).fill('session-only-secret')
+  await settings.getByLabel('API key', { exact: true }).press('Tab')
+  await expect(settings.getByRole('alert')).toContainText('kept only for this session')
+  await settings.getByLabel('Provider', { exact: true }).selectOption('gemini')
+  await expect(settings.getByRole('alert')).toContainText('kept only for this session')
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem('openquire.settings') ?? '{}'
+    const saved = JSON.parse(raw)
+    return saved.aiProvider === 'gemini' && !raw.includes('session-only-secret') && !saved.aiConnections && !saved.aiKey
+  })).toBe(true)
+  await settings.getByLabel('Provider', { exact: true }).selectOption('anthropic')
+  await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('session-only-secret')
 })

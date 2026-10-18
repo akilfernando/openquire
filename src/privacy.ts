@@ -170,6 +170,7 @@ export async function purgeAllPrivateData(): Promise<void> {
       const settings = JSON.parse(raw)
       delete settings.aiKey
       delete settings.aiProfile
+      delete settings.aiConnections
       settings.aiEnabled = false
       settings.recoveryEnabled = false
       settings.author = 'OpenQuire user'

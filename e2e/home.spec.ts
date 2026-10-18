@@ -72,7 +72,9 @@ test('failed routed import does not leave a task on the next import', async ({ p
   await card.getByRole('button').click()
   await (await chooser).setFiles({ name: 'broken.pdf', mimeType: 'application/pdf', buffer: Buffer.from('not a PDF') })
   await expect(page.getByRole('dialog', { name: 'Import results' })).toContainText('1 failed')
-  await page.keyboard.press('Escape')
+  // Dismiss through the mounted control; this routing test does not test Escape wiring.
+  await page.getByRole('dialog', { name: 'Import results' }).getByRole('button', { name: 'Close', exact: true }).last().click()
+  await expect(page.getByRole('dialog', { name: 'Import results' })).toHaveCount(0)
   await expect(page.locator('.status-bar .spin')).toHaveCount(0)
   await expect(page.locator('.home')).toBeVisible()
   const next = page.waitForEvent('filechooser')

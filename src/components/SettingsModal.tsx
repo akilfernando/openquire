@@ -8,7 +8,8 @@ import HotkeySettings from './HotkeySettings'
 import PluginsSettings from './PluginsSettings'
 import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
-import { PROVIDERS, DEFAULT_MODELS, aiKeyRequired, fetchAvailableModels, formatAndRankModels, pickOptimalModel, verifyApiKey, type AiProvider, type ApiKeyVerification } from '../ai'
+import { PROVIDERS, DEFAULT_MODELS, aiKeyRequired, connectionError, fetchAvailableModels, formatAndRankModels, pickOptimalModel, verifyApiKey, type AiProvider, type ApiKeyVerification } from '../ai'
+import { selectProvider, forgetProvider, rememberProvider } from '../ai-profiles'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -45,6 +46,8 @@ export interface Settings {
   aiBaseUrl: string
   /** Facts about the user for filling forms, sent only when they ask. */
   aiProfile: string
+  /** Encrypted provider-profile envelope on disk; JSON only in memory. */
+  aiConnections?: string
   /** Air-gapped privacy mode: completely disables/hides all AI features and settings. */
   aiDisabled?: boolean
   /** Explicit consent to encrypted document checkpoints on this device. Default off. */
@@ -63,6 +66,8 @@ export const ACCENTS: { key: string; hue: number }[] = [
 type Tab = 'appearance' | 'comments' | 'ocr' | 'signatures' | 'privacy' | 'ai' | 'hotkeys' | 'plugins' | 'about'
 
 interface Props {
+  credentialsReady: boolean
+  credentialStorageError: string
   settings: Settings
   onChange: (s: Settings) => void
   onPurge: () => Promise<void>
@@ -89,8 +94,11 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard }: Props) {
-  const set = (p: Partial<Settings>) => onChange({ ...settings, ...p })
+export default function SettingsModal({ settings, credentialsReady, credentialStorageError, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard }: Props) {
+  const set = (p: Partial<Settings>) => {
+    const next = { ...settings, ...p }
+    onChange(credentialsReady && ('aiKey' in p || 'aiModel' in p || 'aiBaseUrl' in p) ? rememberProvider(next) : next)
+  }
   const [certError, setCertError] = useState('')
   const [purgeFeedback, setPurgeFeedback] = useState('')
   const [purgeError, setPurgeError] = useState('')
@@ -103,6 +111,14 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
   const [isCustomModel, setIsCustomModel] = useState(false)
   const [modelError, setModelError] = useState('')
   const verificationRequest = useRef(0)
+  const verificationAbort = useRef<AbortController | null>(null)
+  const discoveryAbort = useRef<AbortController | null>(null)
+  const [connectionNotice, setConnectionNotice] = useState('')
+  const keyInput = useRef<HTMLInputElement>(null)
+  const keyEditing = useRef(false)
+  useEffect(() => {
+    if (keyInput.current && !keyEditing.current) keyInput.current.value = settings.aiKey.startsWith('enc:v1:') ? '' : settings.aiKey
+  }, [settings.aiKey, settings.aiProvider, settings.aiBaseUrl])
   const [keyVerification, setKeyVerification] = useState<ApiKeyVerification | null>(null)
   const [verifyingKey, setVerifyingKey] = useState(false)
   const keyRequired = aiKeyRequired({ provider: settings.aiProvider, baseUrl: settings.aiBaseUrl })
@@ -110,9 +126,13 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
 
   const handleVerify = useCallback(async (provider: AiProvider, apiKey: string, baseUrl: string) => {
     const request = ++verificationRequest.current
+    verificationAbort.current?.abort()
+    const controller = new AbortController()
+    verificationAbort.current = controller
     setVerifyingKey(true)
+    setKeyVerification(null)
     try {
-      const res = await verifyApiKey({ provider, apiKey, baseUrl })
+      const res = await verifyApiKey({ provider, apiKey, baseUrl }, fetch, controller.signal)
       const latest = latestAi.current.settings
       if (request === verificationRequest.current && latest.aiEnabled && !latest.aiDisabled && provider === latest.aiProvider && apiKey === latest.aiKey && baseUrl === latest.aiBaseUrl) setKeyVerification(res)
     } finally {
@@ -126,10 +146,13 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
   const modelRequest = useRef(0)
   const refreshModels = useCallback(async (provider: AiProvider, apiKey: string, baseUrl: string) => {
     const request = ++modelRequest.current
+    discoveryAbort.current?.abort()
+    const controller = new AbortController()
+    discoveryAbort.current = controller
     setLoadingModels(true)
     setModelError('')
     try {
-      const list = await fetchAvailableModels({ provider, apiKey, baseUrl })
+      const list = await fetchAvailableModels({ provider, apiKey, baseUrl }, fetch, controller.signal)
       const latest = latestAi.current
       if (request !== modelRequest.current || !latest.settings.aiEnabled || latest.settings.aiDisabled ||
           provider !== latest.settings.aiProvider || apiKey !== latest.settings.aiKey || baseUrl !== latest.settings.aiBaseUrl) return
@@ -143,19 +166,24 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
       const latest = latestAi.current.settings
       if (request === modelRequest.current && provider === latest.aiProvider && apiKey === latest.aiKey && baseUrl === latest.aiBaseUrl) {
         setModelList([])
-        setModelError(error instanceof Error ? error.message : String(error))
+        setModelError(connectionError(error))
       }
     } finally {
       if (request === modelRequest.current) setLoadingModels(false)
     }
   }, [])
 
-  useEffect(() => () => { modelRequest.current++; verificationRequest.current++ }, [])
   useEffect(() => {
-    if (tab === 'ai' && settings.aiEnabled && !settings.aiDisabled) {
+    if (tab === 'ai' && credentialsReady && settings.aiEnabled && !settings.aiDisabled) {
       void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)
     }
-  }, [tab, settings.aiEnabled, settings.aiDisabled, settings.aiProvider, settings.aiKey, settings.aiBaseUrl, refreshModels])
+    setKeyVerification(null)
+    setVerifyingKey(false)
+    return () => {
+      modelRequest.current++; verificationRequest.current++
+      discoveryAbort.current?.abort(); verificationAbort.current?.abort()
+    }
+  }, [tab, credentialsReady, settings.aiEnabled, settings.aiDisabled, settings.aiProvider, settings.aiKey, settings.aiBaseUrl, refreshModels])
   // Escape closes Settings wherever focus is, even after the focused control went away.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -384,21 +412,25 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
               ) : (
                 <>
                   <Item name={m.settings.aiEnabled} desc={m.settings.aiEnabledDesc}>
-                    <input type="checkbox" className="toggle" checked={settings.aiEnabled} aria-label={m.settings.aiEnabled} onChange={(e) => set({ aiEnabled: e.target.checked })} />
+                    <input type="checkbox" className="toggle" checked={settings.aiEnabled} aria-label={m.settings.aiEnabled} onChange={(e) => { setConnectionNotice(''); set({ aiEnabled: e.target.checked }) }} />
                   </Item>
+              {connectionNotice && <p role="status" className="hint">{connectionNotice}</p>}
+              {credentialStorageError && <p role="alert" className="hint">{credentialStorageError}</p>}
               {settings.aiEnabled && (
                 <>
                   <Item name={m.settings.aiProvider} desc={m.settings.aiProviderDesc}>
-                    <select value={settings.aiProvider} aria-label={m.settings.aiProvider} onChange={(e) => {
+                    <select disabled={!credentialsReady} value={settings.aiProvider} aria-label={m.settings.aiProvider} onChange={(e) => {
                       verificationRequest.current++; modelRequest.current++
                       setVerifyingKey(false); setKeyVerification(null); setModelList([]); setModelError(''); setIsCustomModel(false)
-                      set({ aiProvider: e.target.value as AiProvider, aiModel: '', aiKey: '', aiBaseUrl: '' })
+                      setConnectionNotice('')
+                      onChange(selectProvider(settings, e.target.value as AiProvider))
                     }}>
                       {Object.entries(PROVIDERS).map(([id, provider]) => <option key={id} value={id}>{provider.name}</option>)}
                     </select>
                   </Item>
                   <p className="hint">{m.settings.aiConnectionHint}</p>
                   <p className="hint">{m.settings.aiSwitchHint}</p>
+                  {!credentialsReady && <p role="status" className="hint">Unlocking saved connections on this device…</p>}
                   {settings.aiProvider !== 'anthropic' && (
                     <Item name={m.settings.aiBaseUrl} desc={m.settings.aiBaseUrlDesc}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: 260 }}>
@@ -418,16 +450,6 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                             }
                           }}
                         />
-                        {settings.aiProvider === 'ollama' && (
-                          <button
-                            type="button"
-                            disabled={verifyingKey}
-                            style={{ padding: '5px 10px', fontSize: '0.8rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)', whiteSpace: 'nowrap' }}
-                            onClick={() => void handleVerify('ollama', '', settings.aiBaseUrl)}
-                          >
-                            {verifyingKey ? '...' : 'Test'}
-                          </button>
-                        )}
                       </div>
                     </Item>
                   )}
@@ -438,11 +460,14 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                           type="password"
                           autoComplete="off"
                           key={`key-${settings.aiProvider}-${settings.aiBaseUrl}`}
-                          defaultValue={settings.aiKey}
+                          ref={keyInput}
+                          defaultValue={settings.aiKey.startsWith('enc:v1:') ? '' : settings.aiKey}
                           aria-label={m.settings.aiKey}
                           style={{ flex: 1 }}
-                          onChange={() => { verificationRequest.current++; setKeyVerification(null); setVerifyingKey(false) }}
+                          onChange={() => { keyEditing.current = true; verificationRequest.current++; verificationAbort.current?.abort(); setKeyVerification(null); setVerifyingKey(false) }}
                           onBlur={(e) => {
+                            if (!keyEditing.current) return
+                            keyEditing.current = false
                             const val = e.target.value.trim()
                             if (val !== settings.aiKey) {
                               set({ aiKey: val })
@@ -452,13 +477,14 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                         />
                         <button
                           type="button"
-                          disabled={verifyingKey || (!settings.aiKey && keyRequired)}
+                          disabled={!credentialsReady || verifyingKey || (!settings.aiKey && keyRequired)}
                           style={{ padding: '5px 10px', fontSize: '0.8rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)', whiteSpace: 'nowrap' }}
                           onClick={() => void handleVerify(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)}
                         >
                           {verifyingKey ? m.settings.aiChecking : m.settings.aiCheck}
                         </button>
                       </div>
+                      {verifyingKey && <button type="button" onClick={() => verificationAbort.current?.abort()}>Cancel connection check</button>}
                       {keyVerification && (
                         <div role="status"
                           style={{
@@ -466,7 +492,7 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                             alignItems: 'center',
                             gap: 5,
                             fontSize: '0.78rem',
-                            color: keyVerification.ok ? '#2e7d32' : '#d32f2f',
+                            color: 'var(--text-normal)',
                             fontWeight: 500,
                             lineHeight: 1.3,
                             marginTop: 2,
@@ -478,6 +504,18 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                       )}
                     </div>
                   </Item>
+                  <section className="ai-connection-summary" aria-label="Connection diagnostics">
+                    <strong>{PROVIDERS[settings.aiProvider].name}</strong>
+                    <p className="hint">Checks model-catalogue access only. Text generation, image support and billing remain untested. No document content is sent by this check.</p>
+                    <button type="button" disabled={!credentialsReady} onClick={() => {
+                      verificationRequest.current++; modelRequest.current++
+                      verificationAbort.current?.abort(); discoveryAbort.current?.abort()
+                      setVerifyingKey(false); setKeyVerification(null); setModelList([]); setModelError('')
+                      setConnectionNotice(`${PROVIDERS[settings.aiProvider].name} disconnected. Its saved key, endpoint and model were removed; AI is off. Other provider connections are retained.`)
+                      onChange({ ...forgetProvider(settings), aiEnabled: false })
+                    }}>Disconnect this provider</button>
+                    <p className="hint">Removes this connection from OpenQuire and turns AI off. To revoke an API key, use your provider’s account settings.</p>
+                  </section>
                   <Item name={m.settings.aiModel} desc={m.settings.aiModelDesc}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 240 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -507,7 +545,7 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                           type="button"
                           title="Refresh active models"
                           aria-label="Refresh active models"
-                          disabled={loadingModels}
+                          disabled={!credentialsReady || loadingModels}
                           style={{ padding: '4px 8px', fontSize: '0.85rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)' }}
                           onClick={() => void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)}
                         >

@@ -839,6 +839,8 @@ label.check:hover { color: var(--text-normal); }
 .setting-desc { color: var(--text-muted); font-size: var(--font-smaller); margin-top: 2px; }
 .setting-control { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .setting-control input, .setting-control select { min-width: 0; }
+.ai-connection-summary { padding: 14px; margin: 12px 0; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-s); }
+.ai-connection-summary p { margin: 8px 0; }
 @media (max-width: 700px) {
   .settings { flex-direction: column; }
   .settings-nav { width: auto; padding: 12px 40px 12px 12px; flex-direction: row; flex-wrap: wrap; }

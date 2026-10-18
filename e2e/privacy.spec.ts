@@ -9,12 +9,13 @@ const privacyCode = transformSync(readFileSync(new URL('../src/privacy.ts', impo
 }).code
 
 test('delayed credential hydration preserves a newer edit in the production UI', async ({ page }) => {
-  await page.route('**/models', (route) => route.fulfill({ json: { data: [] } }))
+  await page.route('**/models*', (route) => route.fulfill({ json: { data: [] } }))
   await page.goto('/')
   await page.evaluate(async (code) => {
     const { encryptSensitive } = new Function(`${code}; return privacyTest;`)()
     localStorage.setItem('openquire.settings', JSON.stringify({
       aiEnabled: true, aiProvider: 'anthropic', aiKey: await encryptSensitive('old-key'), aiProfile: '',
+      aiConnections: await encryptSensitive(JSON.stringify({ xai: { apiKey: 'saved-xai-key', model: 'saved-model', baseUrl: '' } })),
     }))
   }, privacyCode)
   await page.addInitScript(() => {
@@ -32,6 +33,14 @@ test('delayed credential hydration preserves a newer edit in the production UI',
   await page.locator('button[aria-label="Settings"]:visible').first().click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
   await settings.getByRole('button', { name: 'AI assistant', exact: true }).click()
+  await expect(settings.getByLabel('Provider', { exact: true })).toBeDisabled()
+  // A blank-looking locked field must not be interpreted as a request to erase it.
+  await settings.getByLabel('API key', { exact: true }).focus()
+  await settings.getByLabel('API key', { exact: true }).press('Tab')
+  await settings.getByLabel('Enable the AI assistant', { exact: true }).uncheck()
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('openquire.settings')!).aiEnabled)).toBe(false)
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('openquire.settings')!).aiKey.startsWith('enc:v1:'))).toBe(true)
+  await settings.getByLabel('Enable the AI assistant', { exact: true }).check()
   await settings.getByLabel('API key', { exact: true }).fill('new-key')
   await settings.getByLabel('API key', { exact: true }).press('Tab')
   await page.evaluate(() => (globalThis as unknown as { releaseDecryption: () => void }).releaseDecryption())
@@ -44,6 +53,12 @@ test('delayed credential hydration preserves a newer edit in the production UI',
     const saved = JSON.parse(localStorage.getItem('openquire.settings') ?? '{}')
     return saved.aiDisabled ? decryptSensitive(saved.aiKey) : ''
   }, privacyCode)).toBe('new-key')
+  await settings.getByRole('checkbox', { name: 'Disable all AI features', exact: true }).uncheck()
+  await settings.getByLabel('Enable the AI assistant', { exact: true }).check()
+  await settings.getByLabel('Provider', { exact: true }).selectOption('xai')
+  await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('saved-xai-key')
+  await settings.getByLabel('Provider', { exact: true }).selectOption('anthropic')
+  await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('new-key')
 })
 
 test('concurrent tabs encrypt with one persisted, non-extractable device key', async ({ page, context }) => {

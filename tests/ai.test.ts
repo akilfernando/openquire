@@ -131,7 +131,7 @@ describe('AI assistant', () => {
     const anthropicFailFetcher = reply({ error: { message: 'invalid x-api-key' } }, false)
     const res2 = await verifyApiKey({ provider: 'anthropic', apiKey: 'sk-ant-bad' }, anthropicFailFetcher)
     expect(res2.ok).toBe(false)
-    expect(res2.message).toBe('invalid x-api-key')
+    expect(res2.message).toContain('Access denied')
 
     // OpenAI valid key
     const openaiOkFetcher = reply({ data: [{ id: 'gpt-5-mini' }] })
@@ -143,7 +143,7 @@ describe('AI assistant', () => {
     const openaiFailFetcher = reply({ error: { message: 'Incorrect API key provided' } }, false)
     const res4 = await verifyApiKey({ provider: 'openai', apiKey: 'sk-bad' }, openaiFailFetcher)
     expect(res4.ok).toBe(false)
-    expect(res4.message).toBe('Incorrect API key provided')
+    expect(res4.message).toContain('Access denied')
 
     // Empty key check
     const resEmpty = await verifyApiKey({ provider: 'openai', apiKey: '   ' })
@@ -161,6 +161,28 @@ describe('AI assistant', () => {
 
 
 describe('provider destinations and contracts', () => {
+  for (const [status, hint] of [[401, 'Access denied'], [403, 'Access denied'], [429, 'Request limit'], [404, 'catalogue not found'], [503, 'unavailable']] as const) {
+    it(`explains HTTP ${status} without exposing the response body`, async () => {
+      const fetcher = vi.fn(async () => ({ ok: false, status, json: async () => ({ error: { message: 'secret-key-in-server-body' } }) }) as Response)
+      const result = await verifyApiKey({ provider: 'xai', apiKey: 'key' }, fetcher)
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain(hint)
+      expect(result.message).not.toContain('secret')
+    })
+  }
+  it('classifies network, timeout and cancellation without raw transport details', async () => {
+    for (const [error, hint] of [[new TypeError('private-url'), 'Could not reach'], [new DOMException('', 'TimeoutError'), 'timed out'], [new DOMException('', 'AbortError'), 'cancelled']] as const) {
+      const result = await verifyApiKey({ provider: 'gemini', apiKey: 'key' }, async () => { throw error })
+      expect(result.message).toContain(hint)
+      expect(result.message).not.toContain('private-url')
+    }
+    const controller = new AbortController()
+    controller.abort()
+    await verifyApiKey({ provider: 'gemini', apiKey: 'key' }, async (_url, init) => {
+      expect(init?.signal?.aborted).toBe(true)
+      throw new DOMException('', 'AbortError')
+    }, controller.signal)
+  })
   for (const provider of ['openai', 'gemini', 'xai', 'ollama', 'custom'] as const) {
     it(`uses the same ${provider} destination for verification, discovery, consent and inference`, async () => {
       const cfg: AiConfig = { provider, apiKey: ' test-key ', model: 'chosen-model', baseUrl: provider === 'custom' ? 'https://example.test/v1/' : '' }
@@ -183,7 +205,7 @@ describe('provider destinations and contracts', () => {
   it('does not silently fall back to a different provider or a cached catalogue', async () => {
     expect(() => aiEndpoint({ provider: 'custom' })).toThrow('endpoint')
     expect(() => aiEndpoint({ provider: 'custom', baseUrl: 'https://user:password@example.test/v1' })).toThrow('credentials')
-    await expect(fetchAvailableModels({ provider: 'xai', apiKey: 'key' }, reply({ error: { message: 'denied' } }, false))).rejects.toThrow('denied')
+    await expect(fetchAvailableModels({ provider: 'xai', apiKey: 'key' }, reply({ error: { message: 'denied' } }, false))).rejects.toThrow('Access denied')
     await expect(fetchAvailableModels({ provider: 'gemini', apiKey: 'key' }, reply({ unexpected: true }))).rejects.toThrow('catalogue')
   })
   it('keeps discovered catalogues free of unavailable seed models', () => {
