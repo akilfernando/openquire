@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
 import { m } from '../i18n'
@@ -15,7 +15,7 @@ interface Props {
 export default function Modal({ title, labelledBy, onClose, className = '', children }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   useFocusTrap(ref)
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!onClose) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
