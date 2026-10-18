@@ -1,3 +1,4 @@
+import type { DiscoveredConnection } from './ai-discovery'
 import Home from './components/Home'
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import {
@@ -174,6 +175,7 @@ export default function App() {
   const [fieldEdit, setFieldEdit] = useState<{ pageId: number; rect: Rect | null; widget: WidgetInfo | null } | null>(null)
   const [linkEdit, setLinkEdit] = useState<{ pageId: number; rect: Rect | null; index: number | null } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [discoveredConnection, setDiscoveredConnection] = useState<DiscoveredConnection | undefined>()
   const [settingsStart, setSettingsStart] = useState<'appearance' | 'ai'>('appearance')
   const [showAssistantSetup, setShowAssistantSetup] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -2376,7 +2378,7 @@ export default function App() {
 
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
 
-      {settingsOpen && <SettingsModal initialTab={settingsStart} settings={settings} credentialsReady={credentialsReady} credentialStorageError={credentialStorageError} onChange={setSettings} onPurge={purgePrivateData} onClose={() => { setSettingsOpen(false); setSettingsStart('appearance') }} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
+      {settingsOpen && <SettingsModal discoveredConnection={discoveredConnection} initialTab={settingsStart} settings={settings} credentialsReady={credentialsReady} credentialStorageError={credentialStorageError} onChange={setSettings} onPurge={purgePrivateData} onClose={() => { setSettingsOpen(false); setSettingsStart('appearance'); setDiscoveredConnection(undefined) }} readCertificates={(data) => engine.describeCertificates(data)} commands={commands.map(({ id, name }) => ({ id, name }))}
         plugins={plugins} pluginErrors={host.errors} onPlugins={setPlugins} onOpenWizard={() => setShowAssistantSetup(true)} />}
       {showOnboarding && <OnboardingModal aiAvailable={!settings.aiDisabled}
         onClose={() => setShowOnboarding(false)}
@@ -2385,10 +2387,10 @@ export default function App() {
         onAi={() => { setSettingsStart('ai'); setSettingsOpen(true) }} />}
       {showAssistantSetup && (
         <AssistantSetupModal
-          settings={settings}
-          onUpdateSettings={(partial) => {
-            const next = { ...settings, ...partial }
-            setSettings(next)
+          disabled={!!settings.aiDisabled}
+          onConfigure={(connection) => {
+            setShowAssistantSetup(false); setDiscoveredConnection(connection)
+            setSettingsStart('ai'); setSettingsOpen(true)
           }}
           onClose={() => setShowAssistantSetup(false)}
         />

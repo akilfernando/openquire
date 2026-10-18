@@ -1,3 +1,4 @@
+import type { DiscoveredConnection } from '../ai-discovery'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ChevronRight, ExternalLink, X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
@@ -80,6 +81,7 @@ interface Props {
   onPlugins: (list: InstalledPlugin[]) => void
   /** Reads certificate files into displayable entries. */
   readCertificates: (data: Uint8Array) => Promise<Settings['trusted']>
+  discoveredConnection?: DiscoveredConnection
   initialTab?: Tab
   onOpenWizard?: () => void
 }
@@ -96,7 +98,7 @@ function Item({ name, desc, children }: { name: string; desc?: string; children:
   )
 }
 
-export default function SettingsModal({ settings, credentialsReady, credentialStorageError, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard, initialTab = 'appearance' }: Props) {
+export default function SettingsModal({ settings, credentialsReady, credentialStorageError, onChange, onPurge, onClose, readCertificates, commands, plugins, pluginErrors, onPlugins, onOpenWizard, discoveredConnection, initialTab = 'appearance' }: Props) {
   const set = (p: Partial<Settings>) => {
     const next = { ...settings, ...p }
     onChange(credentialsReady && ('aiKey' in p || 'aiModel' in p || 'aiBaseUrl' in p) ? rememberProvider(next) : next)
@@ -106,6 +108,7 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
   const [purgeError, setPurgeError] = useState('')
   const [purging, setPurging] = useState(false)
   const [tab, setTab] = useState<Tab>(initialTab)
+  const [suggestion, setSuggestion] = useState(discoveredConnection)
   const [detail, setDetail] = useState(initialTab === 'ai')
   const content = useRef<HTMLDivElement>(null)
   const navigation = useRef<HTMLElement>(null)
@@ -323,7 +326,7 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
               </div>
             </>
           )}
-          {tab === 'ai' && <AiConnections settings={settings} credentialsReady={credentialsReady}
+          {tab === 'ai' && <AiConnections discoveredConnection={suggestion} onDiscoveryUsed={() => setSuggestion(undefined)} settings={settings} credentialsReady={credentialsReady}
             credentialStorageError={credentialStorageError} onChange={onChange}
             onPrivacy={() => navigate('privacy')}
             onAssistants={onOpenWizard ? () => { onClose(); onOpenWizard() } : undefined} />}

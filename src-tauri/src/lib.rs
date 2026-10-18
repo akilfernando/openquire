@@ -108,7 +108,7 @@ async fn native_ocr(request: Request<'_>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || tools::ocr_tsv(&png, &lang)).await.map_err(|e| e.to_string())?
 }
 
-/// Detects installed AI desktop assistants (Claude Desktop, ChatGPT, Cursor).
+/// Looks for supported desktop app/config and CLI command-file markers.
 #[tauri::command]
 async fn detect_ai_assistants() -> ai_detect::AiAssistantsReport {
     tauri::async_runtime::spawn_blocking(ai_detect::detect_all).await.unwrap_or_default()

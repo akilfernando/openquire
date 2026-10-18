@@ -1,328 +1,97 @@
-import { useEffect, useId, useState } from 'react'
-import { Bot, Check, CheckCircle2, Copy, ShieldCheck, ZapOff } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ArrowRight, Check, Circle, LoaderCircle, Search, Sparkles } from 'lucide-react'
 import Modal from './Modal'
-import { m } from '../i18n'
-import { isDesktop, detectAiAssistants, linkClaudeDesktop, unlinkClaudeDesktop, type AiAssistantsReport } from '../native'
-import type { Settings } from './SettingsModal'
+import { isDesktop, detectAiAssistants, type AiAssistantsReport } from '../native'
+import { bounded, discoverLocalModels, type DiscoveredConnection } from '../ai-discovery'
+import { privacyRevision, PRIVACY_REVISION_KEY } from '../privacy'
 
+type CheckState = 'idle' | 'checking' | 'done' | 'unavailable'
 interface Props {
-  settings: Settings
-  onUpdateSettings: (s: Partial<Settings>) => void
+  disabled: boolean
+  onConfigure: (connection?: DiscoveredConnection) => void
   onClose: () => void
 }
 
-export default function AssistantSetupModal({ settings, onUpdateSettings, onClose }: Props) {
-  const titleId = useId()
+export default function AssistantSetupModal({ disabled, onConfigure, onClose }: Props) {
+  const [apps, setApps] = useState<CheckState>('idle')
+  const [local, setLocal] = useState<CheckState>('idle')
   const [report, setReport] = useState<AiAssistantsReport | null>(null)
-  const [scanning, setScanning] = useState(true)
-  const [linking, setLinking] = useState(false)
-  const [linkedNotice, setLinkedNotice] = useState('')
-  const [copiedCmd, setCopiedCmd] = useState(false)
-  const [aiDisabled, setAiDisabled] = useState(settings.aiDisabled ?? false)
-
+  const [connection, setConnection] = useState<DiscoveredConnection | null>(null)
+  const [notice, setNotice] = useState('')
+  const [started, setStarted] = useState(false)
+  const [copyStatus, setCopyStatus] = useState('')
+  const controller = useRef<AbortController | null>(null)
+  const generation = useRef(0)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const revision = useRef(privacyRevision())
+  const scanning = apps === 'checking' || local === 'checking'
+  const stop = () => {
+    generation.current++; controller.current?.abort()
+    setApps(value => value === 'checking' ? 'idle' : value)
+    setLocal(value => value === 'checking' ? 'idle' : value)
+    setNotice('Search stopped. You can use any results already found, or set up a provider.')
+    heading.current?.focus()
+  }
   useEffect(() => {
-    let active = true
-    detectAiAssistants()
-      .then((rep) => {
-        if (active) {
-          setReport(rep)
-          setScanning(false)
-        }
-      })
-      .catch(() => {
-        if (active) setScanning(false)
-      })
-    return () => {
-      active = false
-    }
+    heading.current?.focus()
+    const purge = (event: StorageEvent) => { if (event.key === PRIVACY_REVISION_KEY) onClose() }
+    window.addEventListener('storage', purge)
+    return () => { generation.current++; controller.current?.abort(); window.removeEventListener('storage', purge) }
   }, [])
+  useEffect(() => { if (disabled) { generation.current++; controller.current?.abort(); onClose() } }, [disabled])
 
-  const handleToggleAiDisabled = (disabled: boolean) => {
-    setAiDisabled(disabled)
-    onUpdateSettings({
-      aiDisabled: disabled,
-      aiEnabled: disabled ? false : settings.aiEnabled,
-    })
+  const scan = () => {
+    if (disabled || privacyRevision().endsWith(':purging')) return
+    controller.current?.abort()
+    const abort = new AbortController(); controller.current = abort
+    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)])
+    const id = ++generation.current; revision.current = privacyRevision()
+    const current = () => generation.current === id && revision.current === privacyRevision()
+    setStarted(true); setNotice(''); setCopyStatus(''); setReport(null); setConnection(null)
+    setApps(isDesktop ? 'checking' : 'unavailable'); setLocal('checking')
+    if (isDesktop) void bounded(detectAiAssistants(), signal).then(value => {
+      if (current()) { setReport(value); setApps('done') }
+    }, () => { if (current()) setApps('unavailable') })
+    void bounded(discoverLocalModels(signal), signal).then(value => {
+      if (current()) { setConnection(value); setLocal('done') }
+    }, () => { if (current()) setLocal('unavailable') })
   }
-
-  const handleLinkClaude = async () => {
-    if (!isDesktop) {
-      void navigator.clipboard.writeText('npx -y openquire mcp setup')
-      setCopiedCmd(true)
-      setTimeout(() => setCopiedCmd(false), 3000)
-      return
-    }
-
-    setLinking(true)
-    try {
-      await linkClaudeDesktop()
-      setLinkedNotice('Successfully linked OpenQuire MCP! Restart Claude Desktop to use.')
-      const rep = await detectAiAssistants()
-      setReport(rep)
-    } catch (err) {
-      setLinkedNotice(`Failed to link automatically: ${String(err)}`)
-    } finally {
-      setLinking(false)
-    }
+  const configure = (value?: DiscoveredConnection) => {
+    if (disabled || revision.current !== privacyRevision()) { onClose(); return }
+    generation.current++; controller.current?.abort(); onConfigure(value)
   }
+  const found = report ? Object.entries(report).filter(([, value]) => value?.installed || value?.linked) : []
+  const status = (state: CheckState) => state === 'checking' ? <LoaderCircle className="discovery-spinner" size={18} /> : state === 'done' ? <Check size={18} /> : <Circle size={18} />
 
-  const handleUnlinkClaude = async () => {
-    if (!isDesktop) return
-    setLinking(true)
-    try {
-      await unlinkClaudeDesktop()
-      setLinkedNotice('Disconnected OpenQuire from Claude Desktop.')
-      const rep = await detectAiAssistants()
-      setReport(rep)
-    } catch (err) {
-      setLinkedNotice(`Failed to disconnect: ${String(err)}`)
-    } finally {
-      setLinking(false)
-    }
-  }
-
-  const handleFinish = () => {
-    onClose()
-  }
-
-  const claude = report?.claude_desktop
-  const chatgpt = report?.chatgpt_desktop
-  const cursor = report?.cursor
-
-  return (
-    <Modal className="assistant-setup-modal" labelledBy={titleId} onClose={handleFinish}>
-      <div style={{ padding: '4px 8px 12px 8px', maxWidth: 580 }}>
-        {/* Header */}
-        <div style={{ textAlign: 'center', marginBottom: 20 }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 52,
-              height: 52,
-              borderRadius: 12,
-              background: 'var(--panel)',
-              border: '1px solid var(--border)',
-              marginBottom: 12,
-              color: 'var(--accent)',
-            }}
-          >
-            <ShieldCheck size={32} />
-          </div>
-          <h2 id={titleId} style={{ margin: '0 0 6px 0', fontSize: '1.45rem', fontWeight: 600 }}>{m.settings.openOnboardingWizard}</h2>
-          <p style={{ margin: '0 0 10px 0', color: 'var(--text-muted)', fontSize: '0.92rem' }}>{m.onboarding.subtitle}</p>
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '3px 10px',
-              borderRadius: 20,
-              background: 'var(--panel)',
-              border: '1px solid var(--border)',
-              fontSize: '0.78rem',
-              color: 'var(--accent)',
-              fontWeight: 500,
-            }}
-          >
-            {m.onboarding.privacyBadge}
-          </span>
-        </div>
-
-        {/* Option: Disable All AI Features */}
-        <div
-          style={{
-            padding: 14,
-            borderRadius: 8,
-            border: `1px solid ${aiDisabled ? 'var(--accent)' : 'var(--border)'}`,
-            background: aiDisabled ? 'var(--panel-alt, var(--panel))' : 'var(--bg)',
-            marginBottom: 18,
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <ZapOff size={18} style={{ color: aiDisabled ? 'var(--accent)' : 'var(--text-muted)' }} />
-                <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>{m.onboarding.disableAiTitle}</span>
-              </div>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                {m.onboarding.disableAiDesc}
-              </p>
-            </div>
-            <label className="toggle-switch" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', marginTop: 2 }}>
-              <input
-                type="checkbox"
-                aria-label={m.onboarding.disableAiTitle}
-                checked={aiDisabled}
-                onChange={(e) => handleToggleAiDisabled(e.target.checked)}
-                style={{ width: 18, height: 18, cursor: 'pointer' }}
-              />
-            </label>
-          </div>
-          {aiDisabled && (
-            <div style={{ marginTop: 10, fontSize: '0.82rem', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
-              <Check size={14} />
-              <span>{m.onboarding.aiDisabledActive}</span>
-            </div>
-          )}
-        </div>
-
-        {/* AI & Assistant Integrations Section (Hidden or dimmed if AI is disabled) */}
-        {!aiDisabled && (
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ marginBottom: 10 }}>
-              <h3 style={{ margin: '0 0 2px 0', fontSize: '1rem', fontWeight: 600 }}>{m.onboarding.aiStepTitle}</h3>
-              <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted)' }}>{m.onboarding.aiStepDesc}</p>
-            </div>
-
-            {scanning ? (
-              <div style={{ padding: 16, textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                {m.onboarding.detectingAssistants}
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Claude Desktop Card */}
-                <div
-                  style={{
-                    padding: 12,
-                    borderRadius: 8,
-                    border: '1px solid var(--border)',
-                    background: 'var(--panel)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Bot size={18} style={{ color: 'var(--accent)' }} />
-                      <span style={{ fontWeight: 600, fontSize: '0.92rem' }}>Claude Desktop</span>
-                    </div>
-                    {claude?.linked ? (
-                      <span style={{ fontSize: '0.75rem', color: '#2e7d32', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle2 size={13} />
-                        {m.onboarding.connectedBadge}
-                      </span>
-                    ) : claude?.installed ? (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 500, padding: '2px 6px', background: 'var(--bg)', borderRadius: 4, border: '1px solid var(--border)' }}>
-                        Detected
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Available</span>
-                    )}
-                  </div>
-
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
-                    {m.onboarding.connectClaudeDesc}
-                  </p>
-
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                    {isDesktop ? (
-                      claude?.linked ? (
-                        <button
-                          type="button"
-                          disabled={linking}
-                          onClick={handleUnlinkClaude}
-                          style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer' }}
-                        >
-                          {m.onboarding.unlinkBtn}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="cta"
-                          disabled={linking}
-                          onClick={handleLinkClaude}
-                          style={{ padding: '5px 12px', fontSize: '0.82rem', cursor: 'pointer' }}
-                        >
-                          {linking ? m.onboarding.connecting : m.onboarding.connectBtn}
-                        </button>
-                      )
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleLinkClaude}
-                        style={{ padding: '4px 10px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
-                      >
-                        <Copy size={13} />
-                        <span>{copiedCmd ? 'Command Copied!' : 'Copy Setup Command (npx)'}</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* ChatGPT Desktop Card */}
-                {chatgpt?.installed && (
-                  <div
-                    style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: '1px solid var(--border)',
-                      background: 'var(--panel)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>ChatGPT Desktop</div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{m.onboarding.openProtocolNote}</div>
-                    </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--accent)', padding: '2px 6px', background: 'var(--bg)', borderRadius: 4, border: '1px solid var(--border)' }}>
-                      Detected
-                    </span>
-                  </div>
-                )}
-
-                {/* Cursor Card */}
-                {cursor?.installed && (
-                  <div
-                    style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: '1px solid var(--border)',
-                      background: 'var(--panel)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Cursor Editor</div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Code editor with native MCP protocol</div>
-                    </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--accent)', padding: '2px 6px', background: 'var(--bg)', borderRadius: 4, border: '1px solid var(--border)' }}>
-                      {cursor.linked ? 'Linked ✓' : 'Detected'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {linkedNotice && (
-              <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 4, background: 'var(--panel)', border: '1px solid var(--border)', fontSize: '0.82rem', color: 'var(--accent)' }}>
-                {linkedNotice}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16, textAlign: 'center' }}>
-          {m.onboarding.manageLaterHint}
-        </div>
-
-        {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <button
-            type="button"
-            className="cta"
-            onClick={handleFinish}
-            style={{ width: '100%', padding: '8px 16px', fontSize: '0.95rem', fontWeight: 600, cursor: 'pointer' }}
-          >
-            {m.onboarding.getStarted}
-          </button>
-        </div>
+  return <Modal title="Find your AI connections" className="discovery-modal" onClose={onClose}>
+    <div className="discovery-content">
+      <div className={`discovery-orbit ${scanning ? 'is-scanning' : ''}`} aria-hidden="true"><span /><span /><Sparkles size={30} /></div>
+      <h3 ref={heading} tabIndex={-1}>{scanning ? 'Looking around…' : started ? 'Your options, your choice' : 'Start with what you already use'}</h3>
+      <p className="surface-description">{isDesktop ? 'Find supported apps and local models on this computer.' : 'Check for local models. Finding installed apps requires OpenQuire desktop.'}</p>
+      {!started && <p className="hint">Nothing connects automatically. Your account credentials are not imported.</p>}
+      {started && <div className="discovery-checks" role="status" aria-live="polite">
+        <div>{status(apps)}<span>Desktop apps</span><small>{apps === 'checking' ? 'Checking…' : apps === 'done' ? 'Checked' : isDesktop ? apps === 'idle' ? 'Stopped' : 'Could not check' : 'Desktop app only'}</small></div>
+        <div>{status(local)}<span>Local models</span><small>{local === 'checking' ? 'Checking…' : local === 'done' ? 'Catalogue reached' : local === 'idle' ? 'Stopped' : 'Not reachable here'}</small></div>
+      </div>}
+      {notice && <p role="status" className="hint">{notice}</p>}
+      {connection && <section className="discovery-result" aria-label="Local models">
+        <div><h4>Local models</h4><span className="discovery-badge">Catalogue reached</span></div>
+        <p>{connection.models.length ? `${connection.models.length} model${connection.models.length === 1 ? '' : 's'} listed. Choose one to finish setup.` : 'The service responded, but listed no models. Add a model or enter its name in setup.'}</p>
+        <button className="button-primary" onClick={() => configure(connection)}>Review local setup<ArrowRight size={16} /></button>
+        <details><summary>Connection details</summary><p>{connection.baseUrl}</p><p>At Ollama’s default address. Model listing does not verify text generation or image support.</p></details>
+      </section>}
+      {found.length > 0 && <section className="discovery-apps" aria-label="Desktop findings"><h4>Desktop assistants</h4><p className="hint">These apps work separately from OpenQuire’s AI assistant.</p>{found.map(([id, app]) => <details className="discovery-result" key={id}>
+        <summary><span>{app.name}</span><small>{app.linked ? 'Configuration found' : 'App files found'}</small></summary>
+        {id === 'claude_desktop' ? <><p>{app.linked ? 'An OpenQuire entry exists. Restart Claude Desktop and check its tools to confirm it works.' : 'Add OpenQuire’s PDF tools using the setup command. Requires Node.js. Run it from the folder you want to allow.'}</p><button onClick={async () => { try { await navigator.clipboard.writeText('npx -y openquire mcp setup --allow-dir "."'); setCopyStatus('Setup command copied.') } catch { setCopyStatus('Could not copy. The command is shown below.') } }}>Copy setup command</button><code>npx -y openquire mcp setup --allow-dir "."</code></> : <p>{app.linked ? 'An OpenQuire configuration entry exists; its connection has not been tested.' : 'OpenQuire cannot connect this app here yet. You can still set up any supported AI provider.'}</p>}
+        <p className="hint">Discovery does not sign in or use this app’s subscription.</p>
+      </details>)}</section>}
+      {copyStatus && <p role="status">{copyStatus}</p>}
+      {started && !scanning && !connection && !found.length && <p className="discovery-empty">No connections found here. Set up a provider to get started.</p>}
+      <div className="surface-actions discovery-actions">
+        {scanning ? <button onClick={stop}>Stop search</button> : <button className={started ? '' : 'button-primary'} onClick={scan}><Search size={16} />{started ? 'Search again' : 'Find connections'}</button>}
+        <button onClick={() => configure()}>Set up a provider<ArrowRight size={16} /></button>
       </div>
-    </Modal>
-  )
+      <p className="hint">OpenAI · Anthropic · Google AI · xAI · Ollama · custom providers</p>
+    </div>
+  </Modal>
 }

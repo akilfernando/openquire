@@ -338,20 +338,31 @@ OS/mobile acceptance and live-provider inference remain NOT RUN. No release is
 published by this work.
 
 
-### Next: optional AI connection discovery (planned)
+### Optional AI connection discovery — candidate implementation
 
-Offer a user-started “Find connections” wizard with real progress, restrained
-animation (respecting reduced motion), selectable findings and an always-available
-manual provider route. Show supported local services and desktop assistants as
-appropriate choices without mistaking installation for a usable connection.
-Existing desktop detection only finds Claude Desktop, ChatGPT Desktop and Cursor
-installation/config markers; only Claude Desktop has a local MCP configuration
-writer. Claude Code/Codex account-backed inference is not implemented. Discovering
-an executable must not imply access to its subscription or credentials.
+Settings → AI & connections → Find connections offers a user-started search with
+real per-check progress, restrained animation and reduced-motion support. Manual
+setup stays available before, during and after discovery. Opening the wizard,
+welcome or Settings never starts a scan.
 
-Keep discovery bounded and cancellable, never scan from the welcome screen
-without an explicit action, and never link or import credentials automatically.
-Validate no findings, partial/error results, cancellation, reduced motion, keyboard
-navigation and manual setup. Add adapters and verify actual capabilities before
-presenting new services as usable. This follow-up is planned, not part of the
-Settings implementation or its validation evidence.
+Two checks finish independently: desktop app/config markers (Claude Desktop,
+ChatGPT Desktop, Cursor, Codex and Claude Code command files), and the model
+catalogue at http://localhost:11434/v1. The latter sends no keys, refuses redirects
+and omits credentials. Both checks are bounded to five seconds. Stop, close,
+manual handoff and private-data purge invalidate pending results. Browser users
+can check local models but cannot inspect installed applications.
+
+Results claim only App files found, Configuration found or Catalogue reached.
+A local result opens an unsaved Ollama-compatible setup draft with explicit model
+choice. Nothing automatically links, enables AI or uses a subscription. Claude
+Desktop offers a copyable setup command scoped to the current directory; this
+wizard no longer writes external configuration itself. Other detected assistants
+explain that connection is not implemented. No Codex/Claude Code account-backed
+inference is claimed.
+
+Validation covers explicit start, partial results, cancellation, late results,
+timeout, closure/purge, manual handoff, unchanged saved settings, mobile light/dark
+layouts, reduced motion and accessibility. Native fake-directory tests cover
+command files versus directories without executing tools. Exact local and GitHub
+evidence belongs in issue #44 and the focused PR. Live-provider inference and
+human native/mobile acceptance remain NOT RUN. No release is published.
