@@ -5,7 +5,7 @@ export interface DiscoveredConnection { baseUrl: string; models: string[] }
 /** Only the standard loopback service is probed, without credentials or redirects. */
 export async function discoverLocalModels(signal: AbortSignal): Promise<DiscoveredConnection> {
   const models = await fetchAvailableModels({ provider: 'ollama', baseUrl: DEFAULT_BASE_URL },
-    (input, init) => fetch(input, { ...init, redirect: 'error', credentials: 'omit', cache: 'no-store' }), signal)
+    undefined, signal)
   return { baseUrl: DEFAULT_BASE_URL, models: models.filter(model => model.length <= 200).slice(0, 100) }
 }
 

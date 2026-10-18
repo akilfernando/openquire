@@ -62,6 +62,11 @@ provider** forgets its connection and turns AI off; it does not revoke the API k
 at the provider. **Purge private data** removes all saved connections. If encrypted
 storage is unavailable, Settings warns that credentials remain session-only.
 
+Desktop AI discovery, connection checks and answers use native HTTP, so local
+Ollama does not need browser-origin configuration. Requests remain limited to
+the chosen HTTP(S) endpoint, without redirects or persistent cookies. Document
+content is sent only after the existing per-request consent step.
+
 ## Design
 
 The interface is modelled on [Obsidian](https://obsidian.md): its neutral base color scale, thin

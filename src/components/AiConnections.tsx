@@ -107,7 +107,7 @@ export default function AiConnections({ discoveredConnection, onDiscoveryUsed, s
     const abort = new AbortController(); controller.current = abort
     setBusy(true); setFeedback(''); setChecked(false)
     try {
-      const result = await fetchAvailableModels(draft, fetch, abort.signal)
+      const result = await fetchAvailableModels(draft, undefined, abort.signal)
       if (id !== request.current || draft.revision !== privacyRevision()) return
       setModels(result.slice().sort())
       setChecked(true)

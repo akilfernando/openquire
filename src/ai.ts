@@ -6,6 +6,8 @@
  * every request, saying exactly what will be sent.
  */
 
+import { aiFetch } from './ai-transport'
+
 export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'xai' | 'ollama' | 'custom'
 
 export interface AiConfig {
@@ -158,7 +160,7 @@ export function detectProviderFromKey(key: string): AiProvider | null {
 /** Lists the selected endpoint's models; errors are not disguised as a live catalogue. */
 export async function fetchAvailableModels(
   cfg: { provider: AiProvider; apiKey?: string; baseUrl?: string },
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch = aiFetch,
   signal?: AbortSignal,
 ): Promise<string[]> {
   const base = aiEndpoint(cfg)
@@ -206,7 +208,7 @@ export function connectionError(error: unknown): string {
 /** A catalogue check does not prove model inference access or available billing. */
 export async function verifyApiKey(
   cfg: { provider: AiProvider; apiKey: string; baseUrl?: string },
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch = aiFetch,
   signal?: AbortSignal,
 ): Promise<ApiKeyVerification> {
   try {
@@ -235,7 +237,7 @@ export function aiHost(cfg: AiConfig) {
 }
 
 /** Sends one request to the configured model and returns its text. */
-export async function complete(cfg: AiConfig, req: AiRequest, fetcher: typeof fetch = fetch): Promise<string> {
+export async function complete(cfg: AiConfig, req: AiRequest, fetcher: typeof fetch = aiFetch): Promise<string> {
   const base = aiEndpoint(cfg)
   const key = cfg.apiKey.trim()
   if (aiKeyRequired(cfg) && !key) throw new Error(`Add your ${PROVIDERS[cfg.provider].name} API key in Settings.`)

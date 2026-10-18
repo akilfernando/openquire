@@ -532,3 +532,28 @@ complete rerun. The Windows Ollama origin limitation remains a release gate:
 its upstream defaults omit http(s)://tauri.localhost, so the next focused increment
 must use native desktop HTTP for AI discovery/checks and inference before release.
 Source verified: https://github.com/ollama/ollama/blob/main/envconfig/config.go.
+
+### Native desktop AI networking — 0.2.2
+
+The Ollama origin release gate is addressed by the official Tauri HTTP plugin,
+shared by discovery, catalogue checks and inference. Browser builds keep browser
+fetch. Native requests allow HTTP(S) addresses and custom ports, refuse redirects
+and embedded credentials, disable the persistent cookie jar, retain TLS checks,
+and support cancellation with connection/request deadlines and a 16 MiB response
+limit. No silent browser fallback or ambient credentials are used. The permission
+belongs only to the main local app window; no remote web origin is granted it.
+
+Local validation: production build, 46 focused AI unit tests and native library
+tests (22 passed, one intentional tools smoke skip) passed. Eight URL checks
+against the plugin's actual scope parser covered ordinary HTTPS, localhost,
+IPv4/IPv6, custom ports and unsupported schemes. Browser integration validation
+is in progress; it exercises the real JavaScript SDK against mocked native IPC,
+including model discovery, save/enable, document consent, inference and Stop.
+Completed validation: all 248 unit tests passed with file parallelism disabled
+(six environment-dependent skips), all 123 discovery/provider browser checks
+passed across Chromium, Firefox and WebKit, and both document-consent/locked
+storage integration checks passed. The initial new persistence assertion read
+before encrypted settings finished saving; it now waits for persisted state and
+the complete browser suite passed on rerun.
+These checks do not establish installed WebView or live-provider acceptance.
+Signed platform builds and installed-client human acceptance remain pending.

@@ -160,6 +160,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_http::init())
         .manage(Pending(Mutex::new(initial)))
         .invoke_handler(tauri::generate_handler![
             setup_links::open_setup_link,
