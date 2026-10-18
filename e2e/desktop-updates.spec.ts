@@ -9,6 +9,7 @@ interface UpdateMockOptions {
   failDownload?: boolean
   failRestart?: boolean
   holdDownload?: boolean
+  holdPicker?: boolean
 }
 
 async function mockDesktopUpdates(page: Page, options: UpdateMockOptions = {}) {
@@ -31,6 +32,10 @@ async function mockDesktopUpdates(page: Page, options: UpdateMockOptions = {}) {
       failRestart: options.failRestart ?? false,
       holdDownload: options.holdDownload ?? false,
       downloadRelease: null as (() => void) | null,
+      holdPicker: options.holdPicker ?? false,
+      pickerCalls: 0,
+      pickerReturned: false,
+      pickerRelease: null as (() => void) | null,
     }
     const callbacks = new Map<number, (event: any) => void>()
     let nextCallback = 1
@@ -50,6 +55,16 @@ async function mockDesktopUpdates(page: Page, options: UpdateMockOptions = {}) {
           if (command === 'plugin:event|listen') return nextCallback++
           if (command === 'plugin:event|unlisten' || command === 'take_opened_files') return null
           if (command === 'native_tools') return { libreoffice: null, tesseract: null, tesseract_langs: [] }
+          if (command === 'plugin:dialog|open') {
+            state.pickerCalls++
+            if (state.holdPicker) {
+              await new Promise<void>(resolve => {
+                state.pickerRelease = () => { state.holdPicker = false; resolve() }
+              })
+            }
+            state.pickerReturned = true
+            return null
+          }
           if (command === 'plugin:updater|check') {
             state.checks++
             if (state.failCheck) throw new Error('Injected update check failure')
@@ -112,6 +127,8 @@ async function mockState(page: Page) {
       installs: state.installs,
       restarts: state.restarts,
       hasDownloadRelease: !!state.downloadRelease,
+      pickerCalls: state.pickerCalls,
+      pickerReturned: state.pickerReturned,
       commands: state.calls.map((entry: { command: string }) => entry.command),
     }
   })
@@ -267,4 +284,32 @@ test('About update controls remain usable and accessible at mobile width', async
   expect(await updates.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   const axe = await new AxeBuilder({ page }).include('.update-settings').withTags(['wcag2a', 'wcag2aa']).analyze()
   expect(axe.violations).toEqual([])
+})
+
+test('automatic install waits for an open native file picker and retries on the next timer after cancellation', async ({ page }) => {
+  await page.clock.install()
+  await mockDesktopUpdates(page, { initialMode: 'manual', holdDownload: true, holdPicker: true })
+  const { settings, updates } = await openAbout(page)
+  // Consume the initial five-second startup tick while manual mode is selected.
+  await page.clock.fastForward(5_000)
+  await updates.getByLabel('Keep OpenQuire up to date').selectOption('automatic')
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('openquire.settings') ?? '{}').updateMode)).toBe('automatic')
+
+  await updates.getByRole('button', { name: 'Check for updates' }).click()
+  await expect.poll(async () => (await mockState(page)).hasDownloadRelease).toBe(true)
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+
+  await page.getByRole('main', { name: 'Make more of your PDFs.' }).getByRole('button', { name: /Open a file/ }).click()
+  await expect.poll(async () => (await mockState(page)).pickerCalls).toBe(1)
+  await page.evaluate(() => (window as any).__desktopUpdatesMock.downloadRelease())
+  await expect(page.getByRole('status', { name: 'App update' })).toContainText('OpenQuire 0.3.0 is ready to install')
+  expect((await mockState(page)).installs).toBe(0)
+  expect((await mockState(page)).restarts).toBe(0)
+
+  await page.evaluate(() => (window as any).__desktopUpdatesMock.pickerRelease())
+  await expect.poll(async () => (await mockState(page)).pickerReturned).toBe(true)
+  // The startup timer has already fired; advance to the 30-second interval without wall-clock waiting.
+  await page.clock.fastForward(30_000)
+  await expect.poll(async () => (await mockState(page)).restarts).toBe(1)
+  expect((await mockState(page)).installs).toBe(1)
 })

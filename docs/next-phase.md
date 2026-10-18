@@ -379,12 +379,12 @@ closed. Manual-only mode must not initiate background checks.
 The updater is implemented locally with daily background checks, explicit manual
 checks, progress and retry feedback under Settings > About, and an in-app update
 notice. Installation atomically blocks new work and waits for all documents,
-operations, settings writes and dialogs to finish. Changing mode revokes a pending
+operations, native file pickers/reads, settings writes and dialogs to finish. Changing mode revokes a pending
 automatic installation. The signed desktop feed is separate from npm releases;
 artifact signatures bind the advertised version as well as the downloaded bytes.
 
 Local validation: production build, 27 updater/preference/settings-storage/signature unit
-tests, 21 native-bridge browser checks across Chromium, Firefox and WebKit, 11 Windows native tests,
+tests, 30 native-bridge browser checks across Chromium, Firefox and WebKit, 11 Windows native tests,
 and the installed Node 1.0.3 package consumer passed. Real signed-file verification
 rejects byte tampering and version substitution. Full candidate CI and signed
 installer builds remain pending; exact evidence will be recorded in issue #44.

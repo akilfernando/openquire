@@ -146,6 +146,7 @@ export default function App() {
   const savingDocuments = useRef(new Set<number>())
   const nativeCloseAllowed = useRef(false)
   const updateInstalling = useRef(false)
+  const openingFiles = useRef(0)
   const settingsWrites = useRef(0)
   const updateController = useRef<DesktopUpdates | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' })
@@ -252,7 +253,8 @@ export default function App() {
     if (updateInstalling.current || tabs.length || docRef.current || side || busy || aiBusy ||
       pendingOperations.current.size || blockingTabOperations.current || savingDocuments.current.size ||
       importController.current || ocrController.current || batchController.current || checkpointRunning.current ||
-      settingsWrites.current || !credentialsReady || credentialStorageError || recoveryBusy) return false
+      openingFiles.current || settingsWrites.current || !credentialsReady || credentialStorageError || recoveryBusy ||
+      privacyRevision().endsWith(':purging')) return false
     const dialogs = [...document.querySelectorAll('.modal')]
     if (dialogs.some(dialog => automatic || !dialog.classList.contains('settings'))) return false
     updateInstalling.current = true
@@ -1189,8 +1191,10 @@ export default function App() {
   }, [])
   /** Opens files and carries an optional Home task through this import only. */
   const openDialog = (group?: number) => {
+    if (updateInstalling.current) return
     homeIntent.current = group
     if (!isDesktop) return openRef.current!.click()
+    openingFiles.current++
     void pickFiles().then((picked) => {
       if (picked.length) void openFiles(picked.map((p) => p.file), false, picked.map((p) => p.path))
       else homeIntent.current = undefined
@@ -1198,15 +1202,18 @@ export default function App() {
       homeIntent.current = undefined
       const text = m.status.error(error instanceof Error ? error.message : String(error))
       setStatus(text); setStatusError(text)
-    })
+    }).finally(() => { openingFiles.current-- })
   }
 
-  const openPaths = (list: string[]) =>
+  const openPaths = (list: string[]) => {
+    if (updateInstalling.current) return
+    openingFiles.current++
     void Promise.all(list.map((p) => readPath(p).catch(() => null))).then((files) => {
       const ok = list.filter((_, i) => files[i])
       list.filter((_, i) => !files[i]).forEach((p) => setRecent(removeRecent(p)))
       if (ok.length) void openFiles(files.filter((f): f is File => !!f), false, ok)
-    })
+    }).finally(() => { openingFiles.current-- })
+  }
 
   useEffect(() => {
     if (isDesktop) setTokenSigner((key, digestInfo) => tokenSign(key as TokenKey, digestInfo))
