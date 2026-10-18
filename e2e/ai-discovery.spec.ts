@@ -13,9 +13,22 @@ async function openDiscovery(page: Page) {
   return page.getByRole('dialog', { name: 'Find your AI connections' })
 }
 
-async function mockDesktopDetection(page: Page, hold = false) {
-  await page.addInitScript(({ hold }) => {
-    const state = { calls: [] as string[], hold, completed: 0, release: null as (() => void) | null }
+interface ClaudeMockOptions {
+  folder?: string | null
+  failLink?: boolean
+  holdLink?: boolean
+}
+
+async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMockOptions = {}) {
+  await page.addInitScript(({ hold, claude }) => {
+    const state = {
+      calls: [] as string[], invoked: [] as { command: string; args?: any }[], hold, completed: 0,
+      release: null as (() => void) | null,
+      folder: claude.folder === undefined ? 'C:\\Users\\Akil\\Documents\\PDFs' : claude.folder,
+      failLink: claude.failLink ?? false,
+      holdLink: claude.holdLink ?? false,
+      pickerCalls: 0, linkCalls: 0, linkRelease: null as (() => void) | null,
+    }
     Object.defineProperty(window, '__aiDiscoveryNativeMock', { configurable: true, value: state })
     let callbackId = 0
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
@@ -24,11 +37,19 @@ async function mockDesktopDetection(page: Page, hold = false) {
         metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
         transformCallback: () => ++callbackId,
         unregisterCallback: () => undefined,
-        async invoke(command: string) {
+        async invoke(command: string, args?: any) {
           state.calls.push(command)
+          state.invoked.push({ command, args })
           if (command === 'plugin:event|listen') return ++callbackId
           if (command === 'plugin:event|unlisten' || command === 'take_opened_files') return null
           if (command === 'native_tools') return { libreoffice: null, tesseract: null, tesseract_langs: [] }
+          if (command === 'plugin:dialog|open') { state.pickerCalls++; return state.folder }
+          if (command === 'link_claude_desktop') {
+            state.linkCalls++
+            if (state.holdLink) await new Promise<void>(resolve => { state.linkRelease = resolve })
+            if (state.failLink) throw new Error('Injected Claude configuration write failure')
+            return 'Setup saved'
+          }
           if (command === 'detect_ai_assistants') {
             if (state.hold) await new Promise<void>(resolve => { state.release = resolve })
             state.completed++
@@ -44,7 +65,19 @@ async function mockDesktopDetection(page: Page, hold = false) {
         },
       },
     })
-  }, { hold })
+  }, { hold, claude })
+}
+
+async function openClaudeConnection(page: Page, claude: ClaudeMockOptions = {}) {
+  await mockDesktopDetection(page, false, claude)
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  const dialog = await openDiscovery(page)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  const findings = dialog.getByRole('region', { name: 'Desktop findings' })
+  const claudeItem = findings.locator('details').filter({ has: page.getByText('Claude Desktop', { exact: true }) })
+  await expect(claudeItem).toBeVisible()
+  await claudeItem.locator(':scope > summary').click()
+  return { dialog, claudeItem }
 }
 
 test('discovery waits for explicit consent, then shows local and desktop findings as they arrive', async ({ page }) => {
@@ -75,6 +108,7 @@ test('discovery waits for explicit consent, then shows local and desktop finding
     await expect(item.getByRole('button')).toHaveCount(0)
   }
   expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)).not.toContain('link_claude_desktop')
+  expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)).not.toContain('plugin:dialog|open')
 })
 
 test('stopping a pending search ignores late local catalogue results', async ({ page }) => {
@@ -186,6 +220,74 @@ test('a privacy revision closes discovery and prevents a pending result appearin
   await expect(reopened.getByRole('region', { name: 'Local models' })).toHaveCount(0)
   await expect(reopened.getByText('private-late-model')).toHaveCount(0)
   await expect(reopened.getByRole('button', { name: 'Find connections', exact: true })).toBeVisible()
+})
+
+test('Claude setup stays opt-in and manual instructions expose the pinned package only on demand', async ({ page }) => {
+  await mockDesktopDetection(page)
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  const dialog = await openDiscovery(page)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  const calls = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)
+  expect(calls).not.toContain('plugin:dialog|open')
+  expect(calls).not.toContain('link_claude_desktop')
+  const findings = dialog.getByRole('region', { name: 'Desktop findings' })
+  const item = findings.locator('details').filter({ has: page.getByText('Claude Desktop', { exact: true }) })
+  await item.locator(':scope > summary').click()
+  const manual = item.locator('details')
+  await expect(manual).toBeVisible()
+  const command = manual.locator('code')
+  await expect(command).toBeHidden()
+  await manual.locator(':scope > summary').click()
+  await expect(command).toContainText('https://github.com/akilfernando/openquire/releases/download/desktop-v0.2.0-rc.1/openquire-1.0.3.tgz')
+})
+
+test('Connect Claude Desktop picks a folder and writes only that exact allowed path', async ({ page }) => {
+  const chosen = 'C:\\Users\\Akil\\Documents\\Research PDFs'
+  const { claudeItem } = await openClaudeConnection(page, { folder: chosen })
+  await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
+  await expect(claudeItem.getByRole('status')).toContainText('Setup saved. Restart Claude Desktop')
+  const invoked = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.invoked)
+  const picker = invoked.find((call: any) => call.command === 'plugin:dialog|open')
+  const link = invoked.find((call: any) => call.command === 'link_claude_desktop')
+  expect(picker?.args).toMatchObject({ options: { directory: true, multiple: false } })
+  expect(link?.args).toEqual({ allowedDir: chosen })
+  await expect(claudeItem.getByText(/connected/i)).toHaveCount(0)
+})
+
+test('canceling Claude folder selection writes nothing and leaves setup retry available', async ({ page }) => {
+  const { claudeItem } = await openClaudeConnection(page, { folder: null })
+  await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.pickerCalls)).toBe(1)
+  await expect(claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true })).toBeEnabled()
+  expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(0)
+  await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.pickerCalls)).toBe(2)
+  expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(0)
+})
+
+test('Claude native write errors stay visible and allow a retry', async ({ page }) => {
+  const { claudeItem } = await openClaudeConnection(page, { failLink: true })
+  await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
+  await expect(claudeItem.getByRole('alert')).toHaveText('Injected Claude configuration write failure')
+  await expect(claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true })).toBeEnabled()
+  await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(2)
+  await expect(claudeItem.getByRole('alert')).toBeVisible()
+})
+
+test('Claude setup disables search, provider setup, and closing while native linking is pending', async ({ page }) => {
+  const { dialog, claudeItem } = await openClaudeConnection(page, { holdLink: true })
+  await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(1)
+  await expect(dialog.getByRole('button', { name: 'Search again', exact: true })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Set up a provider', exact: true })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toHaveCount(0)
+  await expect(claudeItem.getByRole('button', { name: 'Setting up…', exact: true })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Search again', exact: true })).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkRelease())
+  await expect(claudeItem.getByRole('status')).toContainText('Setup saved. Restart Claude Desktop')
 })
 
 for (const theme of ['light', 'dark'] as const) {

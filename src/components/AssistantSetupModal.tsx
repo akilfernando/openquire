@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Check, Circle, LoaderCircle, Search, Sparkles } from 'lucide-react'
 import Modal from './Modal'
+import ClaudeConnection from './ClaudeConnection'
 import { isDesktop, detectAiAssistants, type AiAssistantsReport } from '../native'
 import { bounded, discoverLocalModels, type DiscoveredConnection } from '../ai-discovery'
 import { privacyRevision, PRIVACY_REVISION_KEY } from '../privacy'
@@ -19,7 +20,7 @@ export default function AssistantSetupModal({ disabled, onConfigure, onClose }: 
   const [connection, setConnection] = useState<DiscoveredConnection | null>(null)
   const [notice, setNotice] = useState('')
   const [started, setStarted] = useState(false)
-  const [copyStatus, setCopyStatus] = useState('')
+  const [connecting, setConnecting] = useState(false)
   const controller = useRef<AbortController | null>(null)
   const generation = useRef(0)
   const heading = useRef<HTMLHeadingElement>(null)
@@ -41,13 +42,13 @@ export default function AssistantSetupModal({ disabled, onConfigure, onClose }: 
   useEffect(() => { if (disabled) { generation.current++; controller.current?.abort(); onClose() } }, [disabled])
 
   const scan = () => {
-    if (disabled || privacyRevision().endsWith(':purging')) return
+    if (disabled || connecting || privacyRevision().endsWith(':purging')) return
     controller.current?.abort()
     const abort = new AbortController(); controller.current = abort
     const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)])
     const id = ++generation.current; revision.current = privacyRevision()
     const current = () => generation.current === id && revision.current === privacyRevision()
-    setStarted(true); setNotice(''); setCopyStatus(''); setReport(null); setConnection(null)
+    setStarted(true); setNotice(''); setReport(null); setConnection(null)
     setApps(isDesktop ? 'checking' : 'unavailable'); setLocal('checking')
     if (isDesktop) void bounded(detectAiAssistants(), signal).then(value => {
       if (current()) { setReport(value); setApps('done') }
@@ -63,7 +64,7 @@ export default function AssistantSetupModal({ disabled, onConfigure, onClose }: 
   const found = report ? Object.entries(report).filter(([, value]) => value?.installed || value?.linked) : []
   const status = (state: CheckState) => state === 'checking' ? <LoaderCircle className="discovery-spinner" size={18} /> : state === 'done' ? <Check size={18} /> : <Circle size={18} />
 
-  return <Modal title="Find your AI connections" className="discovery-modal" onClose={onClose}>
+  return <Modal title="Find your AI connections" className="discovery-modal" onClose={connecting ? undefined : onClose}>
     <div className="discovery-content">
       <div className={`discovery-orbit ${scanning ? 'is-scanning' : ''}`} aria-hidden="true"><span /><span /><Sparkles size={30} /></div>
       <h3 ref={heading} tabIndex={-1}>{scanning ? 'Looking around…' : started ? 'Your options, your choice' : 'Start with what you already use'}</h3>
@@ -77,19 +78,18 @@ export default function AssistantSetupModal({ disabled, onConfigure, onClose }: 
       {connection && <section className="discovery-result" aria-label="Local models">
         <div><h4>Local models</h4><span className="discovery-badge">Catalogue reached</span></div>
         <p>{connection.models.length ? `${connection.models.length} model${connection.models.length === 1 ? '' : 's'} listed. Choose one to finish setup.` : 'The service responded, but listed no models. Add a model or enter its name in setup.'}</p>
-        <button className="button-primary" onClick={() => configure(connection)}>Review local setup<ArrowRight size={16} /></button>
+        <button className="button-primary" disabled={connecting} onClick={() => configure(connection)}>Review local setup<ArrowRight size={16} /></button>
         <details><summary>Connection details</summary><p>{connection.baseUrl}</p><p>At Ollama’s default address. Model listing does not verify text generation or image support.</p></details>
       </section>}
       {found.length > 0 && <section className="discovery-apps" aria-label="Desktop findings"><h4>Desktop assistants</h4><p className="hint">These apps work separately from OpenQuire’s AI assistant.</p>{found.map(([id, app]) => <details className="discovery-result" key={id}>
         <summary><span>{app.name}</span><small>{app.linked ? 'Configuration found' : 'App files found'}</small></summary>
-        {id === 'claude_desktop' ? <><p>{app.linked ? 'An OpenQuire entry exists. Restart Claude Desktop and check its tools to confirm it works.' : 'Add OpenQuire’s PDF tools using the setup command. Requires Node.js. Run it from the folder you want to allow.'}</p><button onClick={async () => { try { await navigator.clipboard.writeText('npx -y openquire mcp setup --allow-dir "."'); setCopyStatus('Setup command copied.') } catch { setCopyStatus('Could not copy. The command is shown below.') } }}>Copy setup command</button><code>npx -y openquire mcp setup --allow-dir "."</code></> : <p>{app.linked ? 'An OpenQuire configuration entry exists; its connection has not been tested.' : 'OpenQuire cannot connect this app here yet. You can still set up any supported AI provider.'}</p>}
+        {id === 'claude_desktop' ? <ClaudeConnection linked={app.linked} disabled={disabled} onBusy={setConnecting} /> : <p>{app.linked ? 'An OpenQuire configuration entry exists; its connection has not been tested.' : 'In-app setup is not available for this assistant yet. You can still set up an AI provider below.'}</p>}
         <p className="hint">Discovery does not sign in or use this app’s subscription.</p>
       </details>)}</section>}
-      {copyStatus && <p role="status">{copyStatus}</p>}
       {started && !scanning && !connection && !found.length && <p className="discovery-empty">No connections found here. Set up a provider to get started.</p>}
       <div className="surface-actions discovery-actions">
-        {scanning ? <button onClick={stop}>Stop search</button> : <button className={started ? '' : 'button-primary'} onClick={scan}><Search size={16} />{started ? 'Search again' : 'Find connections'}</button>}
-        <button onClick={() => configure()}>Set up a provider<ArrowRight size={16} /></button>
+        {scanning ? <button onClick={stop}>Stop search</button> : <button disabled={connecting} className={started ? '' : 'button-primary'} onClick={scan}><Search size={16} />{started ? 'Search again' : 'Find connections'}</button>}
+        <button disabled={connecting} onClick={() => configure()}>Set up a provider<ArrowRight size={16} /></button>
       </div>
       <p className="hint">OpenAI · Anthropic · Google AI · xAI · Ollama · custom providers</p>
     </div>

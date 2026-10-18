@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::fs;
 #[allow(unused_imports)]
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct AssistantStatus {
@@ -91,8 +91,8 @@ fn find_command(command: &str) -> Option<PathBuf> {
         prefix.as_deref(),
         appdata.as_deref(),
     )
-        .into_iter()
-        .find(|candidate| candidate.is_file())
+    .into_iter()
+    .find(|candidate| candidate.is_file())
 }
 
 fn cli_status(name: &str, command: &str) -> AssistantStatus {
@@ -133,21 +133,38 @@ pub fn claude_config_paths() -> Vec<PathBuf> {
             paths.push(store);
         }
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            paths.push(PathBuf::from(appdata).join("Claude").join("claude_desktop_config.json"));
+            paths.push(
+                PathBuf::from(appdata)
+                    .join("Claude")
+                    .join("claude_desktop_config.json"),
+            );
         }
     }
     #[cfg(target_os = "macos")]
     {
         if let Some(home) = home_dir() {
-            paths.push(home.join("Library").join("Application Support").join("Claude").join("claude_desktop_config.json"));
+            paths.push(
+                home.join("Library")
+                    .join("Application Support")
+                    .join("Claude")
+                    .join("claude_desktop_config.json"),
+            );
         }
     }
     #[cfg(target_os = "linux")]
     {
         if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
-            paths.push(PathBuf::from(config_home).join("Claude").join("claude_desktop_config.json"));
+            paths.push(
+                PathBuf::from(config_home)
+                    .join("Claude")
+                    .join("claude_desktop_config.json"),
+            );
         } else if let Some(home) = home_dir() {
-            paths.push(home.join(".config").join("Claude").join("claude_desktop_config.json"));
+            paths.push(
+                home.join(".config")
+                    .join("Claude")
+                    .join("claude_desktop_config.json"),
+            );
         }
     }
     paths
@@ -171,12 +188,21 @@ fn is_claude_installed() -> (bool, Option<PathBuf>, bool) {
     #[cfg(windows)]
     {
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let exe = PathBuf::from(&local).join("Programs").join("Claude").join("Claude.exe");
-            if exe.exists() {
-                return (true, configs.first().cloned(), false);
+            let exe = PathBuf::from(&local)
+                .join("Programs")
+                .join("Claude")
+                .join("Claude.exe");
+            if exe.exists()
+                || PathBuf::from(&local)
+                    .join("AnthropicClaude/claude.exe")
+                    .is_file()
+            {
+                return (true, configs.last().cloned(), false);
             }
             // Check Store package folder
-            let store_dir = PathBuf::from(local).join("Packages").join("Claude_pzs8sxrjxfjjc");
+            let store_dir = PathBuf::from(local)
+                .join("Packages")
+                .join("Claude_pzs8sxrjxfjjc");
             if store_dir.exists() {
                 return (true, configs.first().cloned(), false);
             }
@@ -197,7 +223,10 @@ fn is_chatgpt_installed() -> bool {
     #[cfg(windows)]
     {
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let exe = PathBuf::from(&local).join("Programs").join("ChatGPT").join("ChatGPT.exe");
+            let exe = PathBuf::from(&local)
+                .join("Programs")
+                .join("ChatGPT")
+                .join("ChatGPT.exe");
             if exe.exists() {
                 return true;
             }
@@ -205,14 +234,22 @@ fn is_chatgpt_installed() -> bool {
             let pkgs = PathBuf::from(&local).join("Packages");
             if let Ok(entries) = fs::read_dir(pkgs) {
                 for entry in entries.flatten() {
-                    if entry.file_name().to_string_lossy().contains("OpenAI.ChatGPT") {
+                    if entry
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("OpenAI.ChatGPT")
+                    {
                         return true;
                     }
                 }
             }
         }
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            if PathBuf::from(appdata).join("OpenAI").join("ChatGPT").exists() {
+            if PathBuf::from(appdata)
+                .join("OpenAI")
+                .join("ChatGPT")
+                .exists()
+            {
                 return true;
             }
         }
@@ -303,56 +340,266 @@ pub fn detect_all() -> AiAssistantsReport {
     }
 }
 
+const MCP_PACKAGE: &str = "https://github.com/akilfernando/openquire/releases/download/desktop-v0.2.0-rc.1/openquire-1.0.3.tgz";
+static NEXT_CONFIG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn allowed_folder(dir: Option<String>) -> Result<PathBuf, String> {
+    let path = PathBuf::from(
+        dir.filter(|s| !s.trim().is_empty())
+            .ok_or("Choose an existing folder explicitly before connecting.")?,
+    );
+    if !path.is_absolute() || !path.is_dir() {
+        return Err("The allowed folder must be an existing absolute directory.".into());
+    }
+    fs::canonicalize(path).map_err(|e| e.to_string())
+}
+
+fn supported_node(version: &str) -> bool {
+    version
+        .trim()
+        .strip_prefix('v')
+        .and_then(|v| v.split('.').next())
+        .and_then(|v| v.parse::<u32>().ok())
+        .is_some_and(|v| v >= 20)
+}
+
+fn runtime_paths() -> Result<(PathBuf, PathBuf), String> {
+    let node = find_command("node").ok_or(
+        "Node.js 20 or newer with npm is required. Install Node.js and restart OpenQuire.",
+    )?;
+    #[cfg(windows)]
+    if !node
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+    {
+        return Err("Node.js executable was not found.".into());
+    }
+    let node = fs::canonicalize(node).map_err(|e| e.to_string())?;
+    let mut candidates = vec![node
+        .parent()
+        .ok_or("Invalid Node.js location")?
+        .join("node_modules/npm/bin/npx-cli.js")];
+    #[cfg(not(windows))]
+    if let Some(npx) = find_command("npx").and_then(|p| fs::canonicalize(p).ok()) {
+        candidates.push(npx);
+    }
+    #[cfg(windows)]
+    if let Some(npx) = find_command("npx") {
+        if let Some(parent) = npx.parent() {
+            candidates.push(parent.join("node_modules/npm/bin/npx-cli.js"));
+        }
+    }
+    let npx = candidates
+        .into_iter()
+        .find(|p| p.is_file() && p.file_name().is_some_and(|n| n == "npx-cli.js"))
+        .ok_or("Cannot locate npm's npx-cli.js. Install Node.js 20 or newer with npm.")?;
+    verify_node(&node)?;
+    Ok((node, fs::canonicalize(npx).map_err(|e| e.to_string())?))
+}
+
+fn verify_node(node: &Path) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let temp = std::env::temp_dir().join(format!(
+        "openquire-node-{}-{}.version",
+        std::process::id(),
+        NEXT_CONFIG.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|e| e.to_string())?;
+    let result = (|| {
+        let mut command = Command::new(node);
+        command
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(file))
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Cannot start Node.js: {e}"))?;
+        let start = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let version = fs::read_to_string(&temp).map_err(|e| e.to_string())?;
+                    return if status.success() && supported_node(&version) {
+                        Ok(())
+                    } else {
+                        Err("Node.js 20 or newer is required. Update Node.js and restart OpenQuire.".into())
+                    };
+                }
+                Ok(None) if start.elapsed() < Duration::from_secs(5) => {
+                    std::thread::sleep(Duration::from_millis(25))
+                }
+                other => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Node.js prerequisite check failed or timed out: {other:?}"
+                    ));
+                }
+            }
+        }
+    })();
+    let _ = fs::remove_file(temp);
+    result
+}
+
+fn reject_symlinks(path: &Path) -> Result<(), String> {
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err("Claude configuration paths must not contain symbolic links.".into())
+            }
+            Ok(meta) => {
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::MetadataExt;
+                    if meta.file_attributes() & 0x400 != 0 {
+                        return Err(
+                            "Claude configuration paths must not contain reparse points.".into(),
+                        );
+                    }
+                }
+                #[cfg(not(windows))]
+                let _ = meta;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
+}
+
+fn read_config(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match fs::read(path) {
+        Ok(b) => Ok(Some(b)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn save_config(path: &Path, bytes: &[u8], original: Option<&[u8]>) -> Result<(), String> {
+    use std::io::Write;
+    if let Some(original) = original {
+        let backup = path.with_file_name(format!(
+            "claude_desktop_config.json.openquire-{}-{}.bak",
+            std::process::id(),
+            NEXT_CONFIG.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut backup = options
+            .open(backup)
+            .map_err(|e| format!("Cannot back up Claude configuration: {e}"))?;
+        backup
+            .write_all(original)
+            .and_then(|_| backup.sync_all())
+            .map_err(|e| e.to_string())?;
+    }
+    reject_symlinks(path)?;
+    if read_config(path)?.as_deref() != original {
+        return Err(
+            "Claude configuration changed during connection. Retry after other editors finish."
+                .into(),
+        );
+    }
+    crate::file_save::write_atomic(path, bytes)
+        .map_err(|e| format!("Cannot save Claude configuration: {e}"))
+}
+
 /// Links Claude Desktop to OpenQuire by updating claude_desktop_config.json
 pub fn link_claude(allowed_dir: Option<String>) -> Result<String, String> {
+    let dir = allowed_folder(allowed_dir)?;
+    let (node, npx) = runtime_paths()?;
+    let _lock = CONFIG_LOCK
+        .lock()
+        .map_err(|_| "Configuration update interrupted; restart OpenQuire.")?;
     let paths = claude_config_paths();
+    #[cfg(windows)]
+    let fallback = {
+        let local = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .ok_or("Cannot locate Claude installation")?;
+        let normal = local.join("Programs/Claude/Claude.exe").is_file()
+            || local.join("AnthropicClaude/claude.exe").is_file();
+        let store = local.join("Packages/Claude_pzs8sxrjxfjjc").is_dir();
+        match (normal, store) {
+            (true, false) => paths.last(),
+            (false, true) => paths.first(),
+            _ => None,
+        }
+    };
+    #[cfg(target_os = "macos")]
+    let fallback = paths
+        .iter()
+        .find(|p| p.parent().is_some_and(|d| d.is_dir()))
+        .or_else(|| {
+            if Path::new("/Applications/Claude.app").is_dir() {
+                paths.first()
+            } else {
+                None
+            }
+        });
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let fallback = paths
+        .iter()
+        .find(|p| p.parent().is_some_and(|d| d.is_dir()));
     let target = paths
         .iter()
-        .find(|p| p.parent().map(|d| d.exists()).unwrap_or(false))
-        .or_else(|| paths.first())
+        .find(|p| p.exists())
+        .or(fallback)
         .ok_or_else(|| "Could not determine Claude Desktop configuration directory".to_string())?;
 
+    if paths.iter().filter(|p| p.exists()).count() > 1 {
+        return Err("Multiple Claude configurations exist; resolve the installation ambiguity before connecting.".into());
+    }
+    link_at(target, &node, &npx, &dir)?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+fn link_at(target: &Path, node: &Path, npx: &Path, dir: &Path) -> Result<(), String> {
+    reject_symlinks(target)?;
     let parent = target.parent().ok_or("Invalid configuration path")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
 
-    let mut config: Value = if target.exists() {
-        let content = fs::read_to_string(target).unwrap_or_default();
-        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-    } else {
-        json!({})
+    let original = read_config(target)?;
+    let mut config: Value = match &original {
+        Some(content) => serde_json::from_slice(content)
+            .map_err(|e| format!("Invalid Claude configuration JSON; unchanged: {e}"))?,
+        None => json!({}),
     };
 
-    let dir = allowed_dir.unwrap_or_else(|| {
-        home_dir()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| ".".into())
-    });
+    let dir = dir
+        .to_str()
+        .ok_or("Folder must be valid UTF-8")?
+        .to_string();
 
-    let (cmd, args) = if cfg!(windows) {
-        (
-            "cmd.exe",
-            vec![
-                "/c".to_string(),
-                "npx".to_string(),
-                "-y".to_string(),
-                "openquire".to_string(),
-                "mcp".to_string(),
-                "--allow-dir".to_string(),
-                dir,
-            ],
-        )
-    } else {
-        (
-            "npx",
-            vec![
-                "-y".to_string(),
-                "openquire".to_string(),
-                "mcp".to_string(),
-                "--allow-dir".to_string(),
-                dir,
-            ],
-        )
-    };
+    let cmd = node.to_str().ok_or("Node.js path must be valid UTF-8")?;
+    let args = vec![
+        npx.to_str()
+            .ok_or("npm path must be valid UTF-8")?
+            .to_string(),
+        "-y".into(),
+        MCP_PACKAGE.into(),
+        "mcp".into(),
+        "--allow-dir".into(),
+        dir,
+    ];
 
     let mcp_servers = config
         .as_object_mut()
@@ -368,12 +615,14 @@ pub fn link_claude(allowed_dir: Option<String>) -> Result<String, String> {
                 "args": args,
             }),
         );
+    } else {
+        return Err("Claude mcpServers must be a JSON object; unchanged.".into());
     }
 
     let formatted = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    fs::write(target, formatted + "\n").map_err(|e| e.to_string())?;
+    save_config(target, (formatted + "\n").as_bytes(), original.as_deref())?;
 
-    Ok(target.to_string_lossy().into_owned())
+    Ok(())
 }
 
 /// Unlinks OpenQuire from Claude Desktop
@@ -384,7 +633,8 @@ pub fn unlink_claude() -> Result<(), String> {
         }
         if let Ok(content) = fs::read_to_string(&p) {
             if let Ok(mut config) = serde_json::from_str::<Value>(&content) {
-                if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+                if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut())
+                {
                     if servers.remove("openquire").is_some() {
                         if let Ok(formatted) = serde_json::to_string_pretty(&config) {
                             let _ = fs::write(&p, formatted + "\n");
@@ -400,6 +650,7 @@ pub fn unlink_claude() -> Result<(), String> {
 #[cfg(test)]
 mod discovery_tests {
     use super::command_candidates;
+    use super::{allowed_folder, link_at, read_config, save_config, supported_node, MCP_PACKAGE};
     use std::ffi::OsStr;
     use std::fs;
     use std::path::Path;
@@ -427,6 +678,74 @@ mod discovery_tests {
 
     fn has_file(candidates: Vec<std::path::PathBuf>) -> bool {
         candidates.into_iter().any(|candidate| candidate.is_file())
+    }
+
+    #[test]
+    fn connection_requires_explicit_existing_absolute_scope_and_node_20() {
+        assert!(allowed_folder(None).is_err());
+        assert!(allowed_folder(Some("relative".into())).is_err());
+        let root = TestDir::new();
+        assert_eq!(
+            allowed_folder(Some(root.0.to_str().unwrap().into())).unwrap(),
+            fs::canonicalize(&root.0).unwrap()
+        );
+        assert!(!supported_node("v18.20.4"));
+        assert!(!supported_node("garbage"));
+        assert!(supported_node("v20.0.0\n"));
+        assert!(supported_node("v24.3.1"));
+    }
+
+    #[test]
+    fn malformed_or_nonobject_configs_are_preserved_exactly() {
+        let root = TestDir::new();
+        let target = root.0.join("config.json");
+        for bytes in [
+            "{bad",
+            "[]",
+            "null",
+            "{\"mcpServers\":[]}",
+            "{\"mcpServers\":null}",
+        ] {
+            fs::write(&target, bytes).unwrap();
+            assert!(link_at(&target, Path::new("node"), Path::new("npx-cli.js"), &root.0).is_err());
+            assert_eq!(fs::read_to_string(&target).unwrap(), bytes);
+        }
+        assert_eq!(fs::read_dir(&root.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn connection_preserves_entries_backs_up_original_and_keeps_args_literal() {
+        let root = TestDir::new();
+        let target = root.0.join("config.json");
+        let original = br#"{"theme":"dark","mcpServers":{"other":{"command":"keep"},"openquire":{"command":"old"}}}"#;
+        fs::write(&target, original).unwrap();
+        let folder = root.0.join("space & % ! ' folder");
+        fs::create_dir(&folder).unwrap();
+        link_at(
+            &target,
+            &root.0.join("node.exe"),
+            &root.0.join("npx-cli.js"),
+            &folder,
+        )
+        .unwrap();
+        let config: serde_json::Value =
+            serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+        assert_eq!(config["theme"], "dark");
+        assert_eq!(config["mcpServers"]["other"]["command"], "keep");
+        let entry = &config["mcpServers"]["openquire"];
+        assert_eq!(entry["command"], root.0.join("node.exe").to_str().unwrap());
+        assert_eq!(entry["args"][2], MCP_PACKAGE);
+        assert_eq!(entry["args"][5], folder.to_str().unwrap());
+        let backup = fs::read_dir(&root.0)
+            .unwrap()
+            .flatten()
+            .find(|e| e.path().extension().is_some_and(|s| s == "bak"))
+            .unwrap();
+        assert_eq!(fs::read(backup.path()).unwrap(), original);
+        let stale = read_config(&target).unwrap();
+        fs::write(&target, "concurrent edit").unwrap();
+        assert!(save_config(&target, b"replacement", stale.as_deref()).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"concurrent edit");
     }
 
     #[test]

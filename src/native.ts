@@ -195,7 +195,13 @@ export async function detectAiAssistants(): Promise<AiAssistantsReport> {
   return invoke<AiAssistantsReport>('detect_ai_assistants')
 }
 
-export async function linkClaudeDesktop(allowedDir?: string): Promise<string> {
+export async function pickAssistantFolder(): Promise<string | null> {
+  if (!isDesktop) throw new Error('Connecting desktop apps requires OpenQuire desktop.')
+  const picked = await open({ directory: true, multiple: false, title: 'Choose a folder Claude can use for PDFs' })
+  return typeof picked === 'string' ? picked : null
+}
+
+export async function linkClaudeDesktop(allowedDir: string): Promise<string> {
   if (!isDesktop) throw new Error('Native link is only available in the desktop app.')
   return invoke<string>('link_claude_desktop', { allowedDir })
 }
