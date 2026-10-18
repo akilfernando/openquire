@@ -13,7 +13,9 @@ Design rule: lead with the task, choice and consequence. Put implementation
 details in contextual help, Advanced or documentation; keep essential consent,
 unsaved-state and destructive-action information visible at the point of action.
 
-The design brief is complete; the redesigned screens are **planned, not implemented**.
+The design brief is complete. The first welcome/foundation package is implemented in #63; exact validation
+and integration evidence is tracked in issue #44. Other
+redesigned screens remain **planned, not implemented**.
 Deliver in focused packages: (1) shared shell and concise welcome, (2) Settings and
 guided provider connections, (3) reading workspace and contextual tools, (4) Home
 and task continuity, (5) cross-screen feedback and performance review. Each package
@@ -284,3 +286,24 @@ Release reconciliation follows validated package evidence. Human native dialogs,
 mobile and independent-viewer acceptance remain NOT RUN. npm and desktop releases
 remain unpublished; no sign-in or user-client configuration changes are included
 in the connection foundation package.
+
+## Shared entry surfaces and welcome — #63
+
+The first experience package introduces shared heading/action/button patterns used
+by Home and Welcome. The welcome now leads with Open a PDF and Explore tools,
+with a quiet optional AI link to the AI Settings category. It performs no assistant
+scan and does not change AI preferences. Existing assistant setup remains available
+from Settings and command search, separate from first run. Show welcome in command
+search lets established users revisit the screen without clearing their data.
+
+The existing onboarding marker remains compatible. Closing, Escape and choosing an
+entry action dismiss the welcome; cancelling file selection leaves Home usable.
+Previously disabled AI stays disabled and hides the optional link. Light/dark and
+short-screen layouts retain clear actions and keyboard focus.
+
+Validation covers Chromium, Firefox and WebKit, axe checks, light/dark screenshots,
+primary focus, cancelled pickers, existing preferences and revisiting welcome over
+an unsaved document. Exact build and full-suite results are tracked in issue #44
+and the implementation PR. The broader Settings,
+provider-card and viewer redesigns remain planned. Human native/mobile acceptance
+and live provider inference remain NOT RUN; no package/release was published.
