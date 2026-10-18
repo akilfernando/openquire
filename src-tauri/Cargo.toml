@@ -1,6 +1,6 @@
 [package]
 name = "openquire"
-version = "0.2.0"
+version = "0.2.1"
 description = "OpenQuire, an open source PDF suite"
 license = "AGPL-3.0-or-later"
 edition = "2021"
@@ -21,6 +21,7 @@ percent-encoding = "2"
 cryptoki = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml_edit = "0.25"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"

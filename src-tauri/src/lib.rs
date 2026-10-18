@@ -120,6 +120,12 @@ async fn link_claude_desktop(allowed_dir: Option<String>) -> Result<String, Stri
     tauri::async_runtime::spawn_blocking(move || ai_detect::link_claude(allowed_dir)).await.map_err(|e| e.to_string())?
 }
 
+/// Configures OpenQuire PDF tools for Codex with an explicitly chosen folder.
+#[tauri::command]
+async fn link_codex(allowed_dir: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_detect::link_codex(allowed_dir)).await.map_err(|e| e.to_string())?
+}
+
 /// Unlinks OpenQuire from Claude Desktop.
 #[tauri::command]
 async fn unlink_claude_desktop() -> Result<(), String> {
@@ -158,6 +164,7 @@ pub fn run() {
             native_ocr,
             detect_ai_assistants,
             link_claude_desktop,
+            link_codex,
             unlink_claude_desktop
         ])
         .build(tauri::generate_context!())
