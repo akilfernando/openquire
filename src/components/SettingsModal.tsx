@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircle, CheckCircle2, ExternalLink, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ArrowLeft, ChevronRight, ExternalLink, X } from 'lucide-react'
 import { useFocusTrap } from '../focus'
 import { m } from '../i18n'
 import { OCR_LANGUAGES } from '../ocr-languages'
@@ -8,8 +8,9 @@ import HotkeySettings from './HotkeySettings'
 import PluginsSettings from './PluginsSettings'
 import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
-import { PROVIDERS, DEFAULT_MODELS, aiKeyRequired, connectionError, fetchAvailableModels, formatAndRankModels, pickOptimalModel, verifyApiKey, type AiProvider, type ApiKeyVerification } from '../ai'
-import { selectProvider, forgetProvider, rememberProvider } from '../ai-profiles'
+import type { AiProvider } from '../ai'
+import { rememberProvider } from '../ai-profiles'
+import AiConnections from './AiConnections'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -104,87 +105,24 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
   const [purgeFeedback, setPurgeFeedback] = useState('')
   const [purgeError, setPurgeError] = useState('')
   const [purging, setPurging] = useState(false)
-  const [copiedMcp, setCopiedMcp] = useState(false)
   const [tab, setTab] = useState<Tab>(initialTab)
+  const [detail, setDetail] = useState(initialTab === 'ai')
+  const content = useRef<HTMLDivElement>(null)
+  const navigation = useRef<HTMLElement>(null)
+  const navScroll = useRef(0)
+  const navigate = (next: Tab) => {
+    navScroll.current = navigation.current?.scrollTop ?? 0
+    setTab(next); setDetail(true)
+    requestAnimationFrame(() => { content.current?.scrollTo(0, 0); content.current?.focus() })
+  }
+  const back = () => {
+    setDetail(false)
+    requestAnimationFrame(() => {
+      navigation.current?.querySelector<HTMLButtonElement>(`[data-category="${tab}"]`)?.focus()
+      if (navigation.current) navigation.current.scrollTop = navScroll.current
+    })
+  }
   const [installed, setInstalled] = useState<NativeTools | null>(null)
-  const [modelList, setModelList] = useState<string[]>([])
-  const [loadingModels, setLoadingModels] = useState(false)
-  const [isCustomModel, setIsCustomModel] = useState(false)
-  const [modelError, setModelError] = useState('')
-  const verificationRequest = useRef(0)
-  const verificationAbort = useRef<AbortController | null>(null)
-  const discoveryAbort = useRef<AbortController | null>(null)
-  const [connectionNotice, setConnectionNotice] = useState('')
-  const keyInput = useRef<HTMLInputElement>(null)
-  const keyEditing = useRef(false)
-  useEffect(() => {
-    if (keyInput.current && !keyEditing.current) keyInput.current.value = settings.aiKey.startsWith('enc:v1:') ? '' : settings.aiKey
-  }, [settings.aiKey, settings.aiProvider, settings.aiBaseUrl])
-  const [keyVerification, setKeyVerification] = useState<ApiKeyVerification | null>(null)
-  const [verifyingKey, setVerifyingKey] = useState(false)
-  const keyRequired = aiKeyRequired({ provider: settings.aiProvider, baseUrl: settings.aiBaseUrl })
-  const modelOptions = formatAndRankModels(settings.aiProvider, modelList)
-
-  const handleVerify = useCallback(async (provider: AiProvider, apiKey: string, baseUrl: string) => {
-    const request = ++verificationRequest.current
-    verificationAbort.current?.abort()
-    const controller = new AbortController()
-    verificationAbort.current = controller
-    setVerifyingKey(true)
-    setKeyVerification(null)
-    try {
-      const res = await verifyApiKey({ provider, apiKey, baseUrl }, fetch, controller.signal)
-      const latest = latestAi.current.settings
-      if (request === verificationRequest.current && latest.aiEnabled && !latest.aiDisabled && provider === latest.aiProvider && apiKey === latest.aiKey && baseUrl === latest.aiBaseUrl) setKeyVerification(res)
-    } finally {
-      if (request === verificationRequest.current) setVerifyingKey(false)
-    }
-  }, [])
-
-  // Read current settings when a request completes without making renders re-trigger it.
-  const latestAi = useRef({ settings, onChange, isCustomModel })
-  latestAi.current = { settings, onChange, isCustomModel }
-  const modelRequest = useRef(0)
-  const refreshModels = useCallback(async (provider: AiProvider, apiKey: string, baseUrl: string) => {
-    const request = ++modelRequest.current
-    discoveryAbort.current?.abort()
-    const controller = new AbortController()
-    discoveryAbort.current = controller
-    setLoadingModels(true)
-    setModelError('')
-    try {
-      const list = await fetchAvailableModels({ provider, apiKey, baseUrl }, fetch, controller.signal)
-      const latest = latestAi.current
-      if (request !== modelRequest.current || !latest.settings.aiEnabled || latest.settings.aiDisabled ||
-          provider !== latest.settings.aiProvider || apiKey !== latest.settings.aiKey || baseUrl !== latest.settings.aiBaseUrl) return
-      setModelList(list)
-      const optimal = pickOptimalModel(provider, list)
-      if (!latest.settings.aiModel && !latest.isCustomModel &&
-          optimal !== latest.settings.aiModel) {
-        latest.onChange({ ...latest.settings, aiModel: optimal })
-      }
-    } catch (error) {
-      const latest = latestAi.current.settings
-      if (request === modelRequest.current && provider === latest.aiProvider && apiKey === latest.aiKey && baseUrl === latest.aiBaseUrl) {
-        setModelList([])
-        setModelError(connectionError(error))
-      }
-    } finally {
-      if (request === modelRequest.current) setLoadingModels(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (tab === 'ai' && credentialsReady && settings.aiEnabled && !settings.aiDisabled) {
-      void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)
-    }
-    setKeyVerification(null)
-    setVerifyingKey(false)
-    return () => {
-      modelRequest.current++; verificationRequest.current++
-      discoveryAbort.current?.abort(); verificationAbort.current?.abort()
-    }
-  }, [tab, credentialsReady, settings.aiEnabled, settings.aiDisabled, settings.aiProvider, settings.aiKey, settings.aiBaseUrl, refreshModels])
   // Escape closes Settings wherever focus is, even after the focused control went away.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -206,15 +144,16 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
   return (
     <div className="modal-container">
       <div className="modal-bg" onPointerDown={onClose} />
-      <div ref={ref} className="modal settings" role="dialog" aria-modal="true" aria-label={m.settings.label}>
+      <div ref={ref} className="modal settings" data-detail={detail} role="dialog" aria-modal="true" aria-label={m.settings.label}>
         <button className="clickable-icon modal-close" aria-label={m.actions.close} onClick={onClose}><X size={20} /></button>
-        <nav className="settings-nav">
-          <div className="pane-heading">{m.settings.options}</div>
+        <nav ref={navigation} className="settings-nav" aria-label="Settings categories">
+          <div className="settings-nav-heading">{m.settings.label}</div>
           {tabs.map(([k, label]) => (
-            <button key={k} className={tab === k ? 'is-active' : ''} onClick={() => setTab(k)}>{label}</button>
+            <button key={k} data-category={k} aria-current={tab === k ? 'page' : undefined} className={tab === k ? 'is-active' : ''} onClick={() => navigate(k)}><span>{label}</span><ChevronRight size={16} /></button>
           ))}
         </nav>
-        <div className="settings-content">
+        <div ref={content} className="settings-content" tabIndex={-1} aria-label={m.settings.tabs[tab]}>
+          <button className="settings-back quiet-action" onClick={back}><ArrowLeft size={16} />All settings</button>
           {tab === 'appearance' && (
             <>
               <h2>{m.settings.tabs.appearance}</h2>
@@ -316,6 +255,10 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
             <>
               <h2>{m.settings.tabs.privacy}</h2>
               <p className="hint">{m.settings.privacyIntro}</p>
+              <Item name={m.settings.aiDisabled} desc="Hide AI features and prevent AI requests. Your saved connections are kept.">
+                <input type="checkbox" className="toggle" checked={!!settings.aiDisabled} aria-label={m.settings.aiDisabled}
+                  onChange={e => set({ aiDisabled: e.target.checked, aiEnabled: e.target.checked ? false : settings.aiEnabled })} />
+              </Item>
 
               <Item name="Encrypted document recovery" desc="Off by default. Keep the newest 3 unsaved document checkpoints on this device for up to 7 days (16 MiB per document, 32 MiB total). Checkpoints may lag your edits. Password-protected documents are skipped. Turning this off removes checkpoints; it does not save your files.">
                 <input type="checkbox" className="toggle" checked={!!settings.recoveryEnabled}
@@ -378,238 +321,10 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
               </div>
             </>
           )}
-          {tab === 'ai' && (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <h2 style={{ margin: 0 }}>{m.settings.tabs.ai}</h2>
-                {onOpenWizard && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose()
-                      onOpenWizard()
-                    }}
-                    style={{ padding: '4px 10px', fontSize: '0.8rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)' }}
-                  >
-                    {m.settings.openOnboardingWizard}
-                  </button>
-                )}
-              </div>
-
-              <Item name={m.settings.aiDisabled} desc={m.settings.aiDisabledDesc}>
-                <input
-                  type="checkbox"
-                  className="toggle"
-                  checked={settings.aiDisabled ?? false}
-                  aria-label={m.settings.aiDisabled}
-                  onChange={(e) => set({ aiDisabled: e.target.checked, aiEnabled: e.target.checked ? false : settings.aiEnabled })}
-                />
-              </Item>
-
-              {settings.aiDisabled ? (
-                <div className="hint" style={{ padding: '12px 14px', background: 'var(--panel)', borderRadius: 6, margin: '14px 0', border: '1px solid var(--border)', lineHeight: 1.45 }}>
-                  <strong>Air-Gapped Mode Active:</strong> All AI features (sidebars, form suggestions, and network LLM prompts) are completely disabled. Uncheck above to re-enable.
-                </div>
-              ) : (
-                <>
-                  <Item name={m.settings.aiEnabled} desc={m.settings.aiEnabledDesc}>
-                    <input type="checkbox" className="toggle" checked={settings.aiEnabled} aria-label={m.settings.aiEnabled} onChange={(e) => { setConnectionNotice(''); set({ aiEnabled: e.target.checked }) }} />
-                  </Item>
-              {connectionNotice && <p role="status" className="hint">{connectionNotice}</p>}
-              {credentialStorageError && <p role="alert" className="hint">{credentialStorageError}</p>}
-              {settings.aiEnabled && (
-                <>
-                  <Item name={m.settings.aiProvider} desc={m.settings.aiProviderDesc}>
-                    <select disabled={!credentialsReady} value={settings.aiProvider} aria-label={m.settings.aiProvider} onChange={(e) => {
-                      verificationRequest.current++; modelRequest.current++
-                      setVerifyingKey(false); setKeyVerification(null); setModelList([]); setModelError(''); setIsCustomModel(false)
-                      setConnectionNotice('')
-                      onChange(selectProvider(settings, e.target.value as AiProvider))
-                    }}>
-                      {Object.entries(PROVIDERS).map(([id, provider]) => <option key={id} value={id}>{provider.name}</option>)}
-                    </select>
-                  </Item>
-                  <p className="hint">{m.settings.aiConnectionHint}</p>
-                  <p className="hint">{m.settings.aiSwitchHint}</p>
-                  {!credentialsReady && <p role="status" className="hint">Unlocking saved connections on this device…</p>}
-                  {settings.aiProvider !== 'anthropic' && (
-                    <Item name={m.settings.aiBaseUrl} desc={m.settings.aiBaseUrlDesc}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: 260 }}>
-                        <input
-                          key={`endpoint-${settings.aiProvider}`}
-                          defaultValue={settings.aiBaseUrl}
-                          placeholder={PROVIDERS[settings.aiProvider].endpoint || "https://your-provider.example/v1"}
-                          aria-label={m.settings.aiBaseUrl}
-                          style={{ flex: 1 }}
-                          onBlur={(e) => {
-                            const val = e.target.value.trim()
-                            if (val !== settings.aiBaseUrl) {
-                              verificationRequest.current++; modelRequest.current++
-                              setVerifyingKey(false); setModelList([]); setModelError(''); setIsCustomModel(false)
-                              set({ aiBaseUrl: val, aiKey: '', aiModel: '' })
-                              setKeyVerification(null)
-                            }
-                          }}
-                        />
-                      </div>
-                    </Item>
-                  )}
-                  <Item name={m.settings.aiKey} desc={keyRequired ? m.settings.aiKeyRequired : m.settings.aiKeyOptional}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 260 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input
-                          type="password"
-                          autoComplete="off"
-                          key={`key-${settings.aiProvider}-${settings.aiBaseUrl}`}
-                          ref={keyInput}
-                          defaultValue={settings.aiKey.startsWith('enc:v1:') ? '' : settings.aiKey}
-                          aria-label={m.settings.aiKey}
-                          style={{ flex: 1 }}
-                          onChange={() => { keyEditing.current = true; verificationRequest.current++; verificationAbort.current?.abort(); setKeyVerification(null); setVerifyingKey(false) }}
-                          onBlur={(e) => {
-                            if (!keyEditing.current) return
-                            keyEditing.current = false
-                            const val = e.target.value.trim()
-                            if (val !== settings.aiKey) {
-                              set({ aiKey: val })
-                              setKeyVerification(null)
-                            }
-                          }}
-                        />
-                        <button
-                          type="button"
-                          disabled={!credentialsReady || verifyingKey || (!settings.aiKey && keyRequired)}
-                          style={{ padding: '5px 10px', fontSize: '0.8rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)', whiteSpace: 'nowrap' }}
-                          onClick={() => void handleVerify(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)}
-                        >
-                          {verifyingKey ? m.settings.aiChecking : m.settings.aiCheck}
-                        </button>
-                      </div>
-                      {verifyingKey && <button type="button" onClick={() => verificationAbort.current?.abort()}>Cancel connection check</button>}
-                      {keyVerification && (
-                        <div role="status"
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 5,
-                            fontSize: '0.78rem',
-                            color: 'var(--text-normal)',
-                            fontWeight: 500,
-                            lineHeight: 1.3,
-                            marginTop: 2,
-                          }}
-                        >
-                          {keyVerification.ok ? <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> : <AlertCircle size={13} style={{ flexShrink: 0 }} />}
-                          <span>{keyVerification.message}</span>
-                        </div>
-                      )}
-                    </div>
-                  </Item>
-                  <section className="ai-connection-summary" aria-label="Connection diagnostics">
-                    <strong>{PROVIDERS[settings.aiProvider].name}</strong>
-                    <p className="hint">Checks model-catalogue access only. Text generation, image support and billing remain untested. No document content is sent by this check.</p>
-                    <button type="button" disabled={!credentialsReady} onClick={() => {
-                      verificationRequest.current++; modelRequest.current++
-                      verificationAbort.current?.abort(); discoveryAbort.current?.abort()
-                      setVerifyingKey(false); setKeyVerification(null); setModelList([]); setModelError('')
-                      setConnectionNotice(`${PROVIDERS[settings.aiProvider].name} disconnected. Its saved key, endpoint and model were removed; AI is off. Other provider connections are retained.`)
-                      onChange({ ...forgetProvider(settings), aiEnabled: false })
-                    }}>Disconnect this provider</button>
-                    <p className="hint">Removes this connection from OpenQuire and turns AI off. To revoke an API key, use your provider’s account settings.</p>
-                  </section>
-                  <Item name={m.settings.aiModel} desc={m.settings.aiModelDesc}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 240 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <select
-                          value={isCustomModel ? '__custom__' : (settings.aiModel || DEFAULT_MODELS[settings.aiProvider])}
-                          aria-label={m.settings.aiModel}
-                          style={{ flex: 1 }}
-                          onChange={(e) => {
-                            if (e.target.value === '__custom__') {
-                              setIsCustomModel(true)
-                            } else {
-                              setIsCustomModel(false)
-                              set({ aiModel: e.target.value })
-                            }
-                          }}
-                        >
-                          {settings.aiModel && !modelOptions.some(item => item.id === settings.aiModel) && <option value={settings.aiModel}>{settings.aiModel} (saved selection)</option>}
-                          {modelOptions.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.name}
-                            </option>
-                          ))}
-                          <option value="">{m.settings.aiChooseModel}</option>
-                          <option value="__custom__">Custom model name...</option>
-                        </select>
-                        <button
-                          type="button"
-                          title="Refresh active models"
-                          aria-label="Refresh active models"
-                          disabled={!credentialsReady || loadingModels}
-                          style={{ padding: '4px 8px', fontSize: '0.85rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)' }}
-                          onClick={() => void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)}
-                        >
-                          {loadingModels ? '...' : '↻'}
-                        </button>
-                      </div>
-                      {modelError && <p role="status" className="hint">{modelError} {m.settings.aiManualModel}</p>}
-                      {isCustomModel && (
-                        <input
-                          defaultValue={settings.aiModel}
-                          placeholder="e.g. gpt-4o, claude-3-5-sonnet-latest"
-                          aria-label="Custom model name"
-                          onBlur={(e) => set({ aiModel: e.target.value.trim() })}
-                        />
-                      )}
-                    </div>
-                  </Item>
-                  <div className="setting-item stacked">
-                    <div className="setting-info">
-                      <div className="setting-name">{m.settings.aiProfile}</div>
-                      <div className="setting-desc">{m.settings.aiProfileDesc}</div>
-                    </div>
-                    <textarea rows={5} defaultValue={settings.aiProfile} placeholder={m.settings.aiProfilePlaceholder} aria-label={m.settings.aiProfile}
-                      onBlur={(e) => e.target.value !== settings.aiProfile && set({ aiProfile: e.target.value })} />
-                  </div>
-                </>
-              )}
-
-              <div style={{ marginTop: 24, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>{m.settings.claudeDesktopTitle}</h3>
-                  <span className="badge" style={{ padding: '2px 8px', borderRadius: 4, background: 'var(--panel)', fontSize: '0.75rem', color: 'var(--accent)', border: '1px solid var(--border)' }}>
-                    Model Context Protocol
-                  </span>
-                </div>
-                <p className="hint" style={{ margin: '4px 0 12px 0' }}>{m.settings.claudeDesktopDesc}</p>
-                <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '12px 14px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: 8 }}>
-                    {m.settings.claudeDesktopCommandHint}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code style={{ flex: 1, padding: '6px 10px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, fontSize: '0.82rem', fontFamily: 'monospace', minWidth: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                      npx -y openquire mcp setup
-                    </code>
-                    <button
-                      type="button"
-                      style={{ padding: '6px 14px', fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                      onClick={() => {
-                        void navigator.clipboard.writeText('npx -y openquire mcp setup')
-                        setCopiedMcp(true)
-                        setTimeout(() => setCopiedMcp(false), 3000)
-                      }}
-                    >
-                      {copiedMcp ? '✔ Copied!' : m.settings.claudeDesktopCopyCmd}
-                    </button>
-                  </div>
-                  {copiedMcp && <p className="success small" style={{ margin: '8px 0 0 0', color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500 }}>{m.settings.claudeDesktopCopied}</p>}
-                </div>
-              </div>
-                </>
-              )}
-            </>
-          )}
+          {tab === 'ai' && <AiConnections settings={settings} credentialsReady={credentialsReady}
+            credentialStorageError={credentialStorageError} onChange={onChange}
+            onPrivacy={() => navigate('privacy')}
+            onAssistants={onOpenWizard ? () => { onClose(); onOpenWizard() } : undefined} />}
           {tab === 'hotkeys' && <HotkeySettings commands={commands} overrides={settings.hotkeys} onChange={(hotkeys) => set({ hotkeys })} />}
           {tab === 'plugins' && <PluginsSettings plugins={plugins} errors={pluginErrors} onChange={onPlugins} />}
           {tab === 'about' && (

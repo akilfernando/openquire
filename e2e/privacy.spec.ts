@@ -8,7 +8,7 @@ const privacyCode = transformSync(readFileSync(new URL('../src/privacy.ts', impo
   loader: 'ts', format: 'iife', globalName: 'privacyTest',
 }).code
 
-test('delayed credential hydration preserves a newer edit in the production UI', async ({ page }) => {
+test('locked connections preserve credentials until hydration and allow later edits', async ({ page }) => {
   await page.route('**/models*', (route) => route.fulfill({ json: { data: [] } }))
   await page.goto('/')
   await page.evaluate(async (code) => {
@@ -32,32 +32,36 @@ test('delayed credential hydration preserves a newer edit in the production UI',
   await page.reload()
   await page.locator('button[aria-label="Settings"]:visible').first().click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
-  await settings.getByRole('button', { name: 'AI assistant', exact: true }).click()
-  await expect(settings.getByLabel('Provider', { exact: true })).toBeDisabled()
-  // A blank-looking locked field must not be interpreted as a request to erase it.
-  await settings.getByLabel('API key', { exact: true }).focus()
-  await settings.getByLabel('API key', { exact: true }).press('Tab')
+  await settings.getByRole('button', { name: 'AI & connections', exact: true }).click()
+  const anthropic = settings.getByRole('region', { name: 'Anthropic (Claude)', exact: true })
+  await expect(anthropic.getByRole('button', { name: /Edit|Set up/ })).toBeDisabled()
+  await expect(settings.getByLabel('API key', { exact: true })).toHaveCount(0)
   await settings.getByLabel('Enable the AI assistant', { exact: true }).uncheck()
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('openquire.settings')!).aiEnabled)).toBe(false)
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('openquire.settings')!).aiKey.startsWith('enc:v1:'))).toBe(true)
-  await settings.getByLabel('Enable the AI assistant', { exact: true }).check()
-  await settings.getByLabel('API key', { exact: true }).fill('new-key')
-  await settings.getByLabel('API key', { exact: true }).press('Tab')
   await page.evaluate(() => (globalThis as unknown as { releaseDecryption: () => void }).releaseDecryption())
-  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { decryptionFinished: boolean }).decryptionFinished)).toBe(true)
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
-  // Trigger a later save from current React state, rather than trusting an uncontrolled input's value.
-  await settings.getByRole('checkbox', { name: 'Disable all AI features', exact: true }).check()
+  await expect(anthropic.getByRole('button', { name: /Edit|Set up/ })).toBeEnabled()
+  await anthropic.getByRole('button', { name: /Edit|Set up/ }).click()
+  await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('old-key')
+  await settings.getByLabel('API key', { exact: true }).fill('new-key')
+  await settings.getByRole('button', { name: 'Continue', exact: true }).click()
+  await settings.getByLabel('Model', { exact: true }).fill('saved-model')
+  await settings.getByRole('button', { name: 'Save and select' }).click()
   await expect.poll(() => page.evaluate(async (code) => {
     const { decryptSensitive } = new Function(`${code}; return privacyTest;`)()
-    const saved = JSON.parse(localStorage.getItem('openquire.settings') ?? '{}')
-    return saved.aiDisabled ? decryptSensitive(saved.aiKey) : ''
+    return decryptSensitive(JSON.parse(localStorage.getItem('openquire.settings')!).aiKey)
   }, privacyCode)).toBe('new-key')
+  await settings.getByRole('button', { name: 'Privacy & Security', exact: true }).click()
+  await settings.getByRole('checkbox', { name: 'Disable all AI features', exact: true }).check()
+  await settings.getByRole('button', { name: 'AI & connections', exact: true }).click()
+  await expect(settings.getByText('AI features are hidden.', { exact: true })).toBeVisible()
+  await settings.getByRole('button', { name: 'Manage AI privacy' }).click()
   await settings.getByRole('checkbox', { name: 'Disable all AI features', exact: true }).uncheck()
-  await settings.getByLabel('Enable the AI assistant', { exact: true }).check()
-  await settings.getByLabel('Provider', { exact: true }).selectOption('xai')
+  await settings.getByRole('button', { name: 'AI & connections', exact: true }).click()
+  await settings.getByRole('region', { name: 'xAI (Grok)', exact: true }).getByRole('button', { name: 'Edit' }).click()
   await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('saved-xai-key')
-  await settings.getByLabel('Provider', { exact: true }).selectOption('anthropic')
+  await settings.getByRole('button', { name: 'Cancel setup' }).click()
+  await anthropic.getByRole('button', { name: 'Edit' }).click()
   await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('new-key')
 })
 

@@ -51,7 +51,7 @@ test('optional AI opens the AI category without enabling requests', async ({ pag
   await page.goto('/')
   await page.getByRole('button', { name: 'Explore optional AI' }).click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
-  await expect(settings.getByRole('heading', { name: 'AI assistant', exact: true })).toBeVisible()
+  await expect(settings.getByRole('heading', { name: 'AI & connections', exact: true })).toBeVisible()
   await expect(settings.getByRole('checkbox', { name: 'Enable the AI assistant', exact: true })).not.toBeChecked()
   expect(external).toEqual([])
 })

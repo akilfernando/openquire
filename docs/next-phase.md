@@ -307,3 +307,32 @@ an unsaved document. Exact build and full-suite results are tracked in issue #44
 and the implementation PR. The broader Settings,
 provider-card and viewer redesigns remain planned. Human native/mobile acceptance
 and live provider inference remain NOT RUN; no package/release was published.
+
+## Settings and guided connections — candidate implementation
+
+Settings now uses a stable desktop category rail and a full-screen category/detail
+flow on narrow displays, with Back navigation and restored category focus/scroll.
+The shared heading, surface and action patterns extend into AI & connections.
+Essential privacy choices remain available in Privacy & Security; hiding AI does
+not delete saved connections or claim to isolate the whole application from a network.
+
+All six providers use the same cards and two-step setup. Draft key/endpoint/model
+changes remain in memory until Save and select; cancelling leaves saved profiles
+unchanged. Endpoint edits clear the draft key/model. Loading models is explicit,
+works while AI is off, and preserves a manually entered model. No automatic model
+request runs when opening Settings, switching a saved provider or saving a draft.
+The model step shows the destination; Advanced and Details hold technical options
+and the limits of catalogue checks. External assistant setup remains separate.
+
+Credential hydration gates setup. Existing encryption, consent invalidation,
+disconnect and session-only storage fallback remain in place. Private-data purge
+invalidates drafts and pending checks, including first connections with no prior
+saved fields. Drafts cannot be saved across a changed privacy revision. Selected
+connections are not presented as verified inference or subscription accounts.
+
+Validation covers provider parity, encrypted reload, cancelled drafts/checks,
+stale results, endpoint changes, hidden AI, delayed hydration, cross-tab purge,
+short mobile navigation, keyboard focus and light/dark accessibility. Exact local,
+candidate and post-merge results belong in issue #44 and the focused PR. Human
+OS/mobile acceptance and live-provider inference remain NOT RUN. No release is
+published by this work.
