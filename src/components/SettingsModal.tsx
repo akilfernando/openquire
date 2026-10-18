@@ -176,7 +176,9 @@ export default function SettingsModal({ settings, credentialsReady, credentialSt
                   ))}
                 </div>
               </Item>
-              <StyleSettings themes={settings.themes} activeTheme={settings.activeTheme} snippets={settings.snippets} onChange={set} />
+              <details className="connection-details"><summary>Custom themes & CSS</summary>
+                <StyleSettings themes={settings.themes} activeTheme={settings.activeTheme} snippets={settings.snippets} onChange={set} />
+              </details>
             </>
           )}
           {tab === 'comments' && (
