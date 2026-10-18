@@ -45,7 +45,10 @@ test('locked connections preserve credentials until hydration and allow later ed
   await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('old-key')
   await settings.getByLabel('API key', { exact: true }).fill('new-key')
   await settings.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect(settings.getByRole('status')).toContainText('Connection checked, but no models were listed.')
   await settings.getByLabel('Model', { exact: true }).fill('saved-model')
+  const enableWhenDone = settings.getByLabel('Enable AI when I finish', { exact: true })
+  if (await enableWhenDone.isChecked()) await enableWhenDone.uncheck()
   await settings.getByRole('button', { name: 'Save and select' }).click()
   await expect.poll(() => page.evaluate(async (code) => {
     const { decryptSensitive } = new Function(`${code}; return privacyTest;`)()

@@ -44,14 +44,19 @@ seconds. Local results open an unsaved setup draft. Manual setup is always avail
 Detection does not sign in, enable AI or give OpenQuire access to chat subscriptions.
 
 AI connections are managed in **Settings → AI & connections**. Choose a provider,
-enter its connection details, then choose a model and **Save and select**. You can
-configure providers while AI is off. Draft changes are discarded when cancelled.
+enter its connection details, then **Continue** to check the key and load models.
+Choose a model (a sole available model is preselected), then **Save and enable AI**.
+Clear **Enable AI when I finish** to save the connection while keeping AI off.
+Draft changes are discarded when cancelled. API key guides open in your browser.
 Each provider keeps
 its own key, endpoint and model on this device; saved connection profiles and keys
 are encrypted using the device vault. Switching providers restores its connection
-and requires fresh document-sharing consent. **Load models** explicitly lists models
+and requires fresh document-sharing consent. The connection check lists models
 without sending document content; it does not verify inference, image support or
 billing. Opening Settings, switching providers and saving do not load models.
+Failed checks can be corrected and retried; services without model listing have
+an explicit unverified manual setup option. Local Ollama setup needs no key by
+default and explains how to add a model when its list is empty.
 Checks can be cancelled and time out after 20 seconds. **Disconnect this
 provider** forgets its connection and turns AI off; it does not revoke the API key
 at the provider. **Purge private data** removes all saved connections. If encrypted

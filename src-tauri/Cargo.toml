@@ -17,6 +17,7 @@ openquire-core = { path = "../crates/openquire-core" }
 openquire-crypto = { path = "../crates/openquire-crypto" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 percent-encoding = "2"
 cryptoki = "0.12"
 serde = { version = "1", features = ["derive"] }

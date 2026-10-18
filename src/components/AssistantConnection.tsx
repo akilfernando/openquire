@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { linkClaudeDesktop, linkCodex, linkChatGPTDesktop, pickAssistantFolder } from '../native'
 import { privacyRevision } from '../privacy'
+import SetupLink from './SetupLink'
 
 const packageUrl = 'https://github.com/akilfernando/openquire/releases/download/desktop-v0.2.0-rc.1/openquire-1.0.3.tgz'
 
@@ -59,10 +60,12 @@ export default function AssistantConnection({ client, linked, disabled, onBusy }
       </button>
     </>}
     {error && <p role="alert">{error}</p>}
+    {error && /Node|npm|npx/i.test(error) && <p><SetupLink href="https://nodejs.org/en/download">Install Node.js</SetupLink>, then restart OpenQuire and try again.</p>}
     <details><summary>What this connection does</summary>
       <p>You work in {shortName}, which can use OpenQuire’s PDF tools on files in your chosen folder. Save edits in OpenQuire first, then reopen files changed by the assistant.</p>
       <p>PDF content returned to {shortName} is handled under that service’s privacy settings. This does not enable AI inside OpenQuire; use “Set up a provider” for that.</p>
       <p>Requires Node.js 20 or later. The tools download on first use, which may take a moment.</p>
+      <SetupLink href="https://nodejs.org/en/download">Get Node.js</SetupLink>
     </details>
     <details><summary>Manual setup</summary>
       {client === 'chatgpt' ? <>
@@ -71,7 +74,7 @@ export default function AssistantConnection({ client, linked, disabled, onBusy }
         <p>Arguments (one per entry):</p>
         <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{['-y', packageUrl, 'mcp', '--allow-dir', '<absolute path to your PDF folder>'].join('\n')}</pre>
         <p>Replace the folder placeholder, save, then select Restart. If MCP servers is missing, check your desktop version and workspace access.</p>
-        <a href="https://learn.chatgpt.com/docs/extend/mcp" target="_blank" rel="noreferrer">ChatGPT setup guide</a>
+        <SetupLink href="https://learn.chatgpt.com/docs/extend/mcp">ChatGPT setup guide</SetupLink>
       </> : <>
       <p>{client === 'claude' ? 'Run this from the folder you want Claude to access.' : 'Replace the placeholder with the full path to your PDF folder.'} Then restart {name}.</p>
       <button disabled={busy} onClick={async () => {

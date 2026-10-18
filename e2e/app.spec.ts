@@ -540,6 +540,9 @@ test('the AI assistant is off by default and never sends without consent', async
     modelRequests++
     await route.fulfill({ json: { data: [{ id: 'test-model' }] } })
   })
+  await context.route('https://generativelanguage.googleapis.com/v1beta/openai/models**', async (route) => {
+    await route.fulfill({ json: { data: [{ id: 'gemini-test-model' }] } })
+  })
   await context.route('https://api.anthropic.com/v1/messages', async (route) => {
     const body = route.request().postDataJSON()
     sent.push({ headers: route.request().headers(), body })
@@ -559,10 +562,9 @@ test('the AI assistant is off by default and never sends without consent', async
   await page.getByRole('region', { name: 'Anthropic (Claude)', exact: true }).getByRole('button', { name: /Edit|Set up/ }).click()
   await page.getByLabel('API key').fill('test-key')
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await page.getByRole('button', { name: 'Load models', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('status')).toContainText('Models loaded')
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('status')).toContainText('Connection checked. Models loaded.')
   await page.getByLabel('Model', { exact: true }).fill('test-model')
-  await page.getByRole('button', { name: 'Save and select' }).click()
+  await page.getByRole('button', { name: 'Save and enable AI', exact: true }).click()
   await page.getByText('Your details for forms', { exact: true }).click()
   await page.getByRole('textbox', { name: 'Your details for forms' }).fill('Jane Doe. I want the Pro plan and the newsletter.')
   // Only explicit discovery loads models; later state updates must not fetch them again.
@@ -615,8 +617,9 @@ test('the AI assistant is off by default and never sends without consent', async
   await page.getByRole('region', { name: 'Google AI (Gemini)', exact: true }).getByRole('button', { name: 'Set up' }).click()
   await page.getByLabel('API key', { exact: true }).fill('gemini-test-key')
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('status')).toContainText('Connection checked. Models loaded.')
   await page.getByLabel('Model', { exact: true }).fill('gemini-test-model')
-  await page.getByRole('button', { name: 'Save and select' }).click()
+  await page.getByRole('button', { name: 'Save and enable AI', exact: true }).click()
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Summarize' }).click()
   await expect(consent).toContainText('generativelanguage.googleapis.com')

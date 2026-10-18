@@ -6,6 +6,7 @@
 
 mod ai_detect;
 mod file_save;
+mod setup_links;
 mod tools;
 
 use std::path::Path;
@@ -158,8 +159,10 @@ pub fn run() {
     }
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Pending(Mutex::new(initial)))
         .invoke_handler(tauri::generate_handler![
+            setup_links::open_setup_link,
             read_file,
             write_file,
             take_opened_files,
