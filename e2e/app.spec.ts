@@ -560,7 +560,7 @@ test('the AI assistant is off by default and never sends without consent', async
   await page.getByLabel('API key').fill('test-key')
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await page.getByRole('button', { name: 'Load models', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Models loaded')
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('status')).toContainText('Models loaded')
   await page.getByLabel('Model', { exact: true }).fill('test-model')
   await page.getByRole('button', { name: 'Save and select' }).click()
   await page.getByText('Your details for forms', { exact: true }).click()
