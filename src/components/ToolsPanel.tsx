@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, RotateCcw, RotateCw, Search, Wrench, X } from 'lucide-react'
 import { rgbOf, type CompressLevel, type DocState, type Metadata, type PageLabelStyle, type Permission, type SaveOptions, type StampPosition, type StampSpec } from '../engine/types'
 import { m } from '../i18n'
@@ -45,10 +45,12 @@ interface Props {
   actions: PanelActions
   open?: boolean
   onClose: () => void
+  initialSections?: SectionId[]
 }
 
 type SectionId = keyof typeof m.discovery.keywords
 const SearchContext = createContext('')
+const RouteContext = createContext<SectionId[]>([])
 function sectionMatches(id: SectionId, query: string) {
   const text = `${m.panel[id]} ${m.discovery.keywords[id]}`.toLocaleLowerCase()
   const words = text.split(/[^\p{L}\p{N}]+/u)
@@ -57,10 +59,11 @@ function sectionMatches(id: SectionId, query: string) {
 
 function Section({ id, title, count, open, onOpen, children }: { id: SectionId; title: string; count?: number | string; open?: boolean; onOpen?: () => void; children: ReactNode }) {
   const query = useContext(SearchContext)
-  const [expanded, setExpanded] = useState(!!open)
+  const route = useContext(RouteContext)
+  const [expanded, setExpanded] = useState(route.length ? route.includes(id) : !!open)
   const matches = sectionMatches(id, query)
   return (
-    <details className="section" hidden={!matches} open={query.trim() ? matches : expanded}
+    <details data-section={id} className="section" hidden={!matches} open={query.trim() ? matches : expanded}
       onToggle={e => {
         if (!query.trim()) setExpanded(e.currentTarget.open)
         if (e.currentTarget.open) onOpen?.()
@@ -255,7 +258,7 @@ const DEFAULT_RIGHT_WIDTH = 300
 const MIN_RIGHT_WIDTH = 220
 const MAX_RIGHT_WIDTH = 600
 
-export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions, open = true, onClose }: Props) {
+export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, onSaveOpts, actions, open = true, onClose, initialSections = [] }: Props) {
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('openquire:sidebar-right-width')
     const n = saved ? Number(saved) : DEFAULT_RIGHT_WIDTH
@@ -292,6 +295,10 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
     localStorage.setItem('openquire:sidebar-right-width', String(DEFAULT_RIGHT_WIDTH))
   }
 
+  const panelRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (open && initialSections.length) panelRef.current?.querySelector<HTMLElement>(`[data-section="${initialSections[0]}"] summary`)?.focus()
+  }, [])
   const [search, setSearch] = useState('')
   const hasResults = (Object.keys(m.discovery.keywords) as SectionId[]).some(id => sectionMatches(id, search))
   const [ranges, setRanges] = useState('')
@@ -302,7 +309,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
   const metaKeys = Object.entries(m.panel.meta) as [keyof Metadata, string][]
 
   return (
-    <aside
+    <aside ref={panelRef}
       className={`sidebar right ${open ? 'is-open' : 'is-closed'}`}
       style={{ width: `${width}px`, '--sidebar-right-width': `${width}px` } as React.CSSProperties}
       id="document-tools"
@@ -321,7 +328,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
         {search && <button className="tool-search-clear" onClick={() => setSearch('')}>{m.discovery.clear}</button>}
         {!hasResults && <p role="status">{m.discovery.empty}</p>}
       </div>
-      <SearchContext.Provider value={search}>
+      <RouteContext.Provider value={initialSections}><SearchContext.Provider value={search}>
       <div className="pane" style={{ gap: 0, padding: '4px 6px 60px' }}>
         <Section id="organize" title={m.panel.organize} open count={selectedCount ? m.panel.selected(selectedCount) : undefined}>
           <div className="row">
@@ -408,7 +415,7 @@ export default function ToolsPanel({ doc, selectedCount, labelPage, saveOpts, on
           ))}
         </Section>
       </div>
-      </SearchContext.Provider>
+      </SearchContext.Provider></RouteContext.Provider>
       <div
         className="sidebar-resize-handle"
         title="Drag to resize panel, double-click to reset"
