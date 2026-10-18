@@ -176,6 +176,10 @@ export interface AiAssistantsReport {
   claude_desktop: AssistantStatus
   chatgpt_desktop: AssistantStatus
   cursor: AssistantStatus
+  /** Optional for older native builds and browser mocks. */
+  codex_cli?: AssistantStatus
+  /** Optional for older native builds and browser mocks. */
+  claude_code?: AssistantStatus
 }
 
 export async function detectAiAssistants(): Promise<AiAssistantsReport> {
@@ -184,6 +188,8 @@ export async function detectAiAssistants(): Promise<AiAssistantsReport> {
       claude_desktop: { name: 'Claude Desktop', installed: false, linked: false },
       chatgpt_desktop: { name: 'ChatGPT Desktop', installed: false, linked: false },
       cursor: { name: 'Cursor', installed: false, linked: false },
+      codex_cli: { name: 'Codex CLI', installed: false, linked: false },
+      claude_code: { name: 'Claude Code', installed: false, linked: false },
     }
   }
   return invoke<AiAssistantsReport>('detect_ai_assistants')

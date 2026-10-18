@@ -1,3 +1,4 @@
+import type { DiscoveredConnection } from '../ai-discovery'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, Plus } from 'lucide-react'
 import { aiEndpoint, aiKeyRequired, connectionError, fetchAvailableModels, PROVIDERS, type AiProvider } from '../ai'
@@ -8,6 +9,7 @@ import { m } from '../i18n'
 
 type Draft = { provider: AiProvider; apiKey: string; baseUrl: string; model: string; revision: string }
 interface Props {
+  discoveredConnection?: DiscoveredConnection
   settings: Settings
   credentialsReady: boolean
   credentialStorageError: string
@@ -16,7 +18,7 @@ interface Props {
   onAssistants?: () => void
 }
 
-export default function AiConnections({ settings, credentialsReady, credentialStorageError, onChange, onPrivacy, onAssistants }: Props) {
+export default function AiConnections({ discoveredConnection, settings, credentialsReady, credentialStorageError, onChange, onPrivacy, onAssistants }: Props) {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [step, setStep] = useState<1 | 2>(1)
   const [models, setModels] = useState<string[]>([])
@@ -44,6 +46,15 @@ export default function AiConnections({ settings, credentialsReady, credentialSt
     return () => { request.current++; controller.current?.abort(); window.removeEventListener('storage', purge) }
   }, [settings.aiConnections, settings.aiKey, settings.aiModel, settings.aiBaseUrl, settings.aiProvider, settings.aiDisabled, credentialsReady])
   useEffect(() => { if (draft) heading.current?.focus() }, [!!draft, step])
+
+  const suggestionUsed = useRef(false)
+  useEffect(() => {
+    if (!discoveredConnection || suggestionUsed.current || !credentialsReady || settings.aiDisabled) return
+    suggestionUsed.current = true
+    returnFocus.current = 'ollama'
+    setDraft({ provider: 'ollama', apiKey: '', baseUrl: discoveredConnection.baseUrl, model: '', revision: privacyRevision() })
+    setModels(discoveredConnection.models); setStep(2)
+  }, [discoveredConnection, credentialsReady, settings.aiDisabled])
 
   const profiles = readProviderProfiles(settings.aiConnections)
   profiles[settings.aiProvider] = { apiKey: settings.aiKey, model: settings.aiModel, baseUrl: settings.aiBaseUrl }
@@ -96,6 +107,7 @@ export default function AiConnections({ settings, credentialsReady, credentialSt
     <p className="surface-description">Your choice of AI, when you need it.</p>
     {credentialStorageError && <p role="alert" className="error">{credentialStorageError}</p>}
     {settings.aiDisabled ? <div className="connection-empty"><p>AI features are hidden.</p><button onClick={onPrivacy}>Manage AI privacy</button></div> : <>
+      {onAssistants && !draft && <button className="discovery-entry" onClick={onAssistants}>Find connections<ArrowRight size={16} /></button>}
       <label className="connection-toggle"><span><strong>{m.settings.aiEnabled}</strong><small>You approve what is sent before a request.</small></span><input type="checkbox" className="toggle" aria-label={m.settings.aiEnabled} checked={settings.aiEnabled} onChange={e => onChange({ ...settings, aiEnabled: e.target.checked })} /></label>
       {notice && <p role="status" className="connection-notice">{notice}</p>}
       {!credentialsReady && <p role="status">Unlocking saved connections…</p>}
@@ -129,7 +141,6 @@ export default function AiConnections({ settings, credentialsReady, credentialSt
         </section>)}</div>
         {configured(settings.aiProvider) && <details className="connection-details"><summary>Selected connection details</summary><p>{PROVIDERS[settings.aiProvider].name}</p><p className="connection-endpoint">{settings.aiBaseUrl || PROVIDERS[settings.aiProvider].endpoint}</p><p className="hint">Saving a connection does not verify AI requests. Disconnecting removes it from OpenQuire; revoke keys in your provider account.</p><button disabled={!credentialsReady} onClick={() => { onChange({ ...forgetProvider(settings), aiEnabled: false }); setNotice('Provider disconnected. AI is off; other connections are kept.') }}>Disconnect this provider</button></details>}
         <details className="connection-details"><summary>{m.settings.aiProfile}</summary><p className="hint">{m.settings.aiProfileDesc}</p><textarea disabled={!credentialsReady} rows={4} aria-label={m.settings.aiProfile} value={credentialsReady ? settings.aiProfile : ''} onChange={e => onChange({ ...settings, aiProfile: e.target.value })} /></details>
-        <section className="external-assistants"><h3>External assistants</h3><p>Use OpenQuire’s PDF tools from a desktop assistant.</p>{onAssistants && <button onClick={onAssistants}>Desktop assistant setup</button>}</section>
       </>}
     </>}
   </div>

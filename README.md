@@ -37,6 +37,12 @@ Browser saves prepare downloads; the desktop app can save back to the source fil
 Annotations are standard PDF annotations that Acrobat and other
 viewers can display and reply to.
 
+**Find connections** in AI & connections opens an optional discovery wizard. Start
+a search to check the standard local model address and supported desktop app files.
+Results appear as checks finish; searches can be stopped and time out after five
+seconds. Local results open an unsaved setup draft. Manual setup is always available.
+Detection does not sign in, enable AI or give OpenQuire access to chat subscriptions.
+
 AI connections are managed in **Settings → AI & connections**. Choose a provider,
 enter its connection details, then choose a model and **Save and select**. You can
 configure providers while AI is off. Draft changes are discarded when cancelled.

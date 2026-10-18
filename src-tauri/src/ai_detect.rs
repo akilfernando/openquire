@@ -18,6 +18,92 @@ pub struct AiAssistantsReport {
     pub claude_desktop: AssistantStatus,
     pub chatgpt_desktop: AssistantStatus,
     pub cursor: AssistantStatus,
+    #[serde(default)]
+    pub codex_cli: AssistantStatus,
+    #[serde(default)]
+    pub claude_code: AssistantStatus,
+}
+
+fn command_file_names(command: &str) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        vec![
+            format!("{command}.exe"),
+            format!("{command}.cmd"),
+            format!("{command}.bat"),
+            command.to_string(),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![command.to_string()]
+    }
+}
+
+fn command_candidates(
+    command: &str,
+    path: Option<&std::ffi::OsStr>,
+    home: Option<&Path>,
+    npm_prefix: Option<&Path>,
+    _appdata: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = path
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect();
+    if let Some(home) = home {
+        dirs.push(home.join(".local").join("bin"));
+        #[cfg(not(windows))]
+        {
+            dirs.push(home.join(".npm-global").join("bin"));
+            dirs.push(home.join(".npm").join("bin"));
+        }
+    }
+    if let Some(prefix) = npm_prefix {
+        dirs.push(prefix.join("bin"));
+        #[cfg(windows)]
+        dirs.push(prefix.to_path_buf());
+    }
+    #[cfg(windows)]
+    if let Some(appdata) = _appdata {
+        dirs.push(appdata.join("npm"));
+    }
+
+    dirs.into_iter()
+        .flat_map(|dir| {
+            command_file_names(command)
+                .into_iter()
+                .map(move |name| dir.join(name))
+        })
+        .collect()
+}
+
+fn find_command(command: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH");
+    let home = home_dir();
+    let prefix = std::env::var_os("NPM_CONFIG_PREFIX").map(PathBuf::from);
+    let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
+    command_candidates(
+        command,
+        path.as_deref(),
+        home.as_deref(),
+        prefix.as_deref(),
+        appdata.as_deref(),
+    )
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+}
+
+fn cli_status(name: &str, command: &str) -> AssistantStatus {
+    let found = find_command(command);
+    AssistantStatus {
+        name: name.into(),
+        installed: found.is_some(),
+        linked: false,
+        config_path: None,
+        details: found.map(|p| format!("Command-line tool detected at {}.", p.display())),
+    }
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -212,6 +298,8 @@ pub fn detect_all() -> AiAssistantsReport {
                 None
             },
         },
+        codex_cli: cli_status("Codex CLI", "codex"),
+        claude_code: cli_status("Claude Code", "claude"),
     }
 }
 
@@ -307,4 +395,99 @@ pub fn unlink_claude() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::command_candidates;
+    use std::ffi::OsStr;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    struct TestDir(std::path::PathBuf);
+    impl TestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "openquire-ai-detect-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn has_file(candidates: Vec<std::path::PathBuf>) -> bool {
+        candidates.into_iter().any(|candidate| candidate.is_file())
+    }
+
+    #[test]
+    fn cli_discovery_checks_path_and_user_install_locations_for_files_only() {
+        let root = TestDir::new();
+        let path_dir = root.0.join("path");
+        let home = root.0.join("home");
+        let prefix = root.0.join("npm-prefix");
+        fs::create_dir_all(&path_dir).unwrap();
+        fs::create_dir_all(home.join(".local").join("bin")).unwrap();
+        fs::create_dir_all(prefix.join("bin")).unwrap();
+
+        let path_candidates = command_candidates(
+            "codex",
+            Some(OsStr::new(path_dir.to_str().unwrap())),
+            Some(&home),
+            Some(Path::new("unused")),
+            None,
+        );
+        let home_candidates = command_candidates("claude", None, Some(&home), None, None);
+        let prefix_candidates = command_candidates("claude", None, None, Some(&prefix), None);
+        assert!(!has_file(path_candidates.clone()));
+        assert!(!has_file(home_candidates.clone()));
+        assert!(!has_file(prefix_candidates.clone()));
+
+        #[cfg(windows)]
+        let codex = path_dir.join("codex.exe");
+        #[cfg(not(windows))]
+        let codex = path_dir.join("codex");
+        fs::write(&codex, "fake executable marker").unwrap();
+        assert!(has_file(path_candidates));
+
+        #[cfg(windows)]
+        let claude = home.join(".local").join("bin").join("claude.cmd");
+        #[cfg(not(windows))]
+        let claude = home.join(".local").join("bin").join("claude");
+        fs::write(claude, "fake command marker").unwrap();
+        assert!(has_file(home_candidates));
+
+        #[cfg(windows)]
+        let npm_claude = prefix.join("bin").join("claude.cmd");
+        #[cfg(not(windows))]
+        let npm_claude = prefix.join("bin").join("claude");
+        fs::write(npm_claude, "fake npm command marker").unwrap();
+        assert!(has_file(prefix_candidates));
+
+        // A matching directory must not count as an installed command.
+        let directory_only = root.0.join("directory-only");
+        fs::create_dir_all(&directory_only).unwrap();
+        #[cfg(windows)]
+        let name = "codex.exe";
+        #[cfg(not(windows))]
+        let name = "codex";
+        fs::create_dir(directory_only.join(name)).unwrap();
+        let directory_candidates = command_candidates(
+            "codex",
+            Some(OsStr::new(directory_only.to_str().unwrap())),
+            None,
+            None,
+            None,
+        );
+        assert!(!has_file(directory_candidates));
+    }
 }
