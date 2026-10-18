@@ -367,7 +367,7 @@ command files versus directories without executing tools. Exact local and GitHub
 evidence belongs in issue #44 and the focused PR. Live-provider inference and
 human native/mobile acceptance remain NOT RUN. No release is published.
 
-### Desktop updates — release preparation in progress
+### Desktop updates — test release published
 
 The default update preference is **Notify me** for new installations and existing
 installations without a saved preference. Background checks should announce an
@@ -387,9 +387,38 @@ Local validation: production build, 27 updater/preference/settings-storage/signa
 tests, 30 native-bridge browser checks across Chromium, Firefox and WebKit, 11 Windows native tests,
 and the installed Node 1.0.3 package consumer passed. Real signed-file verification
 rejects byte tampering and version substitution. Full candidate CI and signed
-installer builds remain pending; exact evidence will be recorded in issue #44.
+installer builds passed, followed by successful post-merge CI (39147697447) and
+desktop builds (39147697446). Exact evidence is recorded in issue #44.
 Human installed-app update/restart acceptance and live-provider inference remain
-NOT RUN. The intended desktop test release is 0.2.0 (tag desktop-v0.2.0-rc.1);
+NOT RUN. The published desktop test release is 0.2.0 (tag desktop-v0.2.0-rc.1);
 future feed promotions must use a strictly greater app version, including the
-subsequent stable release. No release has been published at this checkpoint.
+subsequent stable release. The release includes the canonical Node 1.0.3 tarball; npm publication remains separate.
 See [desktop update delivery](desktop-updates.md) for signing and promotion.
+
+
+### Desktop assistant connection buttons — active implementation
+
+Discovery is followed by an explicit **Connect Claude Desktop** action. The user
+chooses a folder for PDF tools; cancelling leaves external configuration alone.
+Setup preserves unrelated settings, refuses malformed configuration, keeps a
+backup and reports configuration success as **Setup saved**, with restart/check
+instructions. It does not claim a successful MCP handshake or AI inference.
+Node.js 20+ with npm is required; the configuration uses the released canonical
+Node 1.0.3 package rather than the older npm latest or experimental Rust CLI.
+The copyable command remains under Manual setup. Discovery alone stays read-only.
+
+Next, implement Codex PDF-tool setup through its supported MCP interface, with
+matching folder scope, error handling and verification. This is separate from
+bringing account-backed AI into OpenQuire. OpenAI now documents an official
+[ChatGPT plan usage flow for open-source/local apps](https://developers.openai.com/siwc/token-sharing-open-source).
+Evaluate its preview limits, explicit OAuth consent, secure token storage,
+refresh/disconnect and inference contracts in a separate focused package before
+promising availability. Do not import Codex or Claude login credentials. Other
+providers retain equally accessible manual API/local-model setup.
+
+Local validation: production build, five discovery unit tests, 14 Windows native
+tests, and a real MCP initialize/tools-list smoke test against the released 1.0.3
+package (11 tools) passed. All 45 discovery/connection checks passed across
+Chromium, Firefox and WebKit. Candidate delivery evidence belongs in issue #44.
+Installed Claude acceptance, Codex button setup and account-backed inference are
+not completed by this checkpoint.
