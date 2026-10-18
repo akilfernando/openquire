@@ -91,7 +91,7 @@ The same engine runs without a browser. `cli/` builds the `openquire` package: a
 `compress`, `pdfa`, `tag`, `export`) and a Node library exporting the `Engine`. Build it with
 `npm run build:cli` and run `node cli/dist/openquire.mjs --help`. See [cli/README.md](cli/README.md).
 
-## Claude Desktop Integration (Local MCP)
+## Desktop assistant connections (Local MCP)
 
 OpenQuire includes a local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Claude Desktop** and other MCP clients. File operations run locally within configured directories. Requested text and tool results are returned to the client; that client's model, network and privacy settings determine where those results go.
 
@@ -102,7 +102,18 @@ OpenQuire includes a local [Model Context Protocol (MCP)](https://modelcontextpr
 * **Comparison & Diffing**: Structured AST and raster delta reports between revisions.
 * **Certificate signatures**: Signs with local PKCS#12 certificates after explicit confirmation.
 
-### 1-Command Setup
+### Connect from OpenQuire Desktop
+
+In **Settings → AI & connections → Find connections**, search for installed apps,
+then choose **Connect Claude Desktop** or **Connect Codex**. Select the folder
+OpenQuire's PDF tools may access. Restart the assistant and check for OpenQuire
+in its tools. Node.js 20 or later with npm is required; the assistant downloads
+the released canonical Node package on first use. Existing unrelated settings
+are preserved and backed up. Manual commands remain available under **Manual setup**.
+This connects PDF tools to the assistant; it does not enable account-backed AI
+inside OpenQuire. Client policies and permissions still apply.
+
+### Command-line setup for Claude Desktop
 
 In your terminal or Windows PowerShell:
 ```sh

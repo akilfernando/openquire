@@ -335,12 +335,159 @@ pub fn detect_all() -> AiAssistantsReport {
                 None
             },
         },
-        codex_cli: cli_status("Codex CLI", "codex"),
+        codex_cli: codex_status(),
         claude_code: cli_status("Claude Code", "claude"),
     }
 }
 
 const MCP_PACKAGE: &str = "https://github.com/akilfernando/openquire/releases/download/desktop-v0.2.0-rc.1/openquire-1.0.3.tgz";
+
+fn codex_config_path(custom_home: Option<&Path>, home: Option<&Path>) -> Result<PathBuf, String> {
+    let root = match custom_home {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        Some(_) => return Err("CODEX_HOME must be an absolute directory.".into()),
+        None => home
+            .ok_or("Cannot determine the Codex configuration directory.")?
+            .join(".codex"),
+    };
+    if !root.is_absolute() {
+        return Err("Codex configuration directory must be absolute.".into());
+    }
+    Ok(root.join("config.toml"))
+}
+
+fn current_codex_config_path() -> Result<PathBuf, String> {
+    let custom = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    codex_config_path(custom.as_deref(), home_dir().as_deref())
+}
+
+fn codex_status() -> AssistantStatus {
+    let mut status = cli_status("Codex CLI", "codex");
+    match current_codex_config_path() {
+        Ok(path) => {
+            status.config_path = Some(path.to_string_lossy().into_owned());
+            if reject_symlinks(&path).is_ok() {
+                status.linked = fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|s| s.parse::<toml_edit::DocumentMut>().ok())
+                    .is_some_and(|doc| {
+                        doc.get("mcp_servers")
+                            .and_then(|s| s.get("openquire"))
+                            .is_some_and(|s| {
+                                s.is_table_like()
+                                    && s.get("url").is_none()
+                                    && s.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true)
+                                    && s.get("command").and_then(|v| v.as_str()).is_some()
+                            })
+                    });
+                if status.linked {
+                    status.details = Some("OpenQuire MCP setup saved. Restart Codex and check its tools to verify the connection.".into());
+                }
+            }
+        }
+        Err(error) => status.details = Some(error),
+    }
+    status
+}
+
+/// Saves a folder-scoped local MCP entry; it does not start or authenticate Codex.
+pub fn link_codex(allowed_dir: Option<String>) -> Result<String, String> {
+    let folder = allowed_folder(allowed_dir)?;
+    if find_command("codex").is_none() {
+        return Err("Codex CLI was not found. Install Codex and restart OpenQuire.".into());
+    }
+    let (node, npx) = runtime_paths()?;
+    let target = current_codex_config_path()?;
+    let _lock = CONFIG_LOCK
+        .lock()
+        .map_err(|_| "Configuration update interrupted; restart OpenQuire.")?;
+    link_codex_at(&target, &node, &npx, &folder)?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+fn link_codex_at(target: &Path, node: &Path, npx: &Path, folder: &Path) -> Result<(), String> {
+    use toml_edit::{value, Array, DocumentMut, Item, Table};
+    reject_symlinks(target)?;
+    let original = read_config(target)?;
+    let text = original
+        .as_deref()
+        .map(std::str::from_utf8)
+        .transpose()
+        .map_err(|_| "Codex configuration must be UTF-8; unchanged.")?
+        .unwrap_or("");
+    let mut doc = text
+        .parse::<DocumentMut>()
+        .map_err(|_| "Codex configuration contains invalid TOML; unchanged.")?;
+    if !doc.contains_key("mcp_servers") {
+        doc["mcp_servers"] = Item::Table(Table::new());
+    }
+    let servers = doc["mcp_servers"]
+        .as_table_like_mut()
+        .ok_or("Codex mcp_servers must be a table; unchanged.")?;
+    if !servers.contains_key("openquire") {
+        servers.insert("openquire", Item::Table(Table::new()));
+    }
+    let entry = servers
+        .get_mut("openquire")
+        .and_then(Item::as_table_like_mut)
+        .ok_or("Codex openquire entry must be a table; unchanged.")?;
+    if entry.contains_key("url") {
+        return Err("Codex already has a remote OpenQuire server. Remove or rename it explicitly before connecting locally.".into());
+    }
+    for (key, valid) in [
+        (
+            "command",
+            entry.get("command").is_none_or(|v| v.as_str().is_some()),
+        ),
+        (
+            "args",
+            entry.get("args").is_none_or(|v| {
+                v.as_array()
+                    .is_some_and(|a| a.iter().all(|v| v.as_str().is_some()))
+            }),
+        ),
+        (
+            "enabled",
+            entry.get("enabled").is_none_or(|v| v.as_bool().is_some()),
+        ),
+        (
+            "startup_timeout_sec",
+            entry
+                .get("startup_timeout_sec")
+                .is_none_or(|v| v.as_integer().is_some() || v.as_float().is_some()),
+        ),
+    ] {
+        if !valid {
+            return Err(format!(
+                "Codex OpenQuire {key} has an invalid type; unchanged."
+            ));
+        }
+    }
+    entry.insert(
+        "command",
+        value(node.to_str().ok_or("Node.js path must be UTF-8")?),
+    );
+    let mut args = Array::new();
+    for arg in [
+        npx.to_str().ok_or("npm path must be UTF-8")?,
+        "-y",
+        MCP_PACKAGE,
+        "mcp",
+        "--allow-dir",
+        folder.to_str().ok_or("Folder must be UTF-8")?,
+    ] {
+        args.push(arg);
+    }
+    entry.insert("args", value(args));
+    entry.insert("enabled", value(true));
+    if !entry.contains_key("startup_timeout_sec") {
+        entry.insert("startup_timeout_sec", value(120));
+    }
+    fs::create_dir_all(target.parent().ok_or("Invalid Codex configuration path")?)
+        .map_err(|e| e.to_string())?;
+    save_config(target, doc.to_string().as_bytes(), original.as_deref())
+}
+
 static NEXT_CONFIG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -458,7 +605,7 @@ fn reject_symlinks(path: &Path) -> Result<(), String> {
     for ancestor in path.ancestors() {
         match fs::symlink_metadata(ancestor) {
             Ok(meta) if meta.file_type().is_symlink() => {
-                return Err("Claude configuration paths must not contain symbolic links.".into())
+                return Err("Assistant configuration paths must not contain symbolic links.".into())
             }
             Ok(meta) => {
                 #[cfg(windows)]
@@ -466,7 +613,7 @@ fn reject_symlinks(path: &Path) -> Result<(), String> {
                     use std::os::windows::fs::MetadataExt;
                     if meta.file_attributes() & 0x400 != 0 {
                         return Err(
-                            "Claude configuration paths must not contain reparse points.".into(),
+                            "Assistant configuration paths must not contain reparse points.".into(),
                         );
                     }
                 }
@@ -492,7 +639,10 @@ fn save_config(path: &Path, bytes: &[u8], original: Option<&[u8]>) -> Result<(),
     use std::io::Write;
     if let Some(original) = original {
         let backup = path.with_file_name(format!(
-            "claude_desktop_config.json.openquire-{}-{}.bak",
+            "{}.openquire-{}-{}.bak",
+            path.file_name()
+                .ok_or("Missing configuration filename")?
+                .to_string_lossy(),
             std::process::id(),
             NEXT_CONFIG.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
@@ -505,7 +655,7 @@ fn save_config(path: &Path, bytes: &[u8], original: Option<&[u8]>) -> Result<(),
         }
         let mut backup = options
             .open(backup)
-            .map_err(|e| format!("Cannot back up Claude configuration: {e}"))?;
+            .map_err(|e| format!("Cannot back up assistant configuration: {e}"))?;
         backup
             .write_all(original)
             .and_then(|_| backup.sync_all())
@@ -514,12 +664,12 @@ fn save_config(path: &Path, bytes: &[u8], original: Option<&[u8]>) -> Result<(),
     reject_symlinks(path)?;
     if read_config(path)?.as_deref() != original {
         return Err(
-            "Claude configuration changed during connection. Retry after other editors finish."
+            "Assistant configuration changed during connection. Retry after other editors finish."
                 .into(),
         );
     }
     crate::file_save::write_atomic(path, bytes)
-        .map_err(|e| format!("Cannot save Claude configuration: {e}"))
+        .map_err(|e| format!("Cannot save assistant configuration: {e}"))
 }
 
 /// Links Claude Desktop to OpenQuire by updating claude_desktop_config.json
@@ -651,6 +801,7 @@ pub fn unlink_claude() -> Result<(), String> {
 mod discovery_tests {
     use super::command_candidates;
     use super::{allowed_folder, link_at, read_config, save_config, supported_node, MCP_PACKAGE};
+    use super::{codex_config_path, link_codex_at};
     use std::ffi::OsStr;
     use std::fs;
     use std::path::Path;
@@ -676,8 +827,147 @@ mod discovery_tests {
         }
     }
 
+    /// Produces isolated real-runtime configurations for the manual CLI/MCP contract smoke.
+    /// The caller supplies a fresh directory; existing paths are never reused.
+    #[test]
+    #[ignore = "requires installed Node/npm and an explicit fresh smoke directory"]
+    fn export_connection_smoke_configs() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("OPENQUIRE_CONNECTION_SMOKE_DIR")
+                .expect("fresh smoke directory required"),
+        );
+        assert!(root.is_absolute());
+        fs::create_dir(&root).unwrap();
+        let folder = root.join("PDFs & notes");
+        fs::create_dir(&folder).unwrap();
+        let (node, npx) = super::runtime_paths().unwrap();
+        super::link_at(&root.join("claude.json"), &node, &npx, &folder).unwrap();
+        super::link_codex_at(&root.join("codex/config.toml"), &node, &npx, &folder).unwrap();
+    }
+
     fn has_file(candidates: Vec<std::path::PathBuf>) -> bool {
         candidates.into_iter().any(|candidate| candidate.is_file())
+    }
+
+    #[test]
+    fn codex_home_resolution_is_explicit_and_absolute() {
+        let root = TestDir::new();
+        assert_eq!(
+            codex_config_path(None, Some(&root.0)).unwrap(),
+            root.0.join(".codex/config.toml")
+        );
+        let custom = root.0.join("custom codex");
+        assert_eq!(
+            codex_config_path(Some(&custom), None).unwrap(),
+            custom.join("config.toml")
+        );
+        assert!(codex_config_path(Some(Path::new("relative")), Some(&root.0)).is_err());
+        assert!(codex_config_path(None, None).is_err());
+    }
+
+    #[test]
+    fn codex_rejects_invalid_toml_types_and_remote_conflicts_without_writes() {
+        let root = TestDir::new();
+        let target = root.0.join("config.toml");
+        for bytes in [
+            b"invalid [".as_slice(),
+            b"\xff",
+            b"mcp_servers = 2",
+            b"[mcp_servers]\nopenquire = 3",
+            b"[mcp_servers.openquire]\nurl = 'https://example.com/mcp'",
+            b"[mcp_servers.openquire]\ncommand = 3",
+            b"[mcp_servers.openquire]\nargs = [3]",
+            b"[mcp_servers.openquire]\nenabled = 'false'",
+            b"[mcp_servers.openquire]\nstartup_timeout_sec = '120'",
+        ] {
+            fs::write(&target, bytes).unwrap();
+            assert!(
+                link_codex_at(&target, Path::new("node"), Path::new("npx-cli.js"), &root.0)
+                    .is_err()
+            );
+            assert_eq!(fs::read(&target).unwrap(), bytes);
+        }
+        assert_eq!(fs::read_dir(&root.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn codex_preserves_comments_policies_other_servers_and_literal_arguments() {
+        let root = TestDir::new();
+        let target = root.0.join("config.toml");
+        let original = b"# personal settings\nmodel = 'example'\napproval_policy = 'on-request'\n[mcp_servers.other]\ncommand = 'keep' # retain this\n[mcp_servers.openquire]\nenabled = false\nstartup_timeout_sec = 45\nenabled_tools = ['read_pdf']\n[ mcp_servers.openquire.env ]\nCUSTOM = 'preserve'\n";
+        fs::write(&target, original).unwrap();
+        let folder = root.0.join("space & % ! ' folder");
+        let node = root.0.join("node.exe");
+        let npx = root.0.join("npm path/npx-cli.js");
+        link_codex_at(&target, &node, &npx, &folder).unwrap();
+        let text = fs::read_to_string(&target).unwrap();
+        assert!(text.contains("# personal settings"));
+        assert!(text.contains("# retain this"));
+        let doc = text.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(doc["approval_policy"].as_str(), Some("on-request"));
+        assert_eq!(
+            doc["mcp_servers"]["other"]["command"].as_str(),
+            Some("keep")
+        );
+        let entry = &doc["mcp_servers"]["openquire"];
+        assert_eq!(entry["command"].as_str(), node.to_str());
+        assert_eq!(entry["enabled"].as_bool(), Some(true));
+        assert_eq!(entry["startup_timeout_sec"].as_integer(), Some(45));
+        assert_eq!(entry["enabled_tools"][0].as_str(), Some("read_pdf"));
+        assert_eq!(entry["env"]["CUSTOM"].as_str(), Some("preserve"));
+        let args = entry["args"].as_array().unwrap();
+        assert_eq!(args.len(), 6);
+        assert_eq!(args.get(0).unwrap().as_str(), npx.to_str());
+        assert_eq!(args.get(2).unwrap().as_str(), Some(MCP_PACKAGE));
+        assert_eq!(args.get(5).unwrap().as_str(), folder.to_str());
+        let backup = fs::read_dir(&root.0)
+            .unwrap()
+            .flatten()
+            .find(|e| e.path().extension().is_some_and(|s| s == "bak"))
+            .unwrap();
+        assert!(backup
+            .file_name()
+            .to_string_lossy()
+            .starts_with("config.toml.openquire-"));
+        assert_eq!(fs::read(backup.path()).unwrap(), original);
+    }
+
+    #[test]
+    fn codex_inline_tables_preserve_other_entries_and_allow_new_local_setup() {
+        let root = TestDir::new();
+        let target = root.0.join("config.toml");
+        for original in [
+            "mcp_servers = { other = { command = 'keep' } } # keep inline comment\n",
+            "mcp_servers = { other = { command = 'keep' }, openquire = { command = 'old', enabled = false, enabled_tools = ['read_pdf'] } } # keep inline comment\n",
+            "[mcp_servers]\nother = { command = 'keep' }\nopenquire = { command = 'old', enabled = false, enabled_tools = ['read_pdf'] }\n",
+        ] {
+            fs::write(&target, original).unwrap();
+            link_codex_at(&target, &root.0.join("node.exe"), &root.0.join("npx-cli.js"), &root.0).unwrap();
+            let text = fs::read_to_string(&target).unwrap();
+            let doc = text.parse::<toml_edit::DocumentMut>().unwrap();
+            assert_eq!(doc["mcp_servers"]["other"]["command"].as_str(), Some("keep"));
+            assert_eq!(doc["mcp_servers"]["openquire"]["enabled"].as_bool(), Some(true));
+            assert_eq!(doc["mcp_servers"]["openquire"]["args"].as_array().unwrap().get(2).unwrap().as_str(), Some(MCP_PACKAGE));
+            if original.contains("enabled_tools") {
+                assert_eq!(doc["mcp_servers"]["openquire"]["enabled_tools"][0].as_str(), Some("read_pdf"));
+            }
+            if original.contains("# keep inline comment") { assert!(text.contains("# keep inline comment")); }
+        }
+    }
+
+    #[test]
+    fn codex_new_config_uses_default_startup_timeout() {
+        let root = TestDir::new();
+        let target = root.0.join("nested/config.toml");
+        link_codex_at(&target, Path::new("node"), Path::new("npx-cli.js"), &root.0).unwrap();
+        let doc = fs::read_to_string(&target)
+            .unwrap()
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        assert_eq!(
+            doc["mcp_servers"]["openquire"]["startup_timeout_sec"].as_integer(),
+            Some(120)
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Check, Circle, LoaderCircle, Search, Sparkles } from 'lucide-react'
 import Modal from './Modal'
-import ClaudeConnection from './ClaudeConnection'
+import AssistantConnection from './AssistantConnection'
 import { isDesktop, detectAiAssistants, type AiAssistantsReport } from '../native'
 import { bounded, discoverLocalModels, type DiscoveredConnection } from '../ai-discovery'
 import { privacyRevision, PRIVACY_REVISION_KEY } from '../privacy'
@@ -83,7 +83,7 @@ export default function AssistantSetupModal({ disabled, onConfigure, onClose }: 
       </section>}
       {found.length > 0 && <section className="discovery-apps" aria-label="Desktop findings"><h4>Desktop assistants</h4><p className="hint">These apps work separately from OpenQuire’s AI assistant.</p>{found.map(([id, app]) => <details className="discovery-result" key={id}>
         <summary><span>{app.name}</span><small>{app.linked ? 'Configuration found' : 'App files found'}</small></summary>
-        {id === 'claude_desktop' ? <ClaudeConnection linked={app.linked} disabled={disabled} onBusy={setConnecting} /> : <p>{app.linked ? 'An OpenQuire configuration entry exists; its connection has not been tested.' : 'In-app setup is not available for this assistant yet. You can still set up an AI provider below.'}</p>}
+        {id === 'claude_desktop' || id === 'codex_cli' ? <AssistantConnection client={id === 'claude_desktop' ? 'claude' : 'codex'} linked={app.linked} disabled={disabled || connecting} onBusy={setConnecting} /> : <p>{app.linked ? 'An OpenQuire configuration entry exists; its connection has not been tested.' : 'In-app setup is not available for this assistant yet. You can still set up an AI provider below.'}</p>}
         <p className="hint">Discovery does not sign in or use this app’s subscription.</p>
       </details>)}</section>}
       {started && !scanning && !connection && !found.length && <p className="discovery-empty">No connections found here. Set up a provider to get started.</p>}

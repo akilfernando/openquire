@@ -44,10 +44,10 @@ async function mockDesktopDetection(page: Page, hold = false, claude: ClaudeMock
           if (command === 'plugin:event|unlisten' || command === 'take_opened_files') return null
           if (command === 'native_tools') return { libreoffice: null, tesseract: null, tesseract_langs: [] }
           if (command === 'plugin:dialog|open') { state.pickerCalls++; return state.folder }
-          if (command === 'link_claude_desktop') {
+          if (command === 'link_claude_desktop' || command === 'link_codex') {
             state.linkCalls++
             if (state.holdLink) await new Promise<void>(resolve => { state.linkRelease = resolve })
-            if (state.failLink) throw new Error('Injected Claude configuration write failure')
+            if (state.failLink) throw new Error('Injected assistant configuration write failure')
             return 'Setup saved'
           }
           if (command === 'detect_ai_assistants') {
@@ -80,6 +80,18 @@ async function openClaudeConnection(page: Page, claude: ClaudeMockOptions = {}) 
   return { dialog, claudeItem }
 }
 
+async function openCodexConnection(page: Page, codex: ClaudeMockOptions = {}) {
+  await mockDesktopDetection(page, false, codex)
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  const dialog = await openDiscovery(page)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  const findings = dialog.getByRole('region', { name: 'Desktop findings' })
+  const codexItem = findings.locator('details').filter({ has: page.getByText('Codex CLI', { exact: true }) })
+  await expect(codexItem).toBeVisible()
+  await codexItem.locator(':scope > summary').click()
+  return { dialog, codexItem }
+}
+
 test('discovery waits for explicit consent, then shows local and desktop findings as they arrive', async ({ page }) => {
   await mockDesktopDetection(page, true)
   let catalogueCalls = 0
@@ -101,13 +113,14 @@ test('discovery waits for explicit consent, then shows local and desktop finding
   await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.release())
   const findings = dialog.getByRole('region', { name: 'Desktop findings' })
   await expect(findings).toBeVisible()
-  for (const name of ['Codex CLI', 'Claude Code']) {
+  for (const name of ['Claude Code']) {
     const item = findings.locator('details').filter({ has: page.getByText(name, { exact: true }) })
     await item.locator('summary').click()
     await expect(item).not.toContainText(/configuration found|connected|linked/i)
     await expect(item.getByRole('button')).toHaveCount(0)
   }
   expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)).not.toContain('link_claude_desktop')
+  expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)).not.toContain('link_codex')
   expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)).not.toContain('plugin:dialog|open')
 })
 
@@ -268,7 +281,7 @@ test('canceling Claude folder selection writes nothing and leaves setup retry av
 test('Claude native write errors stay visible and allow a retry', async ({ page }) => {
   const { claudeItem } = await openClaudeConnection(page, { failLink: true })
   await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
-  await expect(claudeItem.getByRole('alert')).toHaveText('Injected Claude configuration write failure')
+  await expect(claudeItem.getByRole('alert')).toHaveText('Injected assistant configuration write failure')
   await expect(claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true })).toBeEnabled()
   await claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(2)
@@ -290,9 +303,78 @@ test('Claude setup disables search, provider setup, and closing while native lin
   await expect(claudeItem.getByRole('status')).toContainText('Setup saved. Restart Claude Desktop')
 })
 
+test('Codex setup is opt-in and exposes its pinned manual command only on demand', async ({ page }) => {
+  await mockDesktopDetection(page)
+  await page.route(CATALOGUE, route => route.fulfill({ json: { data: [] } }))
+  const dialog = await openDiscovery(page)
+  await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
+  const calls = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.calls)
+  expect(calls).not.toContain('plugin:dialog|open')
+  expect(calls).not.toContain('link_codex')
+  const findings = dialog.getByRole('region', { name: 'Desktop findings' })
+  const item = findings.locator('details').filter({ has: page.getByText('Codex CLI', { exact: true }) })
+  await item.locator(':scope > summary').click()
+  await expect(item.getByRole('button', { name: 'Connect Codex', exact: true })).toBeVisible()
+  const manual = item.locator('details')
+  const command = manual.locator('code')
+  await expect(command).toBeHidden()
+  await manual.locator(':scope > summary').click()
+  await expect(command).toContainText('codex mcp add openquire -- npx -y')
+  await expect(command).toContainText('<absolute path to your PDF folder>')
+  await expect(command).toContainText('https://github.com/akilfernando/openquire/releases/download/desktop-v0.2.0-rc.1/openquire-1.0.3.tgz')
+})
+
+test('Codex folder cancellation writes nothing and leaves the setup button available to retry', async ({ page }) => {
+  const { codexItem } = await openCodexConnection(page, { folder: null })
+  await codexItem.getByRole('button', { name: 'Connect Codex', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.pickerCalls)).toBe(1)
+  await expect(codexItem.getByRole('button', { name: 'Connect Codex', exact: true })).toBeEnabled()
+  expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(0)
+  await codexItem.getByRole('button', { name: 'Connect Codex', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.pickerCalls)).toBe(2)
+  expect(await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(0)
+})
+
+test('Codex native write errors remain visible and can be retried', async ({ page }) => {
+  const { codexItem } = await openCodexConnection(page, { failLink: true })
+  await codexItem.getByRole('button', { name: 'Connect Codex', exact: true }).click()
+  await expect(codexItem.getByRole('alert')).toHaveText('Injected assistant configuration write failure')
+  await expect(codexItem.getByRole('button', { name: 'Connect Codex', exact: true })).toBeEnabled()
+  await codexItem.getByRole('button', { name: 'Connect Codex', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(2)
+  await expect(codexItem.getByRole('alert')).toBeVisible()
+})
+
+test('Connect Codex picks a PDF folder, saves its exact path, and asks for restart', async ({ page }) => {
+  const chosen = 'C:\\Users\\Akil\\Documents\\Research PDFs'
+  const { codexItem } = await openCodexConnection(page, { folder: chosen })
+  await codexItem.getByRole('button', { name: 'Connect Codex', exact: true }).click()
+  await expect(codexItem.getByRole('status')).toContainText('Setup saved. Restart Codex')
+  const invoked = await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.invoked)
+  const picker = invoked.find((call: any) => call.command === 'plugin:dialog|open')
+  const link = invoked.find((call: any) => call.command === 'link_codex')
+  expect(picker?.args).toMatchObject({ options: { directory: true, multiple: false, title: 'Choose a folder Codex can use for PDFs' } })
+  expect(link?.args).toEqual({ allowedDir: chosen })
+  await expect(codexItem.getByText(/connected/i)).toHaveCount(0)
+})
+
+test('a pending Codex link disables Claude setup, search, and provider setup', async ({ page }) => {
+  const { dialog, codexItem } = await openCodexConnection(page, { holdLink: true })
+  const claudeItem = dialog.getByRole('region', { name: 'Desktop findings' }).locator('details').filter({ has: page.getByText('Claude Desktop', { exact: true }) })
+  await claudeItem.locator(':scope > summary').click()
+  await codexItem.getByRole('button', { name: 'Connect Codex', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkCalls)).toBe(1)
+  await expect(claudeItem.getByRole('button', { name: 'Connect Claude Desktop', exact: true })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Search again', exact: true })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Set up a provider', exact: true })).toBeDisabled()
+  await page.evaluate(() => (window as any).__aiDiscoveryNativeMock.linkRelease())
+  await expect(codexItem.getByRole('status')).toContainText('Setup saved. Restart Codex')
+})
+
 for (const theme of ['light', 'dark'] as const) {
   test(`connection discovery stays accessible at mobile width in ${theme} theme with reduced motion`, async ({ page }, info) => {
     await page.addInitScript(theme => localStorage.setItem('openquire.settings', JSON.stringify({ theme })), theme)
+    if (theme === 'light') await mockDesktopDetection(page)
     await page.route(CATALOGUE, () => new Promise(() => {}))
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
@@ -301,10 +383,19 @@ for (const theme of ['light', 'dark'] as const) {
     await dialog.getByRole('button', { name: 'Find connections', exact: true }).click()
     await expect(dialog.locator('.discovery-orbit span').first()).toHaveCSS('animation-name', 'none')
     await expect(dialog.locator('.discovery-spinner').first()).toHaveCSS('animation-name', 'none')
+    if (theme === 'light') {
+      const findings = dialog.getByRole('region', { name: 'Desktop findings' })
+      await expect(findings).toBeVisible()
+      for (const name of ['Claude Desktop', 'Codex CLI']) {
+        const item = findings.locator('details').filter({ has: page.getByText(name, { exact: true }) })
+        await item.locator(':scope > summary').click()
+        const manual = item.locator('details')
+        await manual.locator(':scope > summary').click()
+      }
+    }
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     const axe = await new AxeBuilder({ page }).include('.discovery-modal').withTags(['wcag2a', 'wcag2aa']).analyze()
     expect(axe.violations).toEqual([])
     await page.screenshot({ path: info.outputPath('discovery.png') })
-    await dialog.getByRole('button', { name: 'Stop search' }).click()
   })
 }

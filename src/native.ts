@@ -195,9 +195,9 @@ export async function detectAiAssistants(): Promise<AiAssistantsReport> {
   return invoke<AiAssistantsReport>('detect_ai_assistants')
 }
 
-export async function pickAssistantFolder(): Promise<string | null> {
+export async function pickAssistantFolder(client: string): Promise<string | null> {
   if (!isDesktop) throw new Error('Connecting desktop apps requires OpenQuire desktop.')
-  const picked = await open({ directory: true, multiple: false, title: 'Choose a folder Claude can use for PDFs' })
+  const picked = await open({ directory: true, multiple: false, title: `Choose a folder ${client} can use for PDFs` })
   return typeof picked === 'string' ? picked : null
 }
 
@@ -211,3 +211,8 @@ export async function unlinkClaudeDesktop(): Promise<void> {
   await invoke('unlink_claude_desktop')
 }
 
+
+export async function linkCodex(allowedDir: string): Promise<string> {
+  if (!isDesktop) throw new Error('Connecting Codex requires OpenQuire desktop.')
+  return invoke<string>('link_codex', { allowedDir })
+}
