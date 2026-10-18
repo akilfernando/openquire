@@ -12,7 +12,7 @@ device by [MuPDF](https://mupdf.com/) compiled to WebAssembly and are never uplo
 | Comment | Highlight, underline and strike through text; sticky notes; pen, rectangles, ellipses, arrows; threaded replies; comments panel with filtering |
 | Compare | Compare two versions: changed, added, removed and moved text, and changed graphics, highlighted in both documents side by side |
 | Workflows | Record steps as you work, then replay them on the open document or on hundreds of files at once (results in a zip, Bates numbers continuing across files); share workflows as JSON |
-| AI assistant (optional) | Off by default. With your own Anthropic API key or any OpenAI-compatible model (including local ones): summaries and answers with page citations, personal data found and marked for redaction, forms filled from your details, alternative text for figures. Every request is shown and approved first |
+| AI assistant (optional) | Off by default. With your own Anthropic, OpenAI, Google AI or xAI API key, or an Ollama/custom compatible endpoint: summaries and answers with page citations, personal data found and marked for redaction, forms filled from your details, alternative text for figures. Every request is shown and approved first |
 | Organize | Merge PDFs and other files, drag to reorder, rotate, delete, extract, insert blank pages, crop |
 | Split | By page ranges (`1-3, 4-6, 7-`) or every page, as a zip; each part keeps its structure |
 | Forms | Fill text fields, checkboxes, radio buttons and dropdowns on the page; design forms (add, move, resize and configure fields); detect fields automatically; flatten |

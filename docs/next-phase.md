@@ -182,3 +182,56 @@ remains active through delayed writes. A Tauri mock covers cancellation, held
 writes, successful text output and failure; this is automated contract evidence,
 not human dialog acceptance. Other output paths (for example PDF/A and batch)
 remain a separate lifecycle audit.
+
+## Provider-neutral AI and desktop MCP phase — 18 October 2026
+
+The next phase treats Anthropic/Claude, OpenAI, Google AI/Gemini, xAI/Grok,
+Ollama and custom compatible services as equal choices. Keep all AI opt-in and
+keep document disclosure approval independent of the selected provider.
+
+### Package 1: provider connection foundation (implemented; candidate validation)
+
+Use one endpoint resolver for model discovery, connection checks, consent labels
+and inference. Repair the empty OpenAI endpoint falling through to Ollama.
+Add named Gemini and Grok choices using their documented compatibility endpoints,
+and a custom provider choice. Provider/endpoint changes clear the old key and
+model; key prefixes must not silently change provider. Preserve existing explicit
+OpenAI-compatible endpoint configurations. Report model-list failures honestly,
+ignore stale asynchronous results, and do not replace a user's selected model on
+refresh. Connection checks verify model-catalogue access, not inference or billing.
+
+Validation uses mocked provider HTTP contracts and cross-browser Settings flows;
+no live account, billable inference or human desktop acceptance is implied.
+Settings now adapts to narrow screens, the model refresh control has an explicit
+accessible name, and saved manual model selections remain visible after reopening.
+Local build and 21 AI unit tests pass. The full local unit run has 197 passes,
+six skips and five environment failures from missing Poppler/OpenSSL on PATH;
+CI must pass those independent PDF contracts before integration. Final browser
+and candidate workflow evidence is tracked in issue #44.
+Compatibility references checked 18 October 2026:
+- https://developers.openai.com/api/reference/resources/chat
+- https://ai.google.dev/gemini-api/docs/openai
+- https://docs.x.ai/developers/rest-api-reference/inference
+
+### Subsequent focused packages (planned)
+
+1. Provider setup polish: securely retained separate provider profiles, explicit
+   disconnect, capability-aware model choices, bounded connection/inference
+   diagnostics and cancellation. Verify each provider with an approved minimal
+   live request before claiming end-to-end account support. Do not infer image or
+   structured-output support from a model's name or presence in a catalogue.
+2. Client-neutral MCP distribution and diagnostics: pinned/current package,
+   Claude and ChatGPT/Codex setup, directory boundaries and actual handshake checks.
+3. Opt-in authenticated bridge to the running desktop app: active-document reads
+   first, then reviewed mutations with expected revisions, undo, dirty state and
+   serialized operations. The current file-oriented MCP cannot see unsaved UI work.
+4. Official subscription authentication where supported. ChatGPT plan OAuth is
+   separate from API keys and from the MCP client connection. Apply the same UX
+   principles to any other provider offering an official supported subscription
+   flow; do not assume Claude/Gemini/Grok subscriptions grant API access. Do not
+   borrow another application's credentials.
+
+Release reconciliation follows validated package evidence. Human native dialogs,
+mobile and independent-viewer acceptance remain NOT RUN. npm and desktop releases
+remain unpublished; no sign-in or user-client configuration changes are included
+in the connection foundation package.

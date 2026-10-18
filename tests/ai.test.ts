@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   citations, complete, extractJson, formRequest, parseFormValues, parsePersonalData, questionRequest, selectPages, summaryRequest, type AiConfig,
-  detectProviderFromKey, fetchAvailableModels, rankModel, pickOptimalModel, formatAndRankModels, verifyApiKey,
+  aiEndpoint, aiHost, PROVIDERS, detectProviderFromKey, fetchAvailableModels, rankModel, pickOptimalModel, formatAndRankModels, verifyApiKey,
 } from '../src/ai'
 
 const anthropic: AiConfig = { provider: 'anthropic', apiKey: 'test-key', model: 'claude-fable-5-1', baseUrl: '' }
@@ -125,7 +125,7 @@ describe('AI assistant', () => {
     const anthropicOkFetcher = reply({ data: [{ id: 'claude-5-5-sonnet-latest' }] })
     const res1 = await verifyApiKey({ provider: 'anthropic', apiKey: 'sk-ant-test' }, anthropicOkFetcher)
     expect(res1.ok).toBe(true)
-    expect(res1.message).toContain('Anthropic API key is valid and active')
+    expect(res1.message).toContain('Anthropic (Claude): connected')
 
     // Anthropic invalid key
     const anthropicFailFetcher = reply({ error: { message: 'invalid x-api-key' } }, false)
@@ -137,7 +137,7 @@ describe('AI assistant', () => {
     const openaiOkFetcher = reply({ data: [{ id: 'gpt-5-mini' }] })
     const res3 = await verifyApiKey({ provider: 'openai', apiKey: 'sk-proj-test' }, openaiOkFetcher)
     expect(res3.ok).toBe(true)
-    expect(res3.message).toContain('OpenAI API key is valid and active')
+    expect(res3.message).toContain('AI requests and billing have not been tested')
 
     // OpenAI invalid key
     const openaiFailFetcher = reply({ error: { message: 'Incorrect API key provided' } }, false)
@@ -154,7 +154,46 @@ describe('AI assistant', () => {
     const ollamaOkFetcher = reply({ data: [{ id: 'llama3.3' }] })
     const resOllama = await verifyApiKey({ provider: 'ollama', apiKey: '', baseUrl: 'http://localhost:11434/v1' }, ollamaOkFetcher)
     expect(resOllama.ok).toBe(true)
-    expect(resOllama.message).toContain('Connected to local Ollama')
+    expect(resOllama.message).toContain('Ollama: connected')
   })
 })
 
+
+
+describe('provider destinations and contracts', () => {
+  for (const provider of ['openai', 'gemini', 'xai', 'ollama', 'custom'] as const) {
+    it(`uses the same ${provider} destination for verification, discovery, consent and inference`, async () => {
+      const cfg: AiConfig = { provider, apiKey: ' test-key ', model: 'chosen-model', baseUrl: provider === 'custom' ? 'https://example.test/v1/' : '' }
+      const base = provider === 'custom' ? 'https://example.test/v1' : PROVIDERS[provider].endpoint
+      const models = reply({ data: [{ id: 'gpt-test' }] })
+      expect((await verifyApiKey(cfg, models)).ok).toBe(true)
+      expect((models.mock.calls[0] as unknown as [string])[0]).toBe(`${base}/models`)
+      expect(await fetchAvailableModels(cfg, models)).toEqual(['gpt-test'])
+      expect(aiHost(cfg)).toBe(new URL(base).host)
+      const inference = reply({ choices: [{ message: { content: 'Result' } }] })
+      expect(await complete(cfg, { system: 's', parts: [{ type: 'text', text: 'hello' }, { type: 'image', png: 'AAAA' }] }, inference)).toBe('Result')
+      const [url, init] = inference.mock.calls[0] as unknown as [string, RequestInit]
+      expect(url).toBe(`${base}/chat/completions`)
+      expect(init.headers).toMatchObject({ authorization: 'Bearer test-key' })
+      const body = JSON.parse(init.body as string)
+      expect(body[provider === 'openai' ? 'max_completion_tokens' : 'max_tokens']).toBe(2048)
+      expect(body.messages[1].content[1].image_url.url).toBe('data:image/png;base64,AAAA')
+    })
+  }
+  it('does not silently fall back to a different provider or a cached catalogue', async () => {
+    expect(() => aiEndpoint({ provider: 'custom' })).toThrow('endpoint')
+    expect(() => aiEndpoint({ provider: 'custom', baseUrl: 'https://user:password@example.test/v1' })).toThrow('credentials')
+    await expect(fetchAvailableModels({ provider: 'xai', apiKey: 'key' }, reply({ error: { message: 'denied' } }, false))).rejects.toThrow('denied')
+    await expect(fetchAvailableModels({ provider: 'gemini', apiKey: 'key' }, reply({ unexpected: true }))).rejects.toThrow('catalogue')
+  })
+  it('keeps discovered catalogues free of unavailable seed models', () => {
+    expect(formatAndRankModels('openai', ['gpt-test']).map(m => m.id)).toEqual(['gpt-test'])
+  })
+  it('refuses missing cloud credentials and empty model output', async () => {
+    const cfg: AiConfig = { provider: 'gemini', apiKey: '', model: 'chosen', baseUrl: '' }
+    const fetcher = reply({ choices: [] })
+    await expect(complete(cfg, { system: '', parts: [] }, fetcher)).rejects.toThrow('API key')
+    expect(fetcher).not.toHaveBeenCalled()
+    await expect(complete({ ...cfg, apiKey: 'key' }, { system: '', parts: [] }, fetcher)).rejects.toThrow('no text')
+  })
+})
