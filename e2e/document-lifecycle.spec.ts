@@ -142,7 +142,8 @@ test('beforeunload is prevented for dirty documents and allowed at the saved rev
   await page.keyboard.press('Control+s')
   await download
   await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toHaveCount(0)
-  expect(await beforeUnloadPrevented(page)).toBe(false)
+  // The saved revision can render before asynchronous save cleanup finishes.
+  await expect.poll(() => beforeUnloadPrevented(page)).toBe(false)
 })
 
 test('undo back to the saved revision clears the dirty marker and redo restores it', async ({ page }) => {
