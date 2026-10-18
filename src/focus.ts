@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from 'react'
 
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const FOCUSABLE = 'summary, button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 /** Keeps keyboard focus inside a dialog while it's open, and restores it afterwards. */
 export function useFocusTrap(ref: RefObject<HTMLElement>) {
@@ -11,7 +11,7 @@ export function useFocusTrap(ref: RefObject<HTMLElement>) {
     if (!root.contains(document.activeElement)) (root.querySelector<HTMLElement>('[autofocus]') ?? root.querySelector<HTMLElement>(FOCUSABLE))?.focus()
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return
-      const items = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null)
+      const items = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null && el.checkVisibility())
       if (!items.length) return
       const first = items[0]
       const last = items[items.length - 1]

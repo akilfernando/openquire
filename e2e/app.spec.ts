@@ -554,13 +554,20 @@ test('the AI assistant is off by default and never sends without consent', async
   await expect(page.getByRole('tab', { name: 'Assistant' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Settings' }).first().click()
-  await page.getByRole('button', { name: 'AI assistant' }).click()
+  await page.getByRole('button', { name: 'AI & connections' }).click()
   await page.getByRole('checkbox', { name: 'Enable the AI assistant' }).check()
+  await page.getByRole('region', { name: 'Anthropic (Claude)', exact: true }).getByRole('button', { name: /Edit|Set up/ }).click()
   await page.getByLabel('API key').fill('test-key')
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await page.getByRole('button', { name: 'Load models', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('status')).toContainText('Models loaded')
+  await page.getByLabel('Model', { exact: true }).fill('test-model')
+  await page.getByRole('button', { name: 'Save and select' }).click()
+  await page.getByText('Your details for forms', { exact: true }).click()
   await page.getByRole('textbox', { name: 'Your details for forms' }).fill('Jane Doe. I want the Pro plan and the newsletter.')
-  // Blurring the key loads models once; later state updates must not fetch them again.
+  // Only explicit discovery loads models; later state updates must not fetch them again.
   await expect.poll(() => modelRequests).toBe(1)
-  await page.getByLabel('API key').focus()
+  await page.getByRole('region', { name: 'Anthropic (Claude)', exact: true }).getByRole('button', { name: 'Edit', exact: true }).focus()
   await page.keyboard.press('Escape')
 
   await page.getByRole('tab', { name: 'Assistant' }).click()
@@ -604,8 +611,12 @@ test('the AI assistant is off by default and never sends without consent', async
   expect(sidebar.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([])
   // Remembered disclosure permission belongs to the connection, not just the document.
   await page.getByRole('button', { name: 'Settings' }).first().click()
-  await page.getByRole('button', { name: 'AI assistant', exact: true }).click()
-  await page.getByLabel('Provider', { exact: true }).selectOption('gemini')
+  await page.getByRole('button', { name: 'AI & connections', exact: true }).click()
+  await page.getByRole('region', { name: 'Google AI (Gemini)', exact: true }).getByRole('button', { name: 'Set up' }).click()
+  await page.getByLabel('API key', { exact: true }).fill('gemini-test-key')
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await page.getByLabel('Model', { exact: true }).fill('gemini-test-model')
+  await page.getByRole('button', { name: 'Save and select' }).click()
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Summarize' }).click()
   await expect(consent).toContainText('generativelanguage.googleapis.com')
@@ -639,6 +650,7 @@ test('rebinds a command shortcut and keeps it', async ({ page }) => {
 test('a CSS snippet restyles the dock and persists', async ({ page }) => {
   await openReport(page)
   await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByText('Custom themes & CSS', { exact: true }).click()
   await page.getByRole('button', { name: 'New', exact: true }).click()
   await page.getByRole('textbox', { name: 'CSS for Snippet 1' }).fill('.dock { background: rgb(10, 120, 60) !important; border-radius: 2px; }')
   const axe = await new AxeBuilder({ page }).include('.modal').withTags(['wcag2a', 'wcag2aa']).analyze()
@@ -652,6 +664,7 @@ test('a CSS snippet restyles the dock and persists', async ({ page }) => {
   await expect.poll(bg).toBe('rgb(10, 120, 60)')
   // Turning the snippet off restores the dock.
   await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByText('Custom themes & CSS', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Use Snippet 1' }).uncheck()
   await expect.poll(bg).not.toBe('rgb(10, 120, 60)')
 })

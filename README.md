@@ -37,12 +37,16 @@ Browser saves prepare downloads; the desktop app can save back to the source fil
 Annotations are standard PDF annotations that Acrobat and other
 viewers can display and reply to.
 
-AI connections are managed in **Settings → AI assistant**. Each provider keeps
+AI connections are managed in **Settings → AI & connections**. Choose a provider,
+enter its connection details, then choose a model and **Save and select**. You can
+configure providers while AI is off. Draft changes are discarded when cancelled.
+Each provider keeps
 its own key, endpoint and model on this device; saved connection profiles and keys
 are encrypted using the device vault. Switching providers restores its connection
-and requires fresh document-sharing consent. **Check connection** lists models
+and requires fresh document-sharing consent. **Load models** explicitly lists models
 without sending document content; it does not verify inference, image support or
-billing. Checks can be cancelled and time out after 20 seconds. **Disconnect this
+billing. Opening Settings, switching providers and saving do not load models.
+Checks can be cancelled and time out after 20 seconds. **Disconnect this
 provider** forgets its connection and turns AI off; it does not revoke the API key
 at the provider. **Purge private data** removes all saved connections. If encrypted
 storage is unavailable, Settings warns that credentials remain session-only.

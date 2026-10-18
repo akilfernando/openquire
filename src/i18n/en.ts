@@ -633,7 +633,7 @@ export const en = {
   settings: {
     label: 'Settings',
     options: 'Options',
-    tabs: { appearance: 'Appearance', comments: 'Comments', ocr: 'Text recognition', signatures: 'Signatures', privacy: 'Privacy & Security', ai: 'AI assistant', hotkeys: 'Hotkeys', plugins: 'Plugins', about: 'About' },
+    tabs: { appearance: 'Appearance', comments: 'Comments', ocr: 'Text recognition', signatures: 'Signatures', privacy: 'Privacy & Security', ai: 'AI & connections', hotkeys: 'Hotkeys', plugins: 'Plugins', about: 'About' },
     privacyIntro: 'OpenQuire is local-first: rendering, edits, and file operations execute directly on your machine with zero telemetry.',
     airGapped: 'Air-gapped signing mode',
     airGappedDesc: 'Strictly blocks all outbound network calls during digital signing (disables remote RFC 3161 timestamps and online OCSP revocation checks).',
