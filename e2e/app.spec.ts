@@ -650,6 +650,7 @@ test('rebinds a command shortcut and keeps it', async ({ page }) => {
 test('a CSS snippet restyles the dock and persists', async ({ page }) => {
   await openReport(page)
   await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByText('Custom themes & CSS', { exact: true }).click()
   await page.getByRole('button', { name: 'New', exact: true }).click()
   await page.getByRole('textbox', { name: 'CSS for Snippet 1' }).fill('.dock { background: rgb(10, 120, 60) !important; border-radius: 2px; }')
   const axe = await new AxeBuilder({ page }).include('.modal').withTags(['wcag2a', 'wcag2aa']).analyze()
@@ -663,6 +664,7 @@ test('a CSS snippet restyles the dock and persists', async ({ page }) => {
   await expect.poll(bg).toBe('rgb(10, 120, 60)')
   // Turning the snippet off restores the dock.
   await page.getByRole('button', { name: 'Settings' }).first().click()
+  await page.getByText('Custom themes & CSS', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Use Snippet 1' }).uncheck()
   await expect.poll(bg).not.toBe('rgb(10, 120, 60)')
 })

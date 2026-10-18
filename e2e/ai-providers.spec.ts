@@ -164,6 +164,10 @@ test('short mobile Settings keeps category navigation reachable', async ({ page 
   await settings.getByLabel('Model', { exact: true }).fill('manual-model')
   const axe = await new AxeBuilder({ page }).include('[role="dialog"]').withTags(['wcag2a', 'wcag2aa']).analyze()
   expect(axe.violations).toEqual([])
+  // Scrolling the setup must never put its controls under the fixed Close button.
+  const closeBox = await settings.getByRole('button', { name: 'Close', exact: true }).boundingBox()
+  const contentBox = await settings.locator('.settings-content').boundingBox()
+  expect(contentBox!.y).toBeGreaterThanOrEqual(closeBox!.y + closeBox!.height)
   await page.screenshot({ path: info.outputPath('provider-setup.png') })
   await settings.getByRole('button', { name: 'Cancel setup' }).click()
   expect(await page.evaluate(() => localStorage.getItem('openquire.settings')?.includes('draft-only') ?? false)).toBe(false)

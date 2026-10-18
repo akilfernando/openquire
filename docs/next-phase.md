@@ -336,3 +336,22 @@ short mobile navigation, keyboard focus and light/dark accessibility. Exact loca
 candidate and post-merge results belong in issue #44 and the focused PR. Human
 OS/mobile acceptance and live-provider inference remain NOT RUN. No release is
 published by this work.
+
+
+### Next: optional AI connection discovery (planned)
+
+Offer a user-started “Find connections” wizard with real progress, restrained
+animation (respecting reduced motion), selectable findings and an always-available
+manual provider route. Show supported local services and desktop assistants as
+appropriate choices without mistaking installation for a usable connection.
+Existing desktop detection only finds Claude Desktop, ChatGPT Desktop and Cursor
+installation/config markers; only Claude Desktop has a local MCP configuration
+writer. Claude Code/Codex account-backed inference is not implemented. Discovering
+an executable must not imply access to its subscription or credentials.
+
+Keep discovery bounded and cancellable, never scan from the welcome screen
+without an explicit action, and never link or import credentials automatically.
+Validate no findings, partial/error results, cancellation, reduced motion, keyboard
+navigation and manual setup. Add adapters and verify actual capabilities before
+presenting new services as usable. This follow-up is planned, not part of the
+Settings implementation or its validation evidence.

@@ -1067,7 +1067,7 @@ button.quiet-action:hover { color: var(--text-normal); background: var(--hover);
 .settings-nav button { min-height: 44px; height: auto; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; text-align: left; gap: 12px; }
 .settings-nav button svg { opacity: .6; flex: none; }
 .settings-nav button.is-active { background: var(--accent-soft) !important; }
-.settings-content { padding: 32px; padding-top: 48px; }
+.settings-content { margin-top: 64px; padding: 0 32px 32px; }
 .settings-content h2 { font-size: 24px; letter-spacing: -.025em; margin-bottom: 16px; }
 .settings-content:focus { outline: none; }
 .settings-back.quiet-action { display: none; }
@@ -1101,7 +1101,7 @@ button.quiet-action:hover { color: var(--text-normal); background: var(--hover);
 .connection-empty { display: grid; justify-items: start; gap: 16px; padding-block: 24px; }
 @media (max-width: 700px) {
   .settings { width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0; }
-  .settings-nav { width: 100%; max-height: 100%; padding: 24px 16px; flex-direction: column; flex-wrap: nowrap; border: 0; }
+  .settings-nav { width: 100%; margin-top: 64px; max-height: calc(100% - 64px); padding: 16px; flex-direction: column; flex-wrap: nowrap; border: 0; }
   .settings-nav-heading { padding-right: 40px; }
   .settings-nav button { min-height: 52px; border-bottom: 1px solid var(--border); }
   .settings[data-detail='true'] .settings-nav, .settings[data-detail='false'] .settings-content { display: none; }
