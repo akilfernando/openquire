@@ -8,7 +8,7 @@ import HotkeySettings from './HotkeySettings'
 import PluginsSettings from './PluginsSettings'
 import type { InstalledPlugin } from '../plugins/types'
 import StyleSettings, { type Snippet, type UserCss } from './StyleSettings'
-import { DEFAULT_BASE_URL, DEFAULT_MODELS, detectProviderFromKey, fetchAvailableModels, formatAndRankModels, pickOptimalModel, verifyApiKey, type AiProvider, type ApiKeyVerification } from '../ai'
+import { PROVIDERS, DEFAULT_MODELS, aiKeyRequired, fetchAvailableModels, formatAndRankModels, pickOptimalModel, verifyApiKey, type AiProvider, type ApiKeyVerification } from '../ai'
 
 export type ThemeSetting = 'dark' | 'light' | 'system'
 
@@ -101,17 +101,22 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
   const [modelList, setModelList] = useState<string[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
   const [isCustomModel, setIsCustomModel] = useState(false)
-  const [detectedNotice, setDetectedNotice] = useState('')
+  const [modelError, setModelError] = useState('')
+  const verificationRequest = useRef(0)
   const [keyVerification, setKeyVerification] = useState<ApiKeyVerification | null>(null)
   const [verifyingKey, setVerifyingKey] = useState(false)
+  const keyRequired = aiKeyRequired({ provider: settings.aiProvider, baseUrl: settings.aiBaseUrl })
+  const modelOptions = formatAndRankModels(settings.aiProvider, modelList)
 
   const handleVerify = useCallback(async (provider: AiProvider, apiKey: string, baseUrl: string) => {
+    const request = ++verificationRequest.current
     setVerifyingKey(true)
     try {
       const res = await verifyApiKey({ provider, apiKey, baseUrl })
-      setKeyVerification(res)
+      const latest = latestAi.current.settings
+      if (request === verificationRequest.current && latest.aiEnabled && !latest.aiDisabled && provider === latest.aiProvider && apiKey === latest.aiKey && baseUrl === latest.aiBaseUrl) setKeyVerification(res)
     } finally {
-      setVerifyingKey(false)
+      if (request === verificationRequest.current) setVerifyingKey(false)
     }
   }, [])
 
@@ -122,6 +127,7 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
   const refreshModels = useCallback(async (provider: AiProvider, apiKey: string, baseUrl: string) => {
     const request = ++modelRequest.current
     setLoadingModels(true)
+    setModelError('')
     try {
       const list = await fetchAvailableModels({ provider, apiKey, baseUrl })
       const latest = latestAi.current
@@ -129,16 +135,22 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
           provider !== latest.settings.aiProvider || apiKey !== latest.settings.aiKey || baseUrl !== latest.settings.aiBaseUrl) return
       setModelList(list)
       const optimal = pickOptimalModel(provider, list)
-      if ((!latest.settings.aiModel || (!list.includes(latest.settings.aiModel) && !latest.isCustomModel)) &&
+      if (!latest.settings.aiModel && !latest.isCustomModel &&
           optimal !== latest.settings.aiModel) {
         latest.onChange({ ...latest.settings, aiModel: optimal })
+      }
+    } catch (error) {
+      const latest = latestAi.current.settings
+      if (request === modelRequest.current && provider === latest.aiProvider && apiKey === latest.aiKey && baseUrl === latest.aiBaseUrl) {
+        setModelList([])
+        setModelError(error instanceof Error ? error.message : String(error))
       }
     } finally {
       if (request === modelRequest.current) setLoadingModels(false)
     }
   }, [])
 
-  useEffect(() => () => { modelRequest.current++ }, [])
+  useEffect(() => () => { modelRequest.current++; verificationRequest.current++ }, [])
   useEffect(() => {
     if (tab === 'ai' && settings.aiEnabled && !settings.aiDisabled) {
       void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)
@@ -377,34 +389,31 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
               {settings.aiEnabled && (
                 <>
                   <Item name={m.settings.aiProvider} desc={m.settings.aiProviderDesc}>
-                    <select value={settings.aiProvider} aria-label={m.settings.aiProvider} onChange={(e) => set({ aiProvider: e.target.value as AiProvider, aiModel: '' })}>
-                      <option value="anthropic">{m.settings.aiProviders.anthropic}</option>
-                      <option value="openai">{m.settings.aiProviders.openai}</option>
-                      <option value="ollama">{m.settings.aiProviders.ollama}</option>
+                    <select value={settings.aiProvider} aria-label={m.settings.aiProvider} onChange={(e) => {
+                      verificationRequest.current++; modelRequest.current++
+                      setVerifyingKey(false); setKeyVerification(null); setModelList([]); setModelError(''); setIsCustomModel(false)
+                      set({ aiProvider: e.target.value as AiProvider, aiModel: '', aiKey: '', aiBaseUrl: '' })
+                    }}>
+                      {Object.entries(PROVIDERS).map(([id, provider]) => <option key={id} value={id}>{provider.name}</option>)}
                     </select>
                   </Item>
-                  {settings.aiProvider === 'ollama' && (
-                    <div className="hint" style={{ padding: '8px 12px', background: 'var(--panel)', borderRadius: 6, margin: '8px 0', border: '1px solid var(--border)' }}>
-                      <strong>100% Offline &amp; Private:</strong> Runs against your local Ollama instance ({DEFAULT_BASE_URL}). Zero data is sent to external servers.
-                    </div>
-                  )}
-                  {settings.aiProvider !== 'ollama' && (
-                    <div className="hint" style={{ padding: '8px 12px', background: 'var(--panel)', borderRadius: 6, margin: '8px 0', border: '1px solid var(--border)' }}>
-                      <strong>Data in flight:</strong> OpenQuire sends form fields or document text over HTTPS only when you explicitly trigger an AI action.
-                    </div>
-                  )}
-                  {(settings.aiProvider === 'openai' || settings.aiProvider === 'ollama') && (
+                  <p className="hint">{m.settings.aiConnectionHint}</p>
+                  <p className="hint">{m.settings.aiSwitchHint}</p>
+                  {settings.aiProvider !== 'anthropic' && (
                     <Item name={m.settings.aiBaseUrl} desc={m.settings.aiBaseUrlDesc}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: 260 }}>
                         <input
+                          key={`endpoint-${settings.aiProvider}`}
                           defaultValue={settings.aiBaseUrl}
-                          placeholder={DEFAULT_BASE_URL}
+                          placeholder={PROVIDERS[settings.aiProvider].endpoint || "https://your-provider.example/v1"}
                           aria-label={m.settings.aiBaseUrl}
                           style={{ flex: 1 }}
                           onBlur={(e) => {
                             const val = e.target.value.trim()
                             if (val !== settings.aiBaseUrl) {
-                              set({ aiBaseUrl: val })
+                              verificationRequest.current++; modelRequest.current++
+                              setVerifyingKey(false); setModelList([]); setModelError(''); setIsCustomModel(false)
+                              set({ aiBaseUrl: val, aiKey: '', aiModel: '' })
                               setKeyVerification(null)
                             }
                           }}
@@ -422,25 +431,17 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                       </div>
                     </Item>
                   )}
-                  <Item name={m.settings.aiKey} desc={settings.aiProvider === 'anthropic' ? m.settings.aiKeyDesc : m.settings.aiKeyOptional}>
+                  <Item name={m.settings.aiKey} desc={keyRequired ? m.settings.aiKeyRequired : m.settings.aiKeyOptional}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 260 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <input
                           type="password"
                           autoComplete="off"
+                          key={`key-${settings.aiProvider}-${settings.aiBaseUrl}`}
                           defaultValue={settings.aiKey}
                           aria-label={m.settings.aiKey}
                           style={{ flex: 1 }}
-                          onChange={(e) => {
-                            const val = e.target.value.trim()
-                            setKeyVerification(null)
-                            const detected = detectProviderFromKey(val)
-                            if (detected && detected !== settings.aiProvider) {
-                              const optimal = DEFAULT_MODELS[detected]
-                              set({ aiKey: val, aiProvider: detected, aiModel: optimal })
-                              setDetectedNotice(`Auto-detected ${detected === 'anthropic' ? 'Anthropic (Claude)' : 'OpenAI'} from key prefix!`)
-                            }
-                          }}
+                          onChange={() => { verificationRequest.current++; setKeyVerification(null); setVerifyingKey(false) }}
                           onBlur={(e) => {
                             const val = e.target.value.trim()
                             if (val !== settings.aiKey) {
@@ -451,20 +452,15 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                         />
                         <button
                           type="button"
-                          disabled={verifyingKey || (!settings.aiKey && settings.aiProvider !== 'ollama')}
+                          disabled={verifyingKey || (!settings.aiKey && keyRequired)}
                           style={{ padding: '5px 10px', fontSize: '0.8rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)', whiteSpace: 'nowrap' }}
                           onClick={() => void handleVerify(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)}
                         >
-                          {verifyingKey ? '...' : 'Verify'}
+                          {verifyingKey ? m.settings.aiChecking : m.settings.aiCheck}
                         </button>
                       </div>
-                      {detectedNotice && (
-                        <span style={{ fontSize: '0.78rem', color: 'var(--accent)', fontWeight: 500 }}>
-                          {detectedNotice}
-                        </span>
-                      )}
                       {keyVerification && (
-                        <div
+                        <div role="status"
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -498,16 +494,19 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                             }
                           }}
                         >
-                          {formatAndRankModels(settings.aiProvider, modelList).map((item) => (
+                          {settings.aiModel && !modelOptions.some(item => item.id === settings.aiModel) && <option value={settings.aiModel}>{settings.aiModel} (saved selection)</option>}
+                          {modelOptions.map((item) => (
                             <option key={item.id} value={item.id}>
                               {item.name}
                             </option>
                           ))}
+                          <option value="">{m.settings.aiChooseModel}</option>
                           <option value="__custom__">Custom model name...</option>
                         </select>
                         <button
                           type="button"
                           title="Refresh active models"
+                          aria-label="Refresh active models"
                           disabled={loadingModels}
                           style={{ padding: '4px 8px', fontSize: '0.85rem', cursor: 'pointer', borderRadius: 4, border: '1px solid var(--border)' }}
                           onClick={() => void refreshModels(settings.aiProvider, settings.aiKey, settings.aiBaseUrl)}
@@ -515,6 +514,7 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                           {loadingModels ? '...' : '↻'}
                         </button>
                       </div>
+                      {modelError && <p role="status" className="hint">{modelError} {m.settings.aiManualModel}</p>}
                       {isCustomModel && (
                         <input
                           defaultValue={settings.aiModel}
@@ -549,7 +549,7 @@ export default function SettingsModal({ settings, onChange, onPurge, onClose, re
                     {m.settings.claudeDesktopCommandHint}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code style={{ flex: 1, padding: '6px 10px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, fontSize: '0.82rem', fontFamily: 'monospace', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+                    <code style={{ flex: 1, padding: '6px 10px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, fontSize: '0.82rem', fontFamily: 'monospace', minWidth: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                       npx -y openquire mcp setup
                     </code>
                     <button

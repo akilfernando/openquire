@@ -6,7 +6,7 @@
  * every request, saying exactly what will be sent.
  */
 
-export type AiProvider = 'anthropic' | 'openai' | 'ollama'
+export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'xai' | 'ollama' | 'custom'
 
 export interface AiConfig {
   provider: AiProvider
@@ -20,8 +20,35 @@ export const DEFAULT_MODELS: Record<AiProvider, string> = {
   anthropic: 'claude-5-5-sonnet-latest',
   openai: 'gpt-5-mini',
   ollama: 'llama3.3',
+  gemini: '', xai: '', custom: '',
 }
 export const DEFAULT_BASE_URL = 'http://localhost:11434/v1'
+
+export const PROVIDERS: Record<AiProvider, { name: string; endpoint: string; keyRequired: boolean }> = {
+  anthropic: { name: 'Anthropic (Claude)', endpoint: 'https://api.anthropic.com/v1', keyRequired: true },
+  openai: { name: 'OpenAI', endpoint: 'https://api.openai.com/v1', keyRequired: true },
+  gemini: { name: 'Google AI (Gemini)', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', keyRequired: true },
+  xai: { name: 'xAI (Grok)', endpoint: 'https://api.x.ai/v1', keyRequired: true },
+  ollama: { name: 'Ollama', endpoint: DEFAULT_BASE_URL, keyRequired: false },
+  custom: { name: 'Custom compatible provider', endpoint: '', keyRequired: false },
+}
+
+/** One destination for discovery, verification, consent and inference. */
+export function aiEndpoint(cfg: { provider: AiProvider; baseUrl?: string }): string {
+  const base = (cfg.provider === 'anthropic' ? PROVIDERS.anthropic.endpoint : cfg.baseUrl?.trim() || PROVIDERS[cfg.provider].endpoint).replace(/\/+$/, '')
+  if (!base) throw new Error('Enter the provider endpoint in Settings.')
+  const url = new URL(base)
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('Use an HTTP or HTTPS endpoint without credentials, query parameters or fragments.')
+  }
+  return base
+}
+
+export function aiKeyRequired(cfg: { provider: AiProvider; baseUrl?: string }): boolean {
+  // Preserve existing OpenAI-compatible local configurations saved before the custom option.
+  if (cfg.provider === 'openai' && cfg.baseUrl?.trim() && cfg.baseUrl.trim().replace(/\/+$/, '') !== PROVIDERS.openai.endpoint) return false
+  return PROVIDERS[cfg.provider].keyRequired
+}
 
 /** Known contemporary models for each provider used as initial seed and fallback. */
 export const CURATED_MODELS: Record<AiProvider, { id: string; name: string; recommended?: boolean }[]> = {
@@ -39,6 +66,7 @@ export const CURATED_MODELS: Record<AiProvider, { id: string; name: string; reco
     { id: 'gpt-4o-mini', name: 'GPT-4o mini' },
     { id: 'gpt-4o', name: 'GPT-4o' },
   ],
+  gemini: [], xai: [], custom: [],
   ollama: [
     { id: 'llama3.3', name: 'Llama 3.3 (Recommended)', recommended: true },
     { id: 'llama3.2', name: 'Llama 3.2' },
@@ -94,7 +122,7 @@ export function pickOptimalModel(provider: AiProvider, models: string[]): string
 
 /** Formats and sorts models with dynamic recommendations based on generation and tier. */
 export function formatAndRankModels(provider: AiProvider, models: string[]): { id: string; name: string; recommended?: boolean }[] {
-  const unique = Array.from(new Set([...models, ...CURATED_MODELS[provider].map((m) => m.id)]))
+  const unique = Array.from(new Set(models.length ? models : CURATED_MODELS[provider].map(m => m.id)))
   const sorted = unique.sort((a, b) => rankModel(b, provider) - rankModel(a, provider))
   const optimal = pickOptimalModel(provider, sorted)
 
@@ -127,82 +155,26 @@ export function detectProviderFromKey(key: string): AiProvider | null {
   return null
 }
 
-const CACHE_KEY_PREFIX = 'openquire.cached_models.'
-
-/** Fetches active models from the provider's /models endpoint, sorting dynamically and caching locally. */
+/** Lists the selected endpoint's models; errors are not disguised as a live catalogue. */
 export async function fetchAvailableModels(
   cfg: { provider: AiProvider; apiKey?: string; baseUrl?: string },
   fetcher: typeof fetch = fetch,
 ): Promise<string[]> {
-  const cacheKey = `${CACHE_KEY_PREFIX}${cfg.provider}`
-  let cached: string[] = []
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const stored = localStorage.getItem(cacheKey)
-      if (stored) cached = JSON.parse(stored)
-    }
-  } catch {
-    // ignore
+  const base = aiEndpoint(cfg)
+  const key = cfg.apiKey?.trim() ?? ''
+  if (aiKeyRequired(cfg) && !key) throw new Error('Please enter an API key.')
+  const headers: Record<string, string> = cfg.provider === 'anthropic'
+    ? { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }
+    : key ? { authorization: `Bearer ${key}` } : {}
+  const res = await fetcher(`${base}/models${cfg.provider === 'anthropic' ? '?limit=50' : ''}`, { headers, signal: AbortSignal.timeout(20_000) })
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(data?.error?.message ?? `Could not list models (${res.status}).`)
+  if (!Array.isArray(data?.data)) throw new Error('The endpoint did not return a model catalogue.')
+  let models = data.data.map((m: { id?: unknown }) => m.id).filter((id: unknown): id is string => typeof id === 'string' && !!id)
+  if (cfg.provider === 'openai' && base === PROVIDERS.openai.endpoint) {
+    models = models.filter((id: string) => /^(gpt-|o\d|chatgpt)/.test(id) && !/audio|realtime|transcribe|tts|image|search/.test(id))
   }
-
-  const updateCache = (list: string[]) => {
-    try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(cacheKey, JSON.stringify(list))
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  if (cfg.provider === 'anthropic') {
-    if (!cfg.apiKey) return cached.length ? cached : CURATED_MODELS.anthropic.map((m) => m.id)
-    try {
-      const res = await fetcher('https://api.anthropic.com/v1/models?limit=50', {
-        headers: {
-          'x-api-key': cfg.apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-      })
-      if (res.ok) {
-        const json = await res.json()
-        const list = (json?.data as { id: string }[] | undefined)?.map((m) => m.id)
-        if (list && list.length > 0) {
-          const sorted = list.sort((a, b) => rankModel(b, 'anthropic') - rankModel(a, 'anthropic'))
-          updateCache(sorted)
-          return sorted
-        }
-      }
-    } catch {
-      // fallback to cached or curated
-    }
-    return cached.length ? cached : CURATED_MODELS.anthropic.map((m) => m.id)
-  }
-
-  const base = (cfg.baseUrl || (cfg.provider === 'ollama' ? DEFAULT_BASE_URL : 'https://api.openai.com/v1')).replace(/\/+$/, '')
-  try {
-    const res = await fetcher(`${base}/models`, {
-      headers: cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {},
-    })
-    if (res.ok) {
-      const json = await res.json()
-      const list = (json?.data as { id: string }[] | undefined)?.map((m) => m.id)
-      if (list && list.length > 0) {
-        let chatModels = list
-        if (cfg.provider === 'openai' && !cfg.baseUrl) {
-          const filtered = list.filter((id) => /^(gpt-|o1|o3|o4|o5|chatgpt)/.test(id))
-          if (filtered.length > 0) chatModels = filtered
-        }
-        const sorted = chatModels.sort((a, b) => rankModel(b, cfg.provider) - rankModel(a, cfg.provider))
-        updateCache(sorted)
-        return sorted
-      }
-    }
-  } catch {
-    // fallback
-  }
-  return cached.length ? cached : CURATED_MODELS[cfg.provider].map((m) => m.id)
+  return [...new Set<string>(models)]
 }
 
 export interface ApiKeyVerification {
@@ -211,57 +183,16 @@ export interface ApiKeyVerification {
   provider: AiProvider
 }
 
-/** Verifies that an API key is authentic and active by testing the provider's free /models endpoint. */
+/** A catalogue check does not prove model inference access or available billing. */
 export async function verifyApiKey(
   cfg: { provider: AiProvider; apiKey: string; baseUrl?: string },
   fetcher: typeof fetch = fetch,
 ): Promise<ApiKeyVerification> {
-  const key = cfg.apiKey.trim()
-  if (!key && cfg.provider !== 'ollama') {
-    return { ok: false, message: 'Please enter an API key.', provider: cfg.provider }
-  }
-
-  if (cfg.provider === 'anthropic') {
-    try {
-      const res = await fetcher('https://api.anthropic.com/v1/models?limit=1', {
-        headers: {
-          'x-api-key': key,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-      })
-      if (res.ok) {
-        return { ok: true, message: 'Anthropic API key is valid and active.', provider: 'anthropic' }
-      }
-      const data = await res.json().catch(() => null)
-      const err = data?.error?.message || `Authentication failed (${res.status})`
-      return { ok: false, message: err, provider: 'anthropic' }
-    } catch (e) {
-      return { ok: false, message: `Could not connect to Anthropic: ${String(e)}`, provider: 'anthropic' }
-    }
-  }
-
-  const base = (cfg.baseUrl || (cfg.provider === 'ollama' ? DEFAULT_BASE_URL : 'https://api.openai.com/v1')).replace(/\/+$/, '')
   try {
-    const res = await fetcher(`${base}/models`, {
-      headers: key ? { authorization: `Bearer ${key}` } : {},
-    })
-    if (res.ok) {
-      return {
-        ok: true,
-        message: cfg.provider === 'ollama' ? 'Connected to local Ollama instance.' : 'OpenAI API key is valid and active.',
-        provider: cfg.provider,
-      }
-    }
-    const data = await res.json().catch(() => null)
-    const err = data?.error?.message || `Authentication failed (${res.status})`
-    return { ok: false, message: err, provider: cfg.provider }
-  } catch (e) {
-    return {
-      ok: false,
-      message: cfg.provider === 'ollama' ? `Could not connect to local Ollama at ${base}` : `Could not connect to endpoint: ${String(e)}`,
-      provider: cfg.provider,
-    }
+    const models = await fetchAvailableModels(cfg, fetcher)
+    return { ok: true, provider: cfg.provider, message: `${PROVIDERS[cfg.provider].name}: connected; ${models.length} models listed. AI requests and billing have not been tested.` }
+  } catch (error) {
+    return { ok: false, provider: cfg.provider, message: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -276,7 +207,7 @@ export interface AiRequest {
 /** Where requests go, for telling the user. */
 export function aiHost(cfg: AiConfig) {
   try {
-    return new URL(cfg.provider === 'anthropic' ? 'https://api.anthropic.com' : cfg.baseUrl).host
+    return new URL(aiEndpoint(cfg)).host
   } catch {
     return cfg.baseUrl
   }
@@ -284,14 +215,18 @@ export function aiHost(cfg: AiConfig) {
 
 /** Sends one request to the configured model and returns its text. */
 export async function complete(cfg: AiConfig, req: AiRequest, fetcher: typeof fetch = fetch): Promise<string> {
+  const base = aiEndpoint(cfg)
+  const key = cfg.apiKey.trim()
+  if (aiKeyRequired(cfg) && !key) throw new Error(`Add your ${PROVIDERS[cfg.provider].name} API key in Settings.`)
+  if (!(cfg.model || DEFAULT_MODELS[cfg.provider]).trim()) throw new Error('Choose a model in Settings.')
   const maxTokens = req.maxTokens ?? 2048
   if (cfg.provider === 'anthropic') {
     if (!cfg.apiKey) throw new Error('Add your Anthropic API key in Settings.')
-    const res = await fetcher('https://api.anthropic.com/v1/messages', {
+    const res = await fetcher(`${base}/messages`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': cfg.apiKey,
+        'x-api-key': key,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
@@ -307,15 +242,16 @@ export async function complete(cfg: AiConfig, req: AiRequest, fetcher: typeof fe
     })
     const data = await res.json().catch(() => null)
     if (!res.ok) throw new Error(data?.error?.message ?? `The model returned an error (${res.status}).`)
-    return (data.content as { type: string; text?: string }[]).filter((c) => c.type === 'text').map((c) => c.text).join('')
+    const text = Array.isArray(data?.content) ? data.content.filter((c: { type: string; text?: string }) => c.type === 'text').map((c: { text?: string }) => c.text ?? '').join('') : ''
+    if (!text.trim()) throw new Error('The model returned no text. Check model capabilities and response limits.')
+    return text
   }
-  const base = (cfg.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '')
   const res = await fetcher(`${base}/chat/completions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}) },
+    headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
     body: JSON.stringify({
       model: cfg.model || DEFAULT_MODELS[cfg.provider] || 'llama3.2',
-      max_tokens: maxTokens,
+      ...(cfg.provider === 'openai' && base === PROVIDERS.openai.endpoint ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
       messages: [
         { role: 'system', content: req.system },
         { role: 'user', content: req.parts.map((p) => (p.type === 'text' ? { type: 'text', text: p.text } : { type: 'image_url', image_url: { url: `data:image/png;base64,${p.png}` } })) },
@@ -324,7 +260,9 @@ export async function complete(cfg: AiConfig, req: AiRequest, fetcher: typeof fe
   })
   const data = await res.json().catch(() => null)
   if (!res.ok) throw new Error(data?.error?.message ?? `The model returned an error (${res.status}).`)
-  return data.choices?.[0]?.message?.content ?? ''
+  const text = data?.choices?.[0]?.message?.content
+  if (typeof text !== 'string' || !text.trim()) throw new Error('The model returned no text. Check model capabilities and response limits.')
+  return text
 }
 
 // ---- document text ---------------------------------------------------------------------------
