@@ -989,3 +989,28 @@ a { color: var(--accent); }
 .home .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .home .home-search input[type='search'] { border: 0; background: transparent; padding: 13px 0; box-shadow: none; font: inherit; color: var(--text-normal); }
 .home .home-search input::placeholder { color: var(--text-muted); font-style: normal; }
+
+/* Document context and tool discovery share the home surface and focus language. */
+.workspace-tools-button { display: inline-flex; align-items: center; gap: 7px; margin: 5px 8px; padding: 5px 10px; flex: none; font-weight: 600; }
+.workspace-tools-button[aria-expanded='true'] { background: var(--accent-soft); color: var(--text-normal); }
+.tool-context { display: flex; align-items: center; gap: 12px; padding: 9px 16px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); font-size: 12px; flex: none; }
+.tool-context-name { font-weight: 650; white-space: nowrap; }
+.tool-context-hint { color: var(--text-muted); flex: 1; line-height: 1.5; }
+.document-save-state { margin-left: auto; white-space: nowrap; color: var(--text-muted); }
+.document-save-state.is-dirty { color: var(--text-normal); }
+.document-save-state.is-dirty::before { content: '●'; color: var(--accent); margin-right: 6px; }
+.tool-discovery { padding: 16px 14px 12px; border-bottom: 1px solid var(--border); flex: none; }
+.tool-scope { font-weight: 600; font-size: 13px; margin: 0 0 4px; }
+.tool-scope-hint { font-size: 12px; line-height: 1.5; color: var(--text-muted); margin: 0 0 12px; }
+.tool-search { display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-m); }
+.sidebar .tool-search input[type='search'] { width: 100%; min-width: 0; border: 0; padding: 10px 0; background: transparent; box-shadow: none; font: inherit; color: var(--text-normal); }
+.tool-search:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tool-search-clear { margin-top: 10px; font-size: 12px; }
+.sidebar.right .section[hidden] { display: none; }
+.sidebar.right .sidebar-title { flex: 1; }
+.sidebar.right .section summary { min-height: 42px; }
+@media (max-width: 600px) {
+  .tool-context { flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; }
+  .tool-context-hint { order: 3; flex-basis: 100%; }
+  .workspace-tools-button { margin: 4px; padding: 5px 8px; }
+}
