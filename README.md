@@ -76,6 +76,14 @@ npm run build    # production build in dist/ (static files, host anywhere)
 
 Requires Node 20+ and a current Chrome, Edge, Firefox or Safari.
 
+## Desktop updates
+
+In the desktop app, open **Settings > About** to check for updates or choose how
+updates arrive. **Notify me** is the default. You can choose automatic updates
+when all PDFs are closed, or check manually. Downloads are verified before
+installation. Older versions without this feature need one manual installation.
+See [desktop update delivery](docs/desktop-updates.md) for release and signing details.
+
 ## Command line and Node
 
 The same engine runs without a browser. `cli/` builds the `openquire` package: a command-line tool
