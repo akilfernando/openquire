@@ -153,7 +153,7 @@ test('short mobile Settings keeps category navigation reachable', async ({ page 
   await page.locator('button[aria-label="Settings"]:visible').first().click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
   await settings.getByRole('button', { name: 'About', exact: true }).click()
-  await expect(settings.getByRole('heading', { name: 'About', exact: true })).toBeVisible()
+  await expect(settings.getByRole('heading', { name: 'About OpenQuire', exact: true })).toBeVisible()
   await settings.getByRole('button', { name: 'All settings' }).click()
   await expect(settings.getByRole('button', { name: 'About', exact: true })).toBeFocused()
   await settings.getByRole('button', { name: 'AI & connections', exact: true }).click()
