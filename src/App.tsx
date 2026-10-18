@@ -1,3 +1,4 @@
+import Home from './components/Home'
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import {
   BadgeCheck, Check, ChevronDown, ChevronUp, Circle, Combine, Crop, Download, Eraser, EyeOff, FilePlus2, FileText, FolderOpen, Highlighter,
@@ -2257,25 +2258,8 @@ export default function App() {
               )}
             </>
           ) : (
-            <div className="empty-state">
-              <div className="empty-state-inner">
-                <div className="empty-state-title">{m.workspace.emptyTitle}</div>
-                <button className="empty-state-action" onClick={() => openDialog()}>{m.workspace.emptyOpen}{hk('open') && <kbd>{hk('open')}</kbd>}</button>
-                <button className="empty-state-action" onClick={() => newBlank()}>{m.workspace.emptyBlank}</button>
-                <button className="empty-state-action" onClick={() => setPalette(true)}>{m.actions.commandPalette}{hk('palette') && <kbd>{hk('palette')}</kbd>}</button>
-                {recent.length > 0 && (
-                  <div className="recent">
-                    <div className="pane-heading">{m.workspace.recent}</div>
-                    {recent.map((p) => (
-                      <button key={p} className="empty-state-action recent-file" title={p} onClick={() => openPaths([p])}>
-                        <FileText size={16} />{fileName(p)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <p className="empty-state-note">{m.workspace.emptyNote}</p>
-              </div>
-            </div>
+            <Home onOpen={() => openDialog()} onBlank={() => newBlank()} onCommands={() => setPalette(true)}
+              recent={recent} onRecent={p => openPaths([p])} openShortcut={hk('open')} />
           )}
         </div>
       </div>

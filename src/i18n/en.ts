@@ -13,6 +13,28 @@ export const en = {
     tagline: 'A free, open source PDF suite. Files are processed on this device and never uploaded.',
   },
 
+  home: {
+    eyebrow: 'YOUR DOCUMENT WORKSPACE',
+    title: 'Make more of your PDFs.',
+    description: 'Review a contract, organize a report or prepare a document to share. Start with a file and make it yours.',
+    drop: 'Or drop files anywhere in this workspace',
+    privacy: 'PDF processing stays on your device. Optional AI requests require your approval.',
+    tools: 'Find the right tool',
+    search: 'Search PDF tools',
+    placeholder: 'Try “merge”, “signature” or “OCR”',
+    empty: 'No matching tools. Try another word or browse all tools.',
+    clear: 'Clear search',
+    start: 'Open a file to get started',
+    groups: [
+      { title: 'Edit & annotate', description: 'Make your ideas clear.', tools: 'Edit text · Highlight · Comments · Images · Links', hint: 'Open a document, then choose a tool from the floating dock. Review replies in the Comments sidebar.' },
+      { title: 'Organize', description: 'Bring every page into place.', tools: 'Merge · Split · Rotate · Extract · Crop', hint: 'Open a document and select pages in the Pages sidebar. Use the Tools panel to split or extract pages.' },
+      { title: 'Convert & OCR', description: 'Put your content to work.', tools: 'Word · Excel · Images · Text · Searchable scans · OCR', hint: 'Open a supported file to convert it to PDF. For exports and searchable scans, open a PDF and use the Tools panel. Conversion fidelity depends on the source.' },
+      { title: 'Fill & sign', description: 'Move the paperwork forward.', tools: 'Form fields · Drawn signatures · Certificates', hint: 'Open a form and select its fields to fill them. Use the signature tools to add a signature or sign with a certificate. Certificate trust is separate from document integrity.' },
+      { title: 'Protect & redact', description: 'Share with greater control.', tools: 'Redaction · Passwords · Sanitize · Permissions', hint: 'Open a PDF and use the Tools panel. Redaction marks must be applied to remove content; inspect the saved output before sharing.' },
+      { title: 'Prepare & automate', description: 'Give repeat work a routine.', tools: 'Compress · PDF/A · Stamps · Workflows · Batch', hint: 'Use the Tools panel for compression, archival copies and stamps. The Workflows command records and replays supported steps.' },
+    ],
+  },
+
   onboarding: {
     title: 'Welcome to OpenQuire',
     subtitle: 'Local-first, privacy-preserving PDF suite running 100% on your device.',

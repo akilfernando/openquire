@@ -1,4 +1,54 @@
-# Next phase: dependable document workflows
+# Next phase: a polished, dependable PDF workspace
+
+## Active experience phase — 18 October 2026
+
+PRs #49–55 are integrated. Main at `4251b7b` passed post-merge CI, native
+contracts, package consumers, filesystem checks, desktop packaging and Pages.
+The earlier plan below is retained as reliability context; its completed packages
+are not new work. Human desktop/mobile and independent-viewer acceptance is NOT RUN.
+
+The product direction is a cohesive, aesthetically considered local-first PDF
+workspace. Preserve AGPL openness, on-device processing, explicit optional AI
+consent and the canonical Node CLI/library and MCP. Communicate breadth through
+clear task discovery and precise capability descriptions.
+
+1. **Visual foundation and home/tool discovery (active):** neutral layered
+   surfaces, restrained amber, consistent spacing, responsive task groups,
+   searchable guidance, existing open/blank/recent entry points. No automatic
+   destructive operation after opening a file. Validate both themes, keyboard
+   expansion/search, narrow layouts, accessibility and document lifecycle tests.
+2. **Workspace refinement (planned):** contextual controls, consistent panels,
+   document navigation, visible selection/save state. Apply shared controls
+   incrementally; preserve existing engine and save contracts.
+3. **Operation feedback (planned):** unify progress, safe-boundary stopping,
+   partial results and retry across conversion, export, OCR and PDF/A. Address
+   native reads and single-file interruption according to actual support.
+4. **Fidelity and inclusive performance (planned):** extend difficult-document
+   fixtures, sidebar/thumbnail keyboard navigation, contrast coverage and
+   comparable measurements before numerical performance budgets.
+5. **Release delivery (planned, requested by user):** audit npm and GitHub
+   releases against main; reconcile version policy and capability/release notes;
+   validate installed package consumers and exact release artifacts. Publish an
+   updated npm package at a suitable validated milestone. GitHub desktop release
+   delivery remains gated by real OS/viewer acceptance. Automated packaging is
+   not human acceptance. Record source commits and checksums for artifacts.
+
+Deliver focused PRs with regression evidence. The first slice adds a task
+catalogue with honest setup guidance; contextual routing to an individual tool
+and broader workspace restyling remain subsequent work. No universal PDF fidelity
+claim, new AI provider, marketplace or native parity expansion is included.
+
+Visual rules: document-first hierarchy; shared spacing/surface/focus tokens;
+legible light/dark themes; clearly labelled controls; designed empty/error/busy
+states; no ornamental motion; existing recent-file privacy behavior retained.
+
+Release audit on 18 October: npm latest is `1.0.2`; GitHub latest `v1.0.2`
+targets `bf31cc6` and includes desktop assets named `0.1.0`. A separate
+`desktop-v1.0.0` draft exists. Do not publish or overwrite that draft incidentally;
+reconcile the intended artifact identities as part of release preparation.
+
+## Earlier reliability phase
+
 
 ## Intent and current state
 
@@ -63,3 +113,17 @@ The phase is complete when the three user workflows pass automated and recorded 
 Defer new AI providers, a plugin marketplace, new broad export formats, native mobile packaging and complete native-engine parity. Existing functionality may receive targeted fixes when these workflows require them.
 
 Evidence: [PR #49](https://github.com/akilfernando/openquire/pull/49), [phase tracker #44](https://github.com/akilfernando/openquire/issues/44), [capability matrix](reliability-phase.md), [fixture inventory](../tests/fixtures/README.md).
+## Home and discovery implementation evidence
+
+The first slice replaces the empty workspace with a responsive home, six searchable
+task groups and expandable instructions. Open, blank document, command palette and
+recent files use existing App callbacks. New copy remains in the message catalogue.
+The PDF engine, save lifecycle and native bridge are unchanged.
+
+Production build and 33 targeted home/document-lifecycle browser cases passed on
+Windows across Chromium, Firefox and WebKit. Light/dark, 1440/390 pixel layouts,
+keyboard disclosure, search/no-results and serious/critical axe checks are covered.
+Desktop light and narrow dark screenshots were inspected; a search-field cascade
+conflict was corrected. The new suite stores screenshots as review evidence, not
+pixel-diff baselines. Full-suite and candidate CI results belong in the PR/tracker.
+Human touch/desktop/viewer acceptance remains NOT RUN.
