@@ -451,6 +451,23 @@ that same launch configuration completed MCP initialize/tools-list with 11
 tools from Node 1.0.3. Real user configurations were not changed. Candidate and
 signed-release validation remain pending at this checkpoint.
 
+### Desktop close correction (18 October 2026)
+
+Installed-app feedback identified a title-bar X that did not close the window.
+Tauri's JavaScript close-request listener calls window.destroy() after our guard
+allows closing; the main-window capability permitted close but omitted destroy.
+The focused correction grants that permission without changing the dirty-document
+or active-operation guards. Real-SDK IPC regression tests failed before the
+correction and passed afterward. Windows cargo check, production build and 11
+Chromium save/lifecycle checks passed, including cancelled save, keep editing,
+save-and-close, discard-and-close and active export protection.
+
+Broader local validation: 232 tests passed initially; corpus tests required
+Poppler/OpenSSL on PATH. After providing the installed tools, four corpus cases
+still failed because their test path extraction splits only on forward slashes.
+This is a separate Windows test-harness issue. Installed-app acceptance of the
+close correction and release delivery remain pending.
+
 ### Clearer desktop AI connections — 0.2.2 candidate
 
 Add a dedicated ChatGPT Desktop connection button using the documented local

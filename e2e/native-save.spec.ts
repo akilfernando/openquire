@@ -18,24 +18,34 @@ test.beforeEach(async ({ page }) => {
       holdWrite?: boolean
       releaseWrite?: () => void
       writes: { path: string; bytes: number[] }[]
+      closeRequests?: () => Promise<void>
+      destroyed?: boolean
     }
     const state: NativeMock = { savePath: null, saveCalls: 0, writes: [] }
-    const callbacks = new Map<number, (event: unknown) => void>()
+    const callbacks = new Map<number, (event: unknown) => Promise<void>>()
     let nextCallback = 1
     Object.defineProperty(window, '__nativeSaveMock', { configurable: true, value: state })
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {
         metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
-        transformCallback(callback: (event: unknown) => void) {
+        transformCallback(callback: (event: unknown) => Promise<void>) {
           const id = nextCallback++
           callbacks.set(id, callback)
           return id
         },
         unregisterCallback(id: number) { callbacks.delete(id) },
         async invoke(command: string, args?: unknown, options?: { headers?: { path?: string } }) {
-          if (command === 'plugin:event|listen') return nextCallback++
+          if (command === 'plugin:event|listen') {
+            const event = args as { event: string; handler: number }
+            if (event.event === 'tauri://close-requested') state.closeRequests = async () => {
+              await callbacks.get(event.handler)!({ event: event.event, id: event.handler, payload: null })
+            }
+            return nextCallback++
+          }
           if (command === 'plugin:event|unlisten') return null
+          if (command === 'plugin:window|destroy') { state.destroyed = true; return null }
+          if (command === 'plugin:window|close') return state.closeRequests?.()
           if (command === 'take_opened_files') return []
           if (command === 'native_tools') return { libreoffice: null, tesseract: null, tesseract_langs: [] }
           if (command === 'plugin:dialog|save') {
@@ -56,6 +66,35 @@ test.beforeEach(async ({ page }) => {
     })
   })
 
+})
+
+test('window close keeps edits safe and closes after explicit discard', async ({ page }) => {
+  await openReport(page)
+  await editName(page, 'Ada Lovelace')
+  await page.evaluate(() => (window as any).__nativeSaveMock.closeRequests())
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' })
+  await expect(dialog).toBeVisible()
+  expect(await page.evaluate(() => !!(window as any).__nativeSaveMock.destroyed)).toBe(false)
+  await dialog.getByRole('button', { name: 'Keep editing' }).click()
+  await expect(dialog).not.toBeVisible()
+  await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toBeVisible()
+  await page.evaluate(() => (window as any).__nativeSaveMock.closeRequests())
+  await dialog.getByRole('button', { name: 'Save and close' }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__nativeSaveMock.saveCalls)).toBe(1)
+  await expect(dialog).toBeVisible()
+  expect(await page.evaluate(() => !!(window as any).__nativeSaveMock.destroyed)).toBe(false)
+  await dialog.getByRole('button', { name: 'Discard changes', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => !!(window as any).__nativeSaveMock.destroyed)).toBe(true)
+})
+
+test('window closes after saving the edited document', async ({ page }) => {
+  await openReport(page)
+  await editName(page, 'Ada Lovelace')
+  await page.evaluate(() => { (window as any).__nativeSaveMock.savePath = '/tmp/saved.pdf' })
+  await page.evaluate(() => (window as any).__nativeSaveMock.closeRequests())
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Save and close' }).click()
+  await expect.poll(() => page.evaluate(() => !!(window as any).__nativeSaveMock.destroyed)).toBe(true)
+  expect(await page.evaluate(() => (window as any).__nativeSaveMock.writes.length)).toBe(1)
 })
 
 test('cancelled native saves preserve edits and an accepted save writes the edited PDF', async ({ page }) => {
@@ -106,6 +145,8 @@ test('native exports await writes and report cancellation or failure honestly', 
   await output.click()
   await expect.poll(() => page.evaluate(() => !!(window as any).__nativeSaveMock.releaseWrite)).toBe(true)
   await expect(page.locator('.status-bar .spin')).toBeVisible()
+  await page.evaluate(() => (window as any).__nativeSaveMock.closeRequests())
+  expect(await page.evaluate(() => !!(window as any).__nativeSaveMock.destroyed)).toBe(false)
   expect(await page.evaluate(() => {
     const event = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(event)
