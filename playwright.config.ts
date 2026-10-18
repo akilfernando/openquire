@@ -28,7 +28,7 @@ export default defineConfig({
       name,
       // Focused engine, save/import and keyboard coverage before expanding the
       // full Chromium suite. Touch-device emulation is not supported in Firefox.
-      testMatch: ['baselines.spec.ts', 'import-files.spec.ts', 'document-lifecycle.spec.ts', 'keyboard.spec.ts'],
+      testMatch: ['home.spec.ts', 'baselines.spec.ts', 'import-files.spec.ts', 'document-lifecycle.spec.ts', 'keyboard.spec.ts'],
       use: { browserName: name, viewport: { width: 1440, height: 1000 } },
     })),
   ],
