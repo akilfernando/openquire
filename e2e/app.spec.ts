@@ -11,6 +11,13 @@ test('opens a document and finds text', async ({ page }) => {
   await page.getByPlaceholder('Find...').fill('regions')
   await page.keyboard.press('Enter')
   await expect(page.locator('.find-count')).toHaveText('1/1')
+  await expect(page.locator('.page .hit')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Next match', exact: true })).toBeEnabled()
+  await page.getByPlaceholder('Find...').fill('')
+  await expect(page.locator('.find-count')).toHaveText('')
+  await expect(page.locator('.page .hit')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Previous match', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Next match', exact: true })).toBeDisabled()
 })
 
 test('command palette runs commands', async ({ page }) => {
@@ -19,6 +26,108 @@ test('command palette runs commands', async ({ page }) => {
   await page.getByPlaceholder('Type a command...').fill('tool high')
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveClass(/is-active/)
+})
+
+test('Find invalidates edited queries and preserves explicit search and navigation', async ({ page }) => {
+  await openReport(page)
+  await page.keyboard.press('Control+f')
+  const input = page.getByPlaceholder('Find...')
+  const count = page.locator('.find-count')
+  const hits = page.locator('.page .hit')
+  const previous = page.getByRole('button', { name: 'Previous match', exact: true })
+  const next = page.getByRole('button', { name: 'Next match', exact: true })
+  const emptyFeedback = async () => {
+    await expect(count).toHaveText('')
+    await expect(hits).toHaveCount(0)
+    await expect(previous).toBeDisabled()
+    await expect(next).toBeDisabled()
+  }
+  await input.fill('regions')
+  await input.press('Enter')
+  await expect(count).toHaveText('1/1')
+  await input.fill('quarter')
+  await emptyFeedback()
+  await input.press('Enter')
+  await expect(count).toHaveText('1/2')
+  await expect(hits).toHaveCount(2)
+  // Leading/trailing whitespace does not change the submitted query.
+  await input.fill(' quarter ')
+  await expect(count).toHaveText('1/2')
+  await input.press('Enter')
+  await expect(count).toHaveText('2/2')
+  await input.press('Shift+Enter')
+  await expect(count).toHaveText('1/2')
+  await previous.click()
+  await expect(count).toHaveText('2/2')
+  await next.click()
+  await expect(count).toHaveText('1/2')
+  await input.fill('no-such-text')
+  await emptyFeedback()
+  await input.press('Enter')
+  await expect(count).toHaveText('None')
+  await expect(next).toBeDisabled()
+  await input.fill('   ')
+  await emptyFeedback()
+  await input.press('Enter')
+  await emptyFeedback()
+  for (const close of ['Escape', 'button']) {
+    await input.fill('regions')
+    await input.press('Enter')
+    await expect(count).toHaveText('1/1')
+    if (close === 'Escape') await input.press('Escape')
+    else await page.getByRole('button', { name: 'Close find', exact: true }).click()
+    await expect(input).toHaveCount(0)
+    await expect(hits).toHaveCount(0)
+    await page.keyboard.press('Control+f')
+    await expect(input).toHaveValue('regions')
+    await emptyFeedback()
+  }
+  await expect(page.locator('.tab.is-active').getByLabel('Unsaved changes')).toHaveCount(0)
+  const text = pdfText(await save(page))
+  for (const line of Object.values(LINES)) expect(text).toContain(line)
+})
+
+test('Find ignores an obsolete in-flight result', async ({ page }) => {
+  // Hold the real worker's search reply so editing during a search is deterministic.
+  await page.addInitScript(() => {
+    const RealWorker = window.Worker
+    const state = window as unknown as { searchReady: boolean; releaseSearch: () => void }
+    window.Worker = class extends RealWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options)
+        let handler: ((event: MessageEvent) => void) | null = null
+        const searchIds = new Set<number>()
+        const held: MessageEvent[] = []
+        Object.defineProperty(this, 'onmessage', { get: () => handler, set: (value) => { handler = value } })
+        super.addEventListener('message', (event) => {
+          if (searchIds.has(event.data.id)) {
+            held.push(event)
+            state.searchReady = true
+          } else handler?.(event)
+        })
+        const post = this.postMessage.bind(this)
+        this.postMessage = ((message: { id: number; method: string }, transfer?: Transferable[]) => {
+          if (message.method === 'search') searchIds.add(message.id)
+          post(message, transfer ?? [])
+        }) as typeof this.postMessage
+        state.releaseSearch = () => {
+          for (const event of held.splice(0)) handler?.(event)
+        }
+      }
+    }
+  })
+  await openReport(page)
+  await page.keyboard.press('Control+f')
+  const input = page.getByPlaceholder('Find...')
+  await input.fill('regions')
+  await input.press('Enter')
+  await page.waitForFunction(() => (window as unknown as { searchReady: boolean }).searchReady)
+  await input.fill('different')
+  await page.evaluate(() => (window as unknown as { releaseSearch: () => void }).releaseSearch())
+  await expect(page.locator('.busy')).toHaveCount(0)
+  await expect(page.locator('.find-count')).toHaveText('')
+  await expect(page.locator('.page .hit')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Next match', exact: true })).toBeDisabled()
 })
 
 test('edits a line of existing text', async ({ page }) => {

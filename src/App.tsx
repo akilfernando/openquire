@@ -214,6 +214,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [hitIndex, setHitIndex] = useState(0)
+  const findRequest = useRef(0)
   const [pageIndex, setPageIndex] = useState(0)
   // Workspace tabs: one document each. Inactive tabs remember their zoom and scroll position.
   const [tabs, setTabs] = useState<{ id: number; name: string }[]>([])
@@ -563,6 +564,7 @@ export default function App() {
     setTextSel(null)
     setHits(null)
     setFindOpen(false)
+    findRequest.current++
     setFieldEdit(null)
     setLinkEdit(null)
     setPageIndex(0)
@@ -1462,11 +1464,22 @@ export default function App() {
   // ---- search ------------------------------------------------------------------------------
 
   const [searched, setSearched] = useState('')
+  const clearFind = () => {
+    findRequest.current++
+    setHits(null)
+    setHitIndex(0)
+  }
+  const closeFind = () => {
+    clearFind()
+    setFindOpen(false)
+  }
   const find = (q: string) =>
     run(m.busy.searching, async () => {
+      const request = ++findRequest.current
       setSearched(q.trim())
       if (!q.trim()) return setHits(null)
       const found = await engine.search(q.trim())
+      if (request !== findRequest.current) return
       setHits(found)
       setHitIndex(0)
       if (found.length) goTo(found[0].pageId, found[0].quads[0])
@@ -2220,9 +2233,13 @@ export default function App() {
               {findOpen ? (
                 <div className="find-bar" role="search">
                   <input
-                    ref={findRef} placeholder={m.workspace.findPlaceholder} aria-label={m.actions.findInDocument} value={query} onChange={(e) => setQuery(e.target.value)}
+                    ref={findRef} placeholder={m.workspace.findPlaceholder} aria-label={m.actions.findInDocument} value={query} onChange={(e) => {
+                      const next = e.target.value
+                      if (next.trim() !== query.trim()) clearFind()
+                      setQuery(next)
+                    }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Escape') { setFindOpen(false); setHits(null) }
+                      if (e.key === 'Escape') closeFind()
                       if (e.key !== 'Enter') return
                       e.preventDefault()
                       // Enter searches; pressing it again on the same query steps through matches.
@@ -2233,7 +2250,7 @@ export default function App() {
                   <span className="find-count tnum">{hits ? (hits.length ? `${hitIndex + 1}/${hits.length}` : m.workspace.noMatches) : ''}</span>
                   <IconButton Icon={ChevronUp} label={m.actions.previousMatch} disabled={!hits?.length} onClick={() => stepHit(-1)} />
                   <IconButton Icon={ChevronDown} label={m.actions.nextMatch} disabled={!hits?.length} onClick={() => stepHit(1)} />
-                  <IconButton Icon={X} label={m.actions.closeFind} onClick={() => { setFindOpen(false); setHits(null) }} />
+                  <IconButton Icon={X} label={m.actions.closeFind} onClick={closeFind} />
                 </div>
               ) : (
                 <IconButton Icon={Search} label={m.actions.find} hotkey={hk('find')} onClick={openFind} />
