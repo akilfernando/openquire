@@ -2069,6 +2069,26 @@ export default function App() {
     { id: 'theme', name: m.actions.toggleTheme, run: () => setSettings({ ...settings, theme: dark ? 'light' : 'dark' }) },
   ]
 
+  const copyRequest = useRef(0)
+  const copySelection = async (clearOnSuccess: boolean) => {
+    const selection = textSel
+    if (!selection) return
+    const documentId = activeDocument()
+    const request = ++copyRequest.current
+    setStatus('')
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+      await navigator.clipboard.writeText(selection.text)
+      if (request !== copyRequest.current || activeDocument() !== documentId) return
+      setStatus(m.status.copied)
+      if (clearOnSuccess) setTextSel((current) => current === selection ? null : current)
+    } catch {
+      if (request !== copyRequest.current || activeDocument() !== documentId) return
+      setStatus(m.status.copyFailed)
+      setStatusError(m.status.copyFailed)
+    }
+  }
+
   // ---- keyboard ------------------------------------------------------------------------------
 
   const keys = useRef<(e: KeyboardEvent) => void>()
@@ -2091,8 +2111,8 @@ export default function App() {
     } else if (typing) {
       return
     } else if (modKey && k === 'c' && textSel) {
-      void navigator.clipboard.writeText(textSel.text)
-      setStatus(m.status.copied)
+      e.preventDefault()
+      void copySelection(false)
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && selAnnot) {
       sideActions.deleteAnnot(selAnnot.pageId, selAnnot.id)
     } else if (e.key === 'Escape') {
@@ -2344,7 +2364,7 @@ export default function App() {
 
               {textSel && (
                 <div className="selbar">
-                  <button onClick={() => { void navigator.clipboard.writeText(textSel.text); setStatus(m.status.copied); setTextSel(null) }}>{m.workspace.copy}</button>
+                  <button onClick={() => { void copySelection(true) }}>{m.workspace.copy}</button>
                   {settings.aiEnabled && !settings.aiDisabled && (
                     <button className="cta" onClick={() => {
                       setAiScope('text')

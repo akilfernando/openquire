@@ -225,6 +225,7 @@ export const en = {
     straightened: (n: number) => (n ? `Straightened ${plural(n, 'page', 'pages')}` : 'Every page is already straight'),
     noTextFound: 'No text was found',
     copied: 'Copied',
+    copyFailed: 'Could not copy. Check clipboard access and try again.',
     signed: (file: string) => `Signed and saved ${file}`,
     protected: 'Protected',
     passwordProtected: 'Password protected',
